@@ -73,4 +73,3 @@ The status bar shows:
 - File name
 - `[+]` indicator if there are unsaved changes
 - Cursor position in Excel format (e.g., A1, B2, AA15)
-# tabular

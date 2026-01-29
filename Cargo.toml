@@ -1,0 +1,10 @@
+[package]
+name = "tabular"
+version = "0.1.0"
+edition = "2021"
+description = "A lightweight, terminal-based editor for CSV files with vim-like keybindings"
+
+[dependencies]
+ratatui = "0.26"
+crossterm = "0.27"
+csv = "1.3"
