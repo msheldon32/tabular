@@ -2,20 +2,7 @@ use std::collections::{HashMap, HashSet};
 use regex::Regex;
 
 use crate::table::Table;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct CellRef {
-    row: usize,
-    col: usize,
-}
-
-#[derive(Debug)]
-pub enum CalcError {
-    CircularReference(String),
-    InvalidReference(String),
-    ParseError(String),
-    EvalError(String),
-}
+use crate::util::{CellRef, parse_cell_ref, parse_range, CalcError};
 
 impl std::fmt::Display for CalcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -87,15 +74,6 @@ impl<'a> Calculator<'a> {
         Ok(updates)
     }
 
-    /// Parse column letters to 0-indexed column number (A=0, B=1, ..., Z=25, AA=26, etc.)
-    fn col_from_letters(&self, letters: &str) -> usize {
-        let mut result = 0usize;
-        for c in letters.chars() {
-            result = result * 26 + (c as usize - 'A' as usize + 1);
-        }
-        result - 1
-    }
-
     /// Convert column index to letters for error messages
     fn col_to_letters(&self, mut col: usize) -> String {
         let mut result = String::new();
@@ -109,51 +87,6 @@ impl<'a> Calculator<'a> {
         result
     }
 
-    /// Parse a cell reference like "A1" or "AA123"
-    fn parse_cell_ref(&self, s: &str) -> Option<CellRef> {
-        let s = s.trim().to_uppercase();
-        let re = Regex::new(r"^([A-Z]+)(\d+)$").ok()?;
-        let caps = re.captures(&s)?;
-
-        let col_str = caps.get(1)?.as_str();
-        let row_str = caps.get(2)?.as_str();
-
-        let row: usize = row_str.parse().ok()?;
-        if row == 0 {
-            return None; // Rows are 1-indexed in user notation
-        }
-
-        let col = self.col_from_letters(col_str);
-        Some(CellRef { row: row - 1, col }) // Convert to 0-indexed
-    }
-
-    /// Parse a range like "A1:A10" and return all cell refs
-    fn parse_range(&self, s: &str) -> Result<Vec<CellRef>, CalcError> {
-        let parts: Vec<&str> = s.split(':').collect();
-        if parts.len() != 2 {
-            return Err(CalcError::ParseError(format!("Invalid range: {}", s)));
-        }
-
-        let start = self.parse_cell_ref(parts[0])
-            .ok_or_else(|| CalcError::InvalidReference(parts[0].to_string()))?;
-        let end = self.parse_cell_ref(parts[1])
-            .ok_or_else(|| CalcError::InvalidReference(parts[1].to_string()))?;
-
-        let mut refs = Vec::new();
-        let row_start = start.row.min(end.row);
-        let row_end = start.row.max(end.row);
-        let col_start = start.col.min(end.col);
-        let col_end = start.col.max(end.col);
-
-        for row in row_start..=row_end {
-            for col in col_start..=col_end {
-                refs.push(CellRef { row, col });
-            }
-        }
-
-        Ok(refs)
-    }
-
     /// Extract all cell references from a formula
     fn extract_cell_refs(&self, formula: &str) -> Result<HashSet<CellRef>, CalcError> {
         let mut refs = HashSet::new();
@@ -162,7 +95,7 @@ impl<'a> Calculator<'a> {
         // Find ranges first (e.g., A1:B10)
         let range_re = Regex::new(r"[A-Z]+\d+:[A-Z]+\d+").unwrap();
         for cap in range_re.find_iter(&upper) {
-            for cell_ref in self.parse_range(cap.as_str())? {
+            for cell_ref in parse_range(cap.as_str())? {
                 refs.insert(cell_ref);
             }
         }
@@ -170,7 +103,7 @@ impl<'a> Calculator<'a> {
         // Find single cell refs
         let cell_re = Regex::new(r"[A-Z]+\d+").unwrap();
         for cap in cell_re.find_iter(&upper) {
-            if let Some(cell_ref) = self.parse_cell_ref(cap.as_str()) {
+            if let Some(cell_ref) = parse_cell_ref(cap.as_str()) {
                 refs.insert(cell_ref);
             }
         }
@@ -269,7 +202,7 @@ impl<'a> Calculator<'a> {
 
     /// Get values for a range
     fn get_range_values(&self, range: &str, results: &HashMap<CellRef, f64>) -> Result<Vec<f64>, CalcError> {
-        let refs = self.parse_range(range)?;
+        let refs = parse_range(range)?;
         let mut values = Vec::new();
         for cell_ref in refs {
             values.push(self.get_cell_value(&cell_ref, results)?);
@@ -394,7 +327,7 @@ impl<'a> Calculator<'a> {
 
         // Replace from end to start to preserve positions
         for (start, end, cell_str) in matches.into_iter().rev() {
-            if let Some(cell_ref) = self.parse_cell_ref(&cell_str) {
+            if let Some(cell_ref) = parse_cell_ref(&cell_str) {
                 let value = self.get_cell_value(&cell_ref, results)?;
                 result = format!("{}{}{}", &result[..start], value, &result[end..]);
             }
@@ -404,50 +337,3 @@ impl<'a> Calculator<'a> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_col_from_letters() {
-        let table = Table::new();
-        let calc = Calculator::new(&table);
-        assert_eq!(calc.col_from_letters("A"), 0);
-        assert_eq!(calc.col_from_letters("B"), 1);
-        assert_eq!(calc.col_from_letters("Z"), 25);
-        assert_eq!(calc.col_from_letters("AA"), 26);
-        assert_eq!(calc.col_from_letters("AB"), 27);
-        assert_eq!(calc.col_from_letters("AZ"), 51);
-        assert_eq!(calc.col_from_letters("BA"), 52);
-    }
-
-    #[test]
-    fn test_parse_cell_ref() {
-        let table = Table::new();
-        let calc = Calculator::new(&table);
-
-        let r = calc.parse_cell_ref("A1").unwrap();
-        assert_eq!(r.row, 0);
-        assert_eq!(r.col, 0);
-
-        let r = calc.parse_cell_ref("B2").unwrap();
-        assert_eq!(r.row, 1);
-        assert_eq!(r.col, 1);
-
-        let r = calc.parse_cell_ref("AA10").unwrap();
-        assert_eq!(r.row, 9);
-        assert_eq!(r.col, 26);
-    }
-
-    #[test]
-    fn test_parse_range() {
-        let table = Table::new();
-        let calc = Calculator::new(&table);
-
-        let refs = calc.parse_range("A1:A3").unwrap();
-        assert_eq!(refs.len(), 3);
-        assert_eq!(refs[0], CellRef { row: 0, col: 0 });
-        assert_eq!(refs[1], CellRef { row: 1, col: 0 });
-        assert_eq!(refs[2], CellRef { row: 2, col: 0 });
-    }
-}

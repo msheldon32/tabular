@@ -1,3 +1,7 @@
+
+use regex::Regex;
+use crate::util::{CellRef, parse_cell_ref};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Write,
@@ -8,23 +12,35 @@ pub enum Command {
     DeleteColumn,
     ToggleHeader,
     Calc,
+    NavigateRow(usize),
+    NavigateCell(CellRef),
     Unknown(String),
 }
 
 impl Command {
-    pub fn parse(input: &str) -> Self {
+    pub fn parse(input: &str) -> Option<Self> {
         let trimmed = input.trim();
 
+        if let Ok(row_dest) = input.parse::<usize>() {
+            return Some(Command::NavigateRow(row_dest-1));
+        }
+
+        let cell_re = Regex::new(r"[A-Z]+\d+").unwrap();
+
+        if cell_re.is_match(input) {
+            return Some(Command::NavigateCell(parse_cell_ref(input)?));
+        }
+
         match trimmed {
-            "w" => Command::Write,
-            "q" => Command::Quit,
-            "q!" => Command::ForceQuit,
-            "wq" => Command::WriteQuit,
-            "addcol" => Command::AddColumn,
-            "delcol" => Command::DeleteColumn,
-            "header" => Command::ToggleHeader,
-            "calc" => Command::Calc,
-            _ => Command::Unknown(trimmed.to_string()),
+            "w" => Some(Command::Write),
+            "q" => Some(Command::Quit),
+            "q!" => Some(Command::ForceQuit),
+            "wq" => Some(Command::WriteQuit),
+            "addcol" => Some(Command::AddColumn),
+            "delcol" => Some(Command::DeleteColumn),
+            "header" => Some(Command::ToggleHeader),
+            "calc" => Some(Command::Calc),
+            _ => Some(Command::Unknown(trimmed.to_string())),
         }
     }
 }

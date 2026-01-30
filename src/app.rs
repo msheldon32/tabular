@@ -11,6 +11,7 @@ use crate::mode::Mode;
 use crate::table::{Table, TableView};
 use crate::ui;
 use crate::clipboard::Clipboard;
+use crate::util::{CellRef, parse_cell_ref, parse_range};
 
 pub struct App {
     pub table: Table,
@@ -281,6 +282,10 @@ impl App {
                         return;
                     }
                 }
+                ('g', KeyCode::Char('g')) => {
+                    self.view.move_to_top();
+                    return;
+                }
                 _ => {
                     // Invalid sequence, ignore
                 }
@@ -428,8 +433,9 @@ impl App {
 
         match key.code {
             KeyCode::Enter => {
-                let cmd = Command::parse(&self.command_buffer);
-                self.execute_command(cmd);
+                if let Some(cmd) = Command::parse(&self.command_buffer) {
+                    self.execute_command(cmd);
+                }
                 self.command_buffer.clear();
                 if self.mode == Mode::Command {
                     self.mode = Mode::Normal;
@@ -523,6 +529,13 @@ impl App {
                         self.message = Some(format!("{}", e));
                     }
                 }
+            }
+            Command::NavigateRow(row) => {
+                self.view.cursor_row = row;
+            }
+            Command::NavigateCell(cell) => {
+                self.view.cursor_row = cell.row;
+                self.view.cursor_col = cell.col;
             }
             Command::Unknown(s) => {
                 self.message = Some(format!("Unknown command: {}", s));

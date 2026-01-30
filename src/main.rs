@@ -5,6 +5,7 @@ mod mode;
 mod table;
 mod ui;
 mod clipboard;
+mod util;
 
 use std::io;
 use std::path::PathBuf;
