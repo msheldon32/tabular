@@ -19,10 +19,11 @@ impl Table {
         }
     }
 
-    pub fn load_csv<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+    pub fn load_csv<P: AsRef<Path>>(path: P, delim: u8) -> io::Result<Self> {
         let file = File::open(path)?;
         let reader = BufReader::new(file);
         let mut csv_reader = csv::ReaderBuilder::new()
+            .delimiter(delim)
             .has_headers(false)
             .from_reader(reader);
 
@@ -41,10 +42,12 @@ impl Table {
         Ok(Self { cells })
     }
 
-    pub fn save_csv<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
+    pub fn save_csv<P: AsRef<Path>>(&self, path: P, delim: u8) -> io::Result<()> {
         let file = File::create(path)?;
         let writer = BufWriter::new(file);
-        let mut csv_writer = csv::Writer::from_writer(writer);
+        let mut csv_writer = csv::WriterBuilder::new()
+            .delimiter(delim)
+            .from_writer(writer);
 
         for row in &self.cells {
             csv_writer

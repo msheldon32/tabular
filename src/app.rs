@@ -1,6 +1,6 @@
 use std::cmp;
 use std::io;
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use std::time::Duration;
 
 use crossterm::event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers};
@@ -39,7 +39,18 @@ pub struct App {
 impl App {
     pub fn new(file_path: Option<PathBuf>) -> io::Result<Self> {
         let table = if let Some(ref path) = file_path {
-            Table::load_csv(path)?
+             let ext = file_path
+                .as_ref()
+                .and_then(|p| p.extension())
+                .and_then(|e| e.to_str());
+            
+            if ext == Some("csv") {
+                Table::load_csv(path, b',')?
+            } else if ext == Some("tsv") {
+                Table::load_csv(path, b'\t')?
+            } else {
+                Table::new()
+            }
         } else {
             Table::new()
         };
@@ -55,7 +66,7 @@ impl App {
             mode: Mode::Normal,
             command_buffer: String::new(),
             edit_buffer: String::new(),
-            file_path,
+            file_path: file_path,
             dirty: false,
             has_selection: false,
             message: None,
@@ -705,7 +716,17 @@ impl App {
         match cmd {
             Command::Write => {
                 if let Some(ref path) = self.file_path {
-                    match self.table.save_csv(path) {
+                    let ext = self.file_path
+                        .as_ref()
+                        .and_then(|p| p.extension())
+                        .and_then(|e| e.to_str());
+                    let mut delim = b',';
+                    
+                    if ext == Some("tsv") {
+                        delim = b'\t';
+                    }
+
+                    match self.table.save_csv(path, delim) {
                         Ok(()) => {
                             self.dirty = false;
                             self.message = Some(format!("Saved to {}", path.display()));
@@ -726,7 +747,16 @@ impl App {
             Command::ForceQuit => self.should_quit = true,
             Command::WriteQuit => {
                 if let Some(ref path) = self.file_path {
-                    match self.table.save_csv(path) {
+                    let ext = self.file_path
+                        .as_ref()
+                        .and_then(|p| p.extension())
+                        .and_then(|e| e.to_str());
+                    let mut delim = b',';
+                    
+                    if ext == Some("tsv") {
+                        delim = b'\t';
+                    }
+                    match self.table.save_csv(path, delim) {
                         Ok(()) => self.should_quit = true,
                         Err(e) => self.message = Some(format!("Error saving: {}", e)),
                     }
@@ -811,7 +841,7 @@ impl App {
                 (0..self.table.row_count(), 0..self.table.col_count())
             }
             ReplaceScope::Selection => {
-                if (self.has_selection) {
+                if self.has_selection {
                     // Use the visual selection bounds (stored in view)
                     let start_row = std::cmp::min(self.view.cursor_row, self.view.support_row);
                     let end_row = std::cmp::max(self.view.cursor_row, self.view.support_row);
