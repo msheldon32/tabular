@@ -12,6 +12,10 @@ pub enum Command {
     DeleteColumn,
     ToggleHeader,
     Calc,
+    Sort,           // Sort rows by current column, ascending
+    SortDesc,       // Sort rows by current column, descending
+    SortRow,        // Sort columns by current row, ascending
+    SortRowDesc,    // Sort columns by current row, descending
     NavigateRow(usize),
     NavigateCell(CellRef),
     Unknown(String),
@@ -40,6 +44,10 @@ impl Command {
             "delcol" => Some(Command::DeleteColumn),
             "header" => Some(Command::ToggleHeader),
             "calc" => Some(Command::Calc),
+            "sort" => Some(Command::Sort),
+            "sortd" | "sort!" => Some(Command::SortDesc),
+            "sortr" => Some(Command::SortRow),
+            "sortrd" | "sortr!" => Some(Command::SortRowDesc),
             _ => Some(Command::Unknown(trimmed.to_string())),
         }
     }
@@ -59,6 +67,16 @@ mod tests {
         assert_eq!(Command::parse("delcol"), Some(Command::DeleteColumn));
         assert_eq!(Command::parse("header"), Some(Command::ToggleHeader));
         assert_eq!(Command::parse("calc"), Some(Command::Calc));
+    }
+
+    #[test]
+    fn test_parse_sort_commands() {
+        assert_eq!(Command::parse("sort"), Some(Command::Sort));
+        assert_eq!(Command::parse("sortd"), Some(Command::SortDesc));
+        assert_eq!(Command::parse("sort!"), Some(Command::SortDesc));
+        assert_eq!(Command::parse("sortr"), Some(Command::SortRow));
+        assert_eq!(Command::parse("sortrd"), Some(Command::SortRowDesc));
+        assert_eq!(Command::parse("sortr!"), Some(Command::SortRowDesc));
     }
 
     #[test]

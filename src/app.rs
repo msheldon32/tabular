@@ -10,7 +10,7 @@ use crate::calculator::Calculator;
 use crate::clipboard::Clipboard;
 use crate::command::Command;
 use crate::mode::Mode;
-use crate::table::{Table, TableView};
+use crate::table::{SortDirection, Table, TableView};
 use crate::transaction::{History, Transaction};
 use crate::ui;
 
@@ -627,7 +627,99 @@ impl App {
                 self.view.cursor_row = cell.row;
                 self.view.cursor_col = cell.col;
             }
+            Command::Sort => self.sort_by_column(SortDirection::Ascending),
+            Command::SortDesc => self.sort_by_column(SortDirection::Descending),
+            Command::SortRow => self.sort_by_row(SortDirection::Ascending),
+            Command::SortRowDesc => self.sort_by_row(SortDirection::Descending),
             Command::Unknown(s) => self.message = Some(format!("Unknown command: {}", s)),
         }
+    }
+
+    fn sort_by_column(&mut self, direction: SortDirection) {
+        let sort_col = self.view.cursor_col;
+        let skip_header = self.header_mode;
+
+        // Get the sort order
+        let new_order = self.table.get_sorted_row_indices(sort_col, direction, skip_header);
+
+        // Check if already sorted
+        let already_sorted: bool = new_order.iter().enumerate().all(|(i, &idx)| i == idx);
+        if already_sorted {
+            self.message = Some("Already sorted".to_string());
+            return;
+        }
+
+        // Capture old state for undo
+        let old_data = self.table.cells.clone();
+
+        // Perform the reorder
+        self.table.reorder_rows(&new_order);
+
+        // Create transaction for undo
+        let new_data = self.table.cells.clone();
+        let txn = Transaction::SetSpan {
+            row: 0,
+            col: 0,
+            old_data,
+            new_data,
+        };
+        self.history.record(txn);
+        self.dirty = true;
+        self.view.update_col_widths(&self.table);
+
+        let sort_type = self.table.probe_column_type(sort_col, skip_header);
+        let type_str = match sort_type {
+            crate::table::SortType::Numeric => "numeric",
+            crate::table::SortType::Text => "text",
+        };
+        let dir_str = match direction {
+            SortDirection::Ascending => "ascending",
+            SortDirection::Descending => "descending",
+        };
+        self.message = Some(format!("Sorted {} ({})", dir_str, type_str));
+    }
+
+    fn sort_by_row(&mut self, direction: SortDirection) {
+        let sort_row = self.view.cursor_row;
+        let skip_first = self.header_mode; // Optionally skip first column like row labels
+
+        // Get the sort order
+        let new_order = self.table.get_sorted_col_indices(sort_row, direction, false);
+
+        // Check if already sorted
+        let already_sorted: bool = new_order.iter().enumerate().all(|(i, &idx)| i == idx);
+        if already_sorted {
+            self.message = Some("Already sorted".to_string());
+            return;
+        }
+
+        // Capture old state for undo
+        let old_data = self.table.cells.clone();
+
+        // Perform the reorder
+        self.table.reorder_cols(&new_order);
+
+        // Create transaction for undo
+        let new_data = self.table.cells.clone();
+        let txn = Transaction::SetSpan {
+            row: 0,
+            col: 0,
+            old_data,
+            new_data,
+        };
+        self.history.record(txn);
+        self.dirty = true;
+        self.view.update_col_widths(&self.table);
+
+        let sort_type = self.table.probe_row_type(sort_row, skip_first);
+        let type_str = match sort_type {
+            crate::table::SortType::Numeric => "numeric",
+            crate::table::SortType::Text => "text",
+        };
+        let dir_str = match direction {
+            SortDirection::Ascending => "ascending",
+            SortDirection::Descending => "descending",
+        };
+        self.message = Some(format!("Columns sorted {} ({})", dir_str, type_str));
     }
 }

@@ -223,6 +223,201 @@ impl Default for Table {
     }
 }
 
+/// Represents whether a column/row should be sorted as numbers or text
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortType {
+    Numeric,
+    Text,
+}
+
+/// Sorting direction
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
+
+impl Table {
+    /// Probe a column to determine if it's numeric or text
+    /// Skips empty cells; if majority of non-empty cells are numeric, returns Numeric
+    pub fn probe_column_type(&self, col: usize, skip_header: bool) -> SortType {
+        let start_row = if skip_header { 1 } else { 0 };
+        let mut numeric_count = 0;
+        let mut total_count = 0;
+
+        for row_idx in start_row..self.row_count() {
+            if let Some(cell) = self.get_cell(row_idx, col) {
+                let trimmed = cell.trim();
+                if !trimmed.is_empty() {
+                    total_count += 1;
+                    if trimmed.parse::<f64>().is_ok() {
+                        numeric_count += 1;
+                    }
+                }
+            }
+        }
+
+        // If more than half are numeric (or all are numeric), treat as numeric
+        if total_count > 0 && numeric_count * 2 >= total_count {
+            SortType::Numeric
+        } else {
+            SortType::Text
+        }
+    }
+
+    /// Probe a row to determine if it's numeric or text
+    pub fn probe_row_type(&self, row: usize, skip_first_col: bool) -> SortType {
+        let start_col = if skip_first_col { 1 } else { 0 };
+        let mut numeric_count = 0;
+        let mut total_count = 0;
+
+        for col_idx in start_col..self.col_count() {
+            if let Some(cell) = self.get_cell(row, col_idx) {
+                let trimmed = cell.trim();
+                if !trimmed.is_empty() {
+                    total_count += 1;
+                    if trimmed.parse::<f64>().is_ok() {
+                        numeric_count += 1;
+                    }
+                }
+            }
+        }
+
+        if total_count > 0 && numeric_count * 2 >= total_count {
+            SortType::Numeric
+        } else {
+            SortType::Text
+        }
+    }
+
+    /// Sort rows by a specific column, returns the sorted indices
+    /// skip_header: if true, row 0 is not included in sorting
+    pub fn get_sorted_row_indices(
+        &self,
+        sort_col: usize,
+        direction: SortDirection,
+        skip_header: bool,
+    ) -> Vec<usize> {
+        let sort_type = self.probe_column_type(sort_col, skip_header);
+        let start_row = if skip_header { 1 } else { 0 };
+
+        let mut indices: Vec<usize> = (start_row..self.row_count()).collect();
+
+        indices.sort_by(|&a, &b| {
+            let cell_a = self.get_cell(a, sort_col).map(|s| s.trim()).unwrap_or("");
+            let cell_b = self.get_cell(b, sort_col).map(|s| s.trim()).unwrap_or("");
+
+            let cmp = match sort_type {
+                SortType::Numeric => {
+                    let num_a = cell_a.parse::<f64>().unwrap_or(f64::NAN);
+                    let num_b = cell_b.parse::<f64>().unwrap_or(f64::NAN);
+                    // Handle NaN: push non-parseable values to the end
+                    match (num_a.is_nan(), num_b.is_nan()) {
+                        (true, true) => cell_a.cmp(cell_b), // Both NaN, sort as text
+                        (true, false) => std::cmp::Ordering::Greater, // NaN goes last
+                        (false, true) => std::cmp::Ordering::Less,
+                        (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
+                    }
+                }
+                SortType::Text => cell_a.to_lowercase().cmp(&cell_b.to_lowercase()),
+            };
+
+            match direction {
+                SortDirection::Ascending => cmp,
+                SortDirection::Descending => cmp.reverse(),
+            }
+        });
+
+        // If we skipped header, prepend 0
+        if skip_header {
+            let mut result = vec![0];
+            result.extend(indices);
+            result
+        } else {
+            indices
+        }
+    }
+
+    /// Sort columns by a specific row, returns the sorted column indices
+    pub fn get_sorted_col_indices(
+        &self,
+        sort_row: usize,
+        direction: SortDirection,
+        skip_first_col: bool,
+    ) -> Vec<usize> {
+        let sort_type = self.probe_row_type(sort_row, skip_first_col);
+        let start_col = if skip_first_col { 1 } else { 0 };
+
+        let mut indices: Vec<usize> = (start_col..self.col_count()).collect();
+
+        indices.sort_by(|&a, &b| {
+            let cell_a = self.get_cell(sort_row, a).map(|s| s.trim()).unwrap_or("");
+            let cell_b = self.get_cell(sort_row, b).map(|s| s.trim()).unwrap_or("");
+
+            let cmp = match sort_type {
+                SortType::Numeric => {
+                    let num_a = cell_a.parse::<f64>().unwrap_or(f64::NAN);
+                    let num_b = cell_b.parse::<f64>().unwrap_or(f64::NAN);
+                    match (num_a.is_nan(), num_b.is_nan()) {
+                        (true, true) => cell_a.cmp(cell_b),
+                        (true, false) => std::cmp::Ordering::Greater,
+                        (false, true) => std::cmp::Ordering::Less,
+                        (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
+                    }
+                }
+                SortType::Text => cell_a.to_lowercase().cmp(&cell_b.to_lowercase()),
+            };
+
+            match direction {
+                SortDirection::Ascending => cmp,
+                SortDirection::Descending => cmp.reverse(),
+            }
+        });
+
+        if skip_first_col {
+            let mut result = vec![0];
+            result.extend(indices);
+            result
+        } else {
+            indices
+        }
+    }
+
+    /// Reorder rows according to the given indices
+    /// Returns the old table state as Vec<Vec<String>> for undo
+    pub fn reorder_rows(&mut self, new_order: &[usize]) -> Vec<Vec<String>> {
+        let old_cells = self.cells.clone();
+        let mut new_cells = Vec::with_capacity(new_order.len());
+
+        for &idx in new_order {
+            if idx < old_cells.len() {
+                new_cells.push(old_cells[idx].clone());
+            }
+        }
+
+        self.cells = new_cells;
+        old_cells
+    }
+
+    /// Reorder columns according to the given indices
+    /// Returns the old table state as Vec<Vec<String>> for undo
+    pub fn reorder_cols(&mut self, new_order: &[usize]) -> Vec<Vec<String>> {
+        let old_cells = self.cells.clone();
+
+        for row in &mut self.cells {
+            let old_row = row.clone();
+            row.clear();
+            for &idx in new_order {
+                if idx < old_row.len() {
+                    row.push(old_row[idx].clone());
+                }
+            }
+        }
+
+        old_cells
+    }
+}
+
 /// View state for the table (cursor, viewport, cached widths)
 #[derive(Debug, Clone)]
 pub struct TableView {
@@ -1249,5 +1444,266 @@ mod tests {
         // Shouldn't shrink
         view.expand_column(3);
         assert_eq!(view.col_widths[1], 10);
+    }
+
+    // === Sorting tests ===
+
+    #[test]
+    fn test_probe_column_type_numeric() {
+        let table = make_table(vec![
+            vec!["Name", "Score"],
+            vec!["Alice", "95"],
+            vec!["Bob", "87"],
+            vec!["Carol", "92"],
+        ]);
+
+        // Column 0 is text (names)
+        assert_eq!(table.probe_column_type(0, true), SortType::Text);
+        // Column 1 is numeric (scores)
+        assert_eq!(table.probe_column_type(1, true), SortType::Numeric);
+    }
+
+    #[test]
+    fn test_probe_column_type_mixed() {
+        let table = make_table(vec![
+            vec!["ID", "Value"],
+            vec!["1", "100"],
+            vec!["2", "N/A"],
+            vec!["3", "200"],
+        ]);
+
+        // Column 0 is numeric
+        assert_eq!(table.probe_column_type(0, true), SortType::Numeric);
+        // Column 1 is mixed but majority numeric
+        assert_eq!(table.probe_column_type(1, true), SortType::Numeric);
+    }
+
+    #[test]
+    fn test_probe_column_type_with_empty_cells() {
+        let table = make_table(vec![
+            vec!["Header"],
+            vec!["10"],
+            vec![""],
+            vec!["20"],
+            vec![""],
+        ]);
+
+        // Empty cells should be ignored; remaining are numeric
+        assert_eq!(table.probe_column_type(0, true), SortType::Numeric);
+    }
+
+    #[test]
+    fn test_probe_column_type_all_text() {
+        let table = make_table(vec![
+            vec!["Names"],
+            vec!["Alice"],
+            vec!["Bob"],
+            vec!["Carol"],
+        ]);
+
+        assert_eq!(table.probe_column_type(0, true), SortType::Text);
+    }
+
+    #[test]
+    fn test_get_sorted_row_indices_numeric_ascending() {
+        let table = make_table(vec![
+            vec!["Name", "Score"],
+            vec!["Alice", "95"],
+            vec!["Bob", "87"],
+            vec!["Carol", "92"],
+        ]);
+
+        // Sort by score (column 1), ascending, skip header
+        let indices = table.get_sorted_row_indices(1, SortDirection::Ascending, true);
+
+        // Expected: header stays at 0, then Bob (87), Carol (92), Alice (95)
+        assert_eq!(indices, vec![0, 2, 3, 1]);
+    }
+
+    #[test]
+    fn test_get_sorted_row_indices_numeric_descending() {
+        let table = make_table(vec![
+            vec!["Name", "Score"],
+            vec!["Alice", "95"],
+            vec!["Bob", "87"],
+            vec!["Carol", "92"],
+        ]);
+
+        // Sort by score (column 1), descending, skip header
+        let indices = table.get_sorted_row_indices(1, SortDirection::Descending, true);
+
+        // Expected: header stays at 0, then Alice (95), Carol (92), Bob (87)
+        assert_eq!(indices, vec![0, 1, 3, 2]);
+    }
+
+    #[test]
+    fn test_get_sorted_row_indices_text_ascending() {
+        let table = make_table(vec![
+            vec!["Name", "Score"],
+            vec!["Carol", "92"],
+            vec!["Alice", "95"],
+            vec!["Bob", "87"],
+        ]);
+
+        // Sort by name (column 0), ascending, skip header
+        let indices = table.get_sorted_row_indices(0, SortDirection::Ascending, true);
+
+        // Expected: header stays at 0, then Alice, Bob, Carol
+        assert_eq!(indices, vec![0, 2, 3, 1]);
+    }
+
+    #[test]
+    fn test_get_sorted_row_indices_no_header() {
+        let table = make_table(vec![
+            vec!["Carol", "92"],
+            vec!["Alice", "95"],
+            vec!["Bob", "87"],
+        ]);
+
+        // Sort by name (column 0), ascending, NO header skip
+        let indices = table.get_sorted_row_indices(0, SortDirection::Ascending, false);
+
+        // Expected: Alice, Bob, Carol
+        assert_eq!(indices, vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn test_get_sorted_row_indices_with_non_numeric() {
+        let table = make_table(vec![
+            vec!["ID", "Value"],
+            vec!["1", "100"],
+            vec!["2", "N/A"],
+            vec!["3", "50"],
+        ]);
+
+        // Sort by value (column 1), ascending
+        // N/A should go to the end
+        let indices = table.get_sorted_row_indices(1, SortDirection::Ascending, true);
+
+        // 50, 100, N/A
+        assert_eq!(indices, vec![0, 3, 1, 2]);
+    }
+
+    #[test]
+    fn test_get_sorted_col_indices() {
+        let table = make_table(vec![
+            vec!["C", "A", "B"],
+            vec!["3", "1", "2"],
+        ]);
+
+        // Sort columns by row 0 (text), ascending
+        let indices = table.get_sorted_col_indices(0, SortDirection::Ascending, false);
+
+        // A, B, C
+        assert_eq!(indices, vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn test_get_sorted_col_indices_numeric() {
+        let table = make_table(vec![
+            vec!["30", "10", "20"],
+            vec!["C", "A", "B"],
+        ]);
+
+        // Sort columns by row 0 (numeric), ascending
+        let indices = table.get_sorted_col_indices(0, SortDirection::Ascending, false);
+
+        // 10, 20, 30
+        assert_eq!(indices, vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn test_reorder_rows() {
+        let mut table = make_table(vec![
+            vec!["a", "1"],
+            vec!["b", "2"],
+            vec!["c", "3"],
+        ]);
+
+        let old = table.reorder_rows(&[2, 0, 1]);
+
+        assert_eq!(table.cells[0], vec!["c", "3"]);
+        assert_eq!(table.cells[1], vec!["a", "1"]);
+        assert_eq!(table.cells[2], vec!["b", "2"]);
+
+        // Old data should be preserved for undo
+        assert_eq!(old[0], vec!["a", "1"]);
+        assert_eq!(old[1], vec!["b", "2"]);
+        assert_eq!(old[2], vec!["c", "3"]);
+    }
+
+    #[test]
+    fn test_reorder_cols() {
+        let mut table = make_table(vec![
+            vec!["a", "b", "c"],
+            vec!["1", "2", "3"],
+        ]);
+
+        let old = table.reorder_cols(&[2, 0, 1]);
+
+        assert_eq!(table.cells[0], vec!["c", "a", "b"]);
+        assert_eq!(table.cells[1], vec!["3", "1", "2"]);
+
+        // Old data should be preserved
+        assert_eq!(old[0], vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_sort_case_insensitive() {
+        let table = make_table(vec![
+            vec!["name"],
+            vec!["Banana"],
+            vec!["apple"],
+            vec!["Cherry"],
+        ]);
+
+        let indices = table.get_sorted_row_indices(0, SortDirection::Ascending, true);
+
+        // apple, Banana, Cherry (case-insensitive)
+        assert_eq!(indices, vec![0, 2, 1, 3]);
+    }
+
+    #[test]
+    fn test_sort_negative_numbers() {
+        let table = make_table(vec![
+            vec!["value"],
+            vec!["-10"],
+            vec!["5"],
+            vec!["-3"],
+            vec!["0"],
+        ]);
+
+        let indices = table.get_sorted_row_indices(0, SortDirection::Ascending, true);
+
+        // -10, -3, 0, 5
+        assert_eq!(indices, vec![0, 1, 3, 4, 2]);
+    }
+
+    #[test]
+    fn test_sort_float_numbers() {
+        let table = make_table(vec![
+            vec!["value"],
+            vec!["1.5"],
+            vec!["1.05"],
+            vec!["1.25"],
+        ]);
+
+        let indices = table.get_sorted_row_indices(0, SortDirection::Ascending, true);
+
+        // 1.05, 1.25, 1.5
+        assert_eq!(indices, vec![0, 2, 3, 1]);
+    }
+
+    #[test]
+    fn test_probe_row_type() {
+        let table = make_table(vec![
+            vec!["Name", "Alice", "Bob", "Carol"],
+            vec!["Score", "95", "87", "92"],
+        ]);
+
+        // Row 0 is text (names)
+        assert_eq!(table.probe_row_type(0, true), SortType::Text);
+        // Row 1 is numeric (scores)
+        assert_eq!(table.probe_row_type(1, true), SortType::Numeric);
     }
 }

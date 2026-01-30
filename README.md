@@ -111,8 +111,27 @@ In **visual row mode** (`V`), `q` fills entire rows. In **visual column mode** (
 | `:delcol` | Delete current column |
 | `:header` | Toggle header mode |
 | `:calc` | Evaluate all formulas |
+| `:sort` | Sort rows by current column (ascending) |
+| `:sortd` | Sort rows by current column (descending) |
+| `:sortr` | Sort columns by current row (ascending) |
+| `:sortrd` | Sort columns by current row (descending) |
 | `:[NUMBER]` | Jump to row NUMBER |
 | `:[CELL]` | Jump to CELL (e.g., `:A1`, `:B5`) |
+
+## Sorting
+
+Sort data by navigating to the column (or row) you want to sort by, then use `:sort` or `:sortd`.
+
+**Automatic type detection**: Tabular probes the column to determine if it contains numeric or text data:
+- **Numeric sort**: If the majority of non-empty cells are numbers, sorting is done numerically
+- **Text sort**: Otherwise, sorting is case-insensitive alphabetical
+
+**Header preservation**: When header mode is enabled (default), the first row is kept in place during sorting.
+
+**Examples**:
+- Navigate to the "Score" column and type `:sort` to sort scores low-to-high
+- Use `:sortd` to sort high-to-low (descending)
+- Use `:sortr` to rearrange columns based on a row's values
 
 ## Undo/Redo
 
