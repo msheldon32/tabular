@@ -152,6 +152,10 @@ impl ElementStyle {
 pub struct Theme {
     pub name: String,
 
+    // Background color for the entire UI
+    #[serde(default)]
+    pub background: Option<ThemeColor>,
+
     // Table cells
     pub cell: ElementStyle,
     pub cell_cursor: ElementStyle,
@@ -193,42 +197,43 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// Dark theme
+    /// Dark theme with black background
     pub fn dark() -> Self {
         use NamedColor::*;
         Self {
             name: "dark".to_string(),
-            cell: ElementStyle::default(),
-            cell_cursor: ElementStyle::fg(ThemeColor::Named(White))
-                .with_bg(ThemeColor::Named(Blue))
+            background: Some(ThemeColor::Named(Black)),
+            cell: ElementStyle::fg(ThemeColor::Named(White)),
+            cell_cursor: ElementStyle::fg(ThemeColor::Named(Black))
+                .with_bg(ThemeColor::Named(LightCyan))
                 .with_bold(),
             cell_selection: ElementStyle::fg(ThemeColor::Named(White))
                 .with_bg(ThemeColor::Named(DarkGray)),
             cell_match: ElementStyle::fg(ThemeColor::Named(Black))
                 .with_bg(ThemeColor::Named(Yellow)),
-            header_col: ElementStyle::fg(ThemeColor::Named(Cyan)).with_bold(),
-            header_row: ElementStyle::fg(ThemeColor::Named(Green)).with_bold(),
-            row_number: ElementStyle::fg(ThemeColor::Named(DarkGray)),
-            row_number_cursor: ElementStyle::fg(ThemeColor::Named(Yellow)).with_bold(),
+            header_col: ElementStyle::fg(ThemeColor::Named(LightCyan)).with_bold(),
+            header_row: ElementStyle::fg(ThemeColor::Named(LightGreen)).with_bold(),
+            row_number: ElementStyle::fg(ThemeColor::Named(Gray)),
+            row_number_cursor: ElementStyle::fg(ThemeColor::Named(LightYellow)).with_bold(),
             status_bar: ElementStyle::fg(ThemeColor::Named(White))
                 .with_bg(ThemeColor::Named(DarkGray)),
             status_mode_normal: ElementStyle::fg(ThemeColor::Named(Black))
-                .with_bg(ThemeColor::Named(Blue))
+                .with_bg(ThemeColor::Named(LightBlue))
                 .with_bold(),
             status_mode_insert: ElementStyle::fg(ThemeColor::Named(Black))
-                .with_bg(ThemeColor::Named(Green))
+                .with_bg(ThemeColor::Named(LightGreen))
                 .with_bold(),
             status_mode_visual: ElementStyle::fg(ThemeColor::Named(Black))
-                .with_bg(ThemeColor::Named(Magenta))
+                .with_bg(ThemeColor::Named(LightMagenta))
                 .with_bold(),
             status_mode_command: ElementStyle::fg(ThemeColor::Named(Black))
-                .with_bg(ThemeColor::Named(Yellow))
+                .with_bg(ThemeColor::Named(LightYellow))
                 .with_bold(),
             message_info: ElementStyle::fg(ThemeColor::Named(White)),
-            message_warning: ElementStyle::fg(ThemeColor::Named(Yellow)),
-            message_error: ElementStyle::fg(ThemeColor::Named(Red)).with_bold(),
-            command_line: ElementStyle::default(),
-            command_prompt: ElementStyle::fg(ThemeColor::Named(Cyan)),
+            message_warning: ElementStyle::fg(ThemeColor::Named(LightYellow)),
+            message_error: ElementStyle::fg(ThemeColor::Named(LightRed)).with_bold(),
+            command_line: ElementStyle::fg(ThemeColor::Named(White)),
+            command_prompt: ElementStyle::fg(ThemeColor::Named(LightCyan)),
             show_grid: false,
             grid: ElementStyle::fg(ThemeColor::Named(DarkGray)),
         }
@@ -239,6 +244,7 @@ impl Theme {
         use NamedColor::*;
         Self {
             name: "light".to_string(),
+            background: None, // Use terminal default
             cell: ElementStyle::fg(ThemeColor::Named(Black)),
             cell_cursor: ElementStyle::fg(ThemeColor::Named(White))
                 .with_bg(ThemeColor::Named(Blue))
@@ -293,6 +299,7 @@ impl Theme {
 
         Self {
             name: "solarized-dark".to_string(),
+            background: Some(base03),
             cell: ElementStyle::fg(base0),
             cell_cursor: ElementStyle::fg(base03).with_bg(blue).with_bold(),
             cell_selection: ElementStyle::fg(base0).with_bg(base02),
@@ -439,5 +446,9 @@ impl Style {
 
     pub fn grid(&self) -> RatStyle {
         self.theme.grid.to_ratatui()
+    }
+
+    pub fn background(&self) -> Option<Color> {
+        self.theme.background.map(|c| c.into())
     }
 }

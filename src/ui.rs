@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table as RatatuiTable},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table as RatatuiTable},
     Frame,
 };
 
@@ -11,6 +11,13 @@ use crate::mode::Mode;
 use crate::util::letters_from_col;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
+    // Apply background color if set
+    if let Some(bg_color) = app.style.background() {
+        let bg_style = Style::default().bg(bg_color);
+        frame.render_widget(Clear, frame.size());
+        frame.render_widget(Block::default().style(bg_style), frame.size());
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -168,9 +175,14 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
         format!("Table [{} rows, {} cols]", row_count, col_count)
     };
 
+    let mut table_block = Block::default().borders(Borders::ALL).title(title);
+    if let Some(bg_color) = app.style.background() {
+        table_block = table_block.style(Style::default().bg(bg_color));
+    }
+
     let table = RatatuiTable::new(rows, col_widths)
         .header(header_row)
-        .block(Block::default().borders(Borders::ALL).title(title));
+        .block(table_block);
 
     frame.render_widget(table, area);
 }
