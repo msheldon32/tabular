@@ -202,6 +202,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let dirty_indicator = if app.dirty { "[+]" } else { "" };
 
     let file_name = app
+        .file_io
         .file_path
         .as_ref()
         .map(|p| p.to_string_lossy().to_string())

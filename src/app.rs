@@ -13,6 +13,7 @@ use crate::mode::Mode;
 use crate::table::{SortDirection, Table, TableView};
 use crate::transaction::{History, Transaction};
 use crate::ui;
+use crate::fileio::FileIO;
 
 pub struct App {
     pub table: Table,
@@ -22,7 +23,7 @@ pub struct App {
     pub mode: Mode,
     pub command_buffer: String,
     pub edit_buffer: String,
-    pub file_path: Option<PathBuf>,
+    pub file_io: FileIO,
     pub dirty: bool,
     pub has_selection: bool,
     pub message: Option<String>,
@@ -37,28 +38,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(file_path: Option<PathBuf>) -> io::Result<Self> {
-        let table = if let Some(ref path) = file_path {
-             let ext = file_path
-                .as_ref()
-                .and_then(|p| p.extension())
-                .and_then(|e| e.to_str());
-            
-            if ext == Some("csv") {
-                Table::load_csv(path, b',')?
-            } else if ext == Some("tsv") {
-                Table::load_csv(path, b'\t')?
-            } else {
-                Table::new()
-            }
-        } else {
-            Table::new()
-        };
-
+    pub fn new(table: Table, file_io: FileIO) -> Self {
         let mut view = TableView::new();
         view.update_col_widths(&table);
 
-        Ok(Self {
+        Self {
             table,
             view,
             clipboard: Clipboard::new(),
@@ -66,7 +50,7 @@ impl App {
             mode: Mode::Normal,
             command_buffer: String::new(),
             edit_buffer: String::new(),
-            file_path: file_path,
+            file_io: file_io,
             dirty: false,
             has_selection: false,
             message: None,
@@ -77,7 +61,7 @@ impl App {
             search_matches: Vec::new(),
             search_index: 0,
             search_buffer: String::new(),
-        })
+        }
     }
 
     pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
@@ -715,26 +699,12 @@ impl App {
     fn execute_command(&mut self, cmd: Command) {
         match cmd {
             Command::Write => {
-                if let Some(ref path) = self.file_path {
-                    let ext = self.file_path
-                        .as_ref()
-                        .and_then(|p| p.extension())
-                        .and_then(|e| e.to_str());
-                    let mut delim = b',';
-                    
-                    if ext == Some("tsv") {
-                        delim = b'\t';
+                match self.file_io.write(&mut self.table) {
+                    Ok(()) => {
+                        self.dirty = false;
+                        self.message = Some(format!("Saved to {}", self.file_io.file_name()));
                     }
-
-                    match self.table.save_csv(path, delim) {
-                        Ok(()) => {
-                            self.dirty = false;
-                            self.message = Some(format!("Saved to {}", path.display()));
-                        }
-                        Err(e) => self.message = Some(format!("Error saving: {}", e)),
-                    }
-                } else {
-                    self.message = Some("No file path specified".to_string());
+                    Err(e) => self.message = Some(format!("Error saving: {}", e)),
                 }
             }
             Command::Quit => {
@@ -746,22 +716,12 @@ impl App {
             }
             Command::ForceQuit => self.should_quit = true,
             Command::WriteQuit => {
-                if let Some(ref path) = self.file_path {
-                    let ext = self.file_path
-                        .as_ref()
-                        .and_then(|p| p.extension())
-                        .and_then(|e| e.to_str());
-                    let mut delim = b',';
-                    
-                    if ext == Some("tsv") {
-                        delim = b'\t';
+                match self.file_io.write(&mut self.table) {
+                    Ok(()) => {
+                        self.dirty = false;
+                        self.message = Some(format!("Saved to {}", self.file_io.file_name()));
                     }
-                    match self.table.save_csv(path, delim) {
-                        Ok(()) => self.should_quit = true,
-                        Err(e) => self.message = Some(format!("Error saving: {}", e)),
-                    }
-                } else {
-                    self.message = Some("No file path specified".to_string());
+                    Err(e) => self.message = Some(format!("Error saving: {}", e)),
                 }
             }
             Command::AddColumn => {

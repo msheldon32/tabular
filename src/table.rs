@@ -1,7 +1,7 @@
 use std::fs::File;
-use std::io::{self, BufReader, BufWriter};
-use std::path::Path;
 use std::cmp;
+use std::io::{self, BufReader, BufWriter};
+use std::path::{PathBuf, Path};
 
 use crate::mode::Mode;
 use crate::util::translate_references;
@@ -13,53 +13,10 @@ pub struct Table {
 }
 
 impl Table {
-    pub fn new() -> Self {
+    pub fn new(cells: Vec<Vec<String>>) -> Self {
         Self {
-            cells: vec![vec![String::new()]],
+            cells: cells
         }
-    }
-
-    pub fn load_csv<P: AsRef<Path>>(path: P, delim: u8) -> io::Result<Self> {
-        let file = File::open(path)?;
-        let reader = BufReader::new(file);
-        let mut csv_reader = csv::ReaderBuilder::new()
-            .delimiter(delim)
-            .has_headers(false)
-            .from_reader(reader);
-
-        let mut cells: Vec<Vec<String>> = Vec::new();
-
-        for result in csv_reader.records() {
-            let record = result.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            let row: Vec<String> = record.iter().map(|s| s.to_string()).collect();
-            cells.push(row);
-        }
-
-        if cells.is_empty() {
-            cells.push(vec![String::new()]);
-        }
-
-        Ok(Self { cells })
-    }
-
-    pub fn save_csv<P: AsRef<Path>>(&self, path: P, delim: u8) -> io::Result<()> {
-        let file = File::create(path)?;
-        let writer = BufWriter::new(file);
-        let mut csv_writer = csv::WriterBuilder::new()
-            .delimiter(delim)
-            .from_writer(writer);
-
-        for row in &self.cells {
-            csv_writer
-                .write_record(row)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        }
-
-        csv_writer
-            .flush()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-        Ok(())
     }
 
     pub fn get_cell(&self, row: usize, col: usize) -> Option<&String> {
@@ -222,7 +179,7 @@ impl Table {
 
 impl Default for Table {
     fn default() -> Self {
-        Self::new()
+        Self::new(vec![vec![String::new()]])
     }
 }
 
