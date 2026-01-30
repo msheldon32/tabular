@@ -3,6 +3,7 @@ mod calculator;
 mod clipboard;
 mod command;
 mod fileio;
+mod format;
 mod input;
 mod mode;
 mod style;

@@ -48,6 +48,12 @@ pub enum SequenceAction {
     MoveUp,      // k
     MoveLeft,    // h
     MoveRight,   // l
+    // Format actions (visual mode)
+    FormatReduceDecimal,   // f-
+    FormatIncreaseDecimal, // f+
+    FormatCurrency,        // f$
+    FormatScientific,      // fe
+    FormatPercentage,      // f%
 }
 
 /// Result of processing a key through the buffer
@@ -152,12 +158,18 @@ impl KeyBuffer {
             ['k'] => Some(SequenceAction::MoveUp),
             ['h'] => Some(SequenceAction::MoveLeft),
             ['l'] => Some(SequenceAction::MoveRight),
+            // Format sequences
+            ['f', '-'] => Some(SequenceAction::FormatReduceDecimal),
+            ['f', '+'] => Some(SequenceAction::FormatIncreaseDecimal),
+            ['f', '$'] => Some(SequenceAction::FormatCurrency),
+            ['f', 'e'] => Some(SequenceAction::FormatScientific),
+            ['f', '%'] => Some(SequenceAction::FormatPercentage),
             _ => None,
         }
     }
 
     fn is_valid_prefix(&self) -> bool {
-        matches!(self.keys.as_slice(), ['g'] | ['d'] | ['y'])
+        matches!(self.keys.as_slice(), ['g'] | ['d'] | ['y'] | ['f'])
     }
 }
 
@@ -392,6 +404,16 @@ pub enum VisualType {
     Col,
 }
 
+/// Format operation types for visual mode formatting
+#[derive(Clone, Copy, PartialEq)]
+pub enum FormatOp {
+    ReduceDecimal,
+    IncreaseDecimal,
+    Currency,
+    Scientific,
+    Percentage,
+}
+
 /// Unified visual mode handler
 pub struct VisualHandler {
     pub visual_type: VisualType,
@@ -428,6 +450,22 @@ impl VisualHandler {
                     SequenceAction::MoveRight => view.move_right_n(count, table),
                     SequenceAction::Yank => return self.handle_yank(view, table, clipboard),
                     SequenceAction::Delete => return self.handle_delete(view, table),
+                    // Format actions
+                    SequenceAction::FormatReduceDecimal => {
+                        return self.handle_format(view, table, FormatOp::ReduceDecimal);
+                    }
+                    SequenceAction::FormatIncreaseDecimal => {
+                        return self.handle_format(view, table, FormatOp::IncreaseDecimal);
+                    }
+                    SequenceAction::FormatCurrency => {
+                        return self.handle_format(view, table, FormatOp::Currency);
+                    }
+                    SequenceAction::FormatScientific => {
+                        return self.handle_format(view, table, FormatOp::Scientific);
+                    }
+                    SequenceAction::FormatPercentage => {
+                        return self.handle_format(view, table, FormatOp::Percentage);
+                    }
                     _ => {} // dr, dc, yr, yc not used in visual mode
                 }
                 KeyResult::Continue
@@ -555,6 +593,57 @@ impl VisualHandler {
             }
             VisualType::Row => KeyResult::Continue, // Not applicable
         }
+    }
+
+    fn handle_format(&self, view: &TableView, table: &Table, op: FormatOp) -> KeyResult {
+        let (sel_start_row, sel_end_row, sel_start_col, sel_end_col) = view.get_selection_bounds();
+
+        // Expand selection based on visual type
+        let (start_row, end_row, start_col, end_col) = match self.visual_type {
+            VisualType::Row => {
+                // Full rows
+                (sel_start_row, sel_end_row, 0, table.col_count().saturating_sub(1))
+            }
+            VisualType::Col => {
+                // Full columns
+                (0, table.row_count().saturating_sub(1), sel_start_col, sel_end_col)
+            }
+            VisualType::Cell => {
+                // Just the selected cells
+                (sel_start_row, sel_end_row, sel_start_col, sel_end_col)
+            }
+        };
+
+        // Get the old data
+        let old_data = table.get_span(start_row, end_row, start_col, end_col)
+            .unwrap_or_default();
+
+        // Apply format to each cell
+        let new_data: Vec<Vec<String>> = old_data.iter()
+            .map(|row| {
+                row.iter()
+                    .map(|cell| {
+                        let formatted = match op {
+                            FormatOp::ReduceDecimal => crate::format::reduce_decimal(cell),
+                            FormatOp::IncreaseDecimal => crate::format::increase_decimal(cell),
+                            FormatOp::Currency => crate::format::format_currency(cell, '$'),
+                            FormatOp::Scientific => crate::format::format_scientific(cell, 2),
+                            FormatOp::Percentage => crate::format::format_percentage(cell, 0),
+                        };
+                        // If formatting failed (non-numeric), keep original value
+                        formatted.unwrap_or_else(|| cell.clone())
+                    })
+                    .collect()
+            })
+            .collect();
+
+        let txn = Transaction::SetSpan {
+            row: start_row,
+            col: start_col,
+            old_data,
+            new_data,
+        };
+        KeyResult::ExecuteAndFinish(txn)
     }
 }
 

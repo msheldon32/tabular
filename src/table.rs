@@ -201,8 +201,9 @@ pub enum SortDirection {
 fn compare_cells(cell_a: &str, cell_b: &str, sort_type: SortType, direction: SortDirection) -> std::cmp::Ordering {
     let cmp = match sort_type {
         SortType::Numeric => {
-            let num_a = cell_a.parse::<f64>().unwrap_or(f64::NAN);
-            let num_b = cell_b.parse::<f64>().unwrap_or(f64::NAN);
+            // Use parse_numeric to handle currency, percentages, etc.
+            let num_a = crate::format::parse_numeric(cell_a).unwrap_or(f64::NAN);
+            let num_b = crate::format::parse_numeric(cell_b).unwrap_or(f64::NAN);
             // Handle NaN: push non-parseable values to the end
             match (num_a.is_nan(), num_b.is_nan()) {
                 (true, true) => cell_a.cmp(cell_b), // Both NaN, sort as text
@@ -223,6 +224,7 @@ fn compare_cells(cell_a: &str, cell_b: &str, sort_type: SortType, direction: Sor
 impl Table {
     /// Probe a column to determine if it's numeric or text
     /// Skips empty cells; if majority of non-empty cells are numeric, returns Numeric
+    /// Recognizes formatted numbers (currency, percentages, etc.)
     pub fn probe_column_type(&self, col: usize, skip_header: bool) -> SortType {
         let start_row = if skip_header { 1 } else { 0 };
         let mut numeric_count = 0;
@@ -233,7 +235,7 @@ impl Table {
                 let trimmed = cell.trim();
                 if !trimmed.is_empty() {
                     total_count += 1;
-                    if trimmed.parse::<f64>().is_ok() {
+                    if crate::format::parse_numeric(trimmed).is_some() {
                         numeric_count += 1;
                     }
                 }
@@ -249,6 +251,7 @@ impl Table {
     }
 
     /// Probe a row to determine if it's numeric or text
+    /// Recognizes formatted numbers (currency, percentages, etc.)
     pub fn probe_row_type(&self, row: usize, skip_first_col: bool) -> SortType {
         let start_col = if skip_first_col { 1 } else { 0 };
         let mut numeric_count = 0;
@@ -259,7 +262,7 @@ impl Table {
                 let trimmed = cell.trim();
                 if !trimmed.is_empty() {
                     total_count += 1;
-                    if trimmed.parse::<f64>().is_ok() {
+                    if crate::format::parse_numeric(trimmed).is_some() {
                         numeric_count += 1;
                     }
                 }

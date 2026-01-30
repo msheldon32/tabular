@@ -188,12 +188,12 @@ pub struct Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        Self::dark()
+        Self::light()
     }
 }
 
 impl Theme {
-    /// Dark theme (default)
+    /// Dark theme
     pub fn dark() -> Self {
         use NamedColor::*;
         Self {
@@ -234,7 +234,7 @@ impl Theme {
         }
     }
 
-    /// Light theme
+    /// Light theme (default)
     pub fn light() -> Self {
         use NamedColor::*;
         Self {

@@ -103,6 +103,22 @@ All visual modes support navigation keys (`h`, `j`, `k`, `l`, etc.) to extend th
 | `Q` | Drag right (fill from left column) |
 | `Escape` / `Ctrl+[` | Cancel and return to normal mode |
 
+#### Formatting
+
+Format commands start with `f` and modify the selected cells:
+
+| Key | Action | Example |
+|-----|--------|---------|
+| `f-` | Reduce decimal places | `123.456` -> `123.46` |
+| `f+` | Increase decimal places | `123.4` -> `123.40` |
+| `f$` | Format as currency | `1234.56` -> `$1,234.56` |
+| `fe` | Format as scientific notation | `0.00123` -> `1.23e-3` |
+| `f%` | Format as percentage | `0.15` -> `15%` |
+
+In **visual row mode** (`V`), formatting applies to entire rows. In **visual column mode** (`Ctrl+v`), formatting applies to entire columns.
+
+Non-numeric cells are left unchanged. All format operations can be undone with `u`.
+
 #### Drag Fill
 
 The drag feature works like spreadsheet drag-fill:
@@ -142,6 +158,11 @@ Sort data by navigating to the column (or row) you want to sort by, then use `:s
 - **Numeric sort**: If the majority of non-empty cells are numbers, sorting is done numerically
 - **Text sort**: Otherwise, sorting is case-insensitive alphabetical
 
+**Formatted number recognition**: Currency and percentages are recognized as numbers for sorting:
+- Currency: `$1,234.56`, `€500`, `-$100`, `($50)`
+- Percentages: `15%`, `3.5%` (sorted by their decimal value, e.g., 15% = 0.15)
+- Numbers with commas: `1,234,567`
+
 **Header preservation**: When header mode is enabled (default), the first row is kept in place during sorting.
 
 **Examples**:
@@ -160,6 +181,10 @@ The undo history tracks cell edits, row/column insertions and deletions, drag fi
 ## Formulas
 
 Cells starting with `=` are treated as formulas. Run `:calc` to evaluate all formulas and replace them with results.
+
+Formulas recognize formatted numbers in cell references:
+- Currency values like `$1,234.56` are read as `1234.56`
+- Percentages like `15%` are read as `0.15`
 
 ### Cell References
 

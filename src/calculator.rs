@@ -287,9 +287,9 @@ impl<'a> Calculator<'a> {
             return Ok(0.0);
         }
 
-        // Try to parse as number
-        cell_content.trim().parse::<f64>()
-            .map_err(|_| CalcError::EvalError(format!("{} is not a number", cell_ref_to_name(cell))))
+        // Try to parse as number (handles currency, percentages, etc.)
+        crate::format::parse_numeric(cell_content)
+            .ok_or_else(|| CalcError::EvalError(format!("{} is not a number", cell_ref_to_name(cell))))
     }
 
     /// Get values for a range

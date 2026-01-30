@@ -298,6 +298,12 @@ impl App {
                     self.message = Some("Row deleted".to_string());
                 }
             }
+            // Format actions are only meaningful in visual mode
+            SequenceAction::FormatReduceDecimal
+            | SequenceAction::FormatIncreaseDecimal
+            | SequenceAction::FormatCurrency
+            | SequenceAction::FormatScientific
+            | SequenceAction::FormatPercentage => {}
         }
     }
 
