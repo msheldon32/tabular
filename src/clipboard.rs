@@ -36,7 +36,7 @@ impl Clipboard {
         table: &Table,
     ) -> (String, Option<Transaction>) {
         if let Some(ref row_data) = self.yanked_row {
-            let old_data = table.get_row(cursor_row).unwrap_or_default();
+            let old_data = table.get_row_cloned(cursor_row).unwrap_or_default();
             let txn = Transaction::SetSpan {
                 row: cursor_row,
                 col: 0,
@@ -274,11 +274,11 @@ mod tests {
     use super::*;
 
     fn make_table(data: Vec<Vec<&str>>) -> Table {
-        Table {
-            cells: data.into_iter()
+        Table::new(
+            data.into_iter()
                 .map(|row| row.into_iter().map(|s| s.to_string()).collect())
-                .collect(),
-        }
+                .collect()
+        )
     }
 
     #[test]

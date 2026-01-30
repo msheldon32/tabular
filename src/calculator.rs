@@ -761,11 +761,11 @@ mod tests {
     use super::*;
 
     fn make_table(data: Vec<Vec<&str>>) -> Table {
-        Table {
-            cells: data.into_iter()
+        Table::new(
+            data.into_iter()
                 .map(|row| row.into_iter().map(|s| s.to_string()).collect())
-                .collect(),
-        }
+                .collect()
+        )
     }
 
     #[test]

@@ -192,7 +192,7 @@ impl App {
 
                 // Yank the rows first
                 let rows: Vec<Vec<String>> = (start_row..end_row)
-                    .filter_map(|r| self.table.get_row(r))
+                    .filter_map(|r| self.table.get_row_cloned(r))
                     .collect();
                 if !rows.is_empty() {
                     self.clipboard.yank_rows(rows);
@@ -200,7 +200,7 @@ impl App {
 
                 // Delete rows (always delete at start_row since indices shift)
                 for _ in 0..actual_count {
-                    if let Some(row_data) = self.table.get_row(start_row) {
+                    if let Some(row_data) = self.table.get_row_cloned(start_row) {
                         let txn = Transaction::DeleteRow {
                             idx: start_row,
                             data: row_data,
@@ -232,7 +232,7 @@ impl App {
 
                 // Delete columns (always delete at start_col since indices shift)
                 for _ in 0..actual_count {
-                    if let Some(col_data) = self.table.get_col(start_col) {
+                    if let Some(col_data) = self.table.get_col_cloned(start_col) {
                         let txn = Transaction::DeleteCol {
                             idx: start_col,
                             data: col_data,
@@ -251,7 +251,7 @@ impl App {
                 let actual_count = end_row - start_row;
 
                 let rows: Vec<Vec<String>> = (start_row..end_row)
-                    .filter_map(|r| self.table.get_row(r))
+                    .filter_map(|r| self.table.get_row_cloned(r))
                     .collect();
                 if !rows.is_empty() {
                     self.clipboard.yank_rows(rows);
@@ -279,14 +279,14 @@ impl App {
             }
             SequenceAction::Yank => {
                 // In normal mode, yy yanks current row (like yr)
-                if let Some(row) = self.table.get_row(self.view.cursor_row) {
+                if let Some(row) = self.table.get_row_cloned(self.view.cursor_row) {
                     self.clipboard.yank_rows(vec![row]);
                     self.message = Some("Row yanked".to_string());
                 }
             }
             SequenceAction::Delete => {
                 // In normal mode, dd deletes current row (like dr)
-                if let Some(row_data) = self.table.get_row(self.view.cursor_row) {
+                if let Some(row_data) = self.table.get_row_cloned(self.view.cursor_row) {
                     self.clipboard.yank_rows(vec![row_data.clone()]);
                     let txn = Transaction::DeleteRow {
                         idx: self.view.cursor_row,
@@ -384,7 +384,7 @@ impl App {
                 self.message = Some("Column added".to_string());
             }
             KeyCode::Char('X') => {
-                if let Some(col_data) = self.table.get_col(self.view.cursor_col) {
+                if let Some(col_data) = self.table.get_col_cloned(self.view.cursor_col) {
                     let txn = Transaction::DeleteCol {
                         idx: self.view.cursor_col,
                         data: col_data,
@@ -565,7 +565,7 @@ impl App {
                 self.message = Some("Column added".to_string());
             }
             Command::DeleteColumn => {
-                if let Some(col_data) = self.table.get_col(self.view.cursor_col) {
+                if let Some(col_data) = self.table.get_col_cloned(self.view.cursor_col) {
                     let txn = Transaction::DeleteCol {
                         idx: self.view.cursor_col,
                         data: col_data,

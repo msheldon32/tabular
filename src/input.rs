@@ -183,7 +183,20 @@ impl NavigationHandler {
 
     /// Handle navigation keys, returns true if the key was handled
     pub fn handle(&self, key: KeyEvent, view: &mut TableView, table: &Table) -> bool {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
         match key.code {
+            // Jump navigation: Ctrl+Arrow or Ctrl+hjkl
+            KeyCode::Left if ctrl => { view.jump_left(table); true }
+            KeyCode::Right if ctrl => { view.jump_right(table); true }
+            KeyCode::Up if ctrl => { view.jump_up(table); true }
+            KeyCode::Down if ctrl => { view.jump_down(table); true }
+            KeyCode::Char('h') if ctrl => { view.jump_left(table); true }
+            KeyCode::Char('j') if ctrl => { view.jump_down(table); true }
+            KeyCode::Char('k') if ctrl => { view.jump_up(table); true }
+            KeyCode::Char('l') if ctrl => { view.jump_right(table); true }
+
+            // Regular navigation
             KeyCode::Char('h') | KeyCode::Left => { view.move_left(); true }
             KeyCode::Char('j') | KeyCode::Down => { view.move_down(table); true }
             KeyCode::Char('k') | KeyCode::Up => { view.move_up(); true }
@@ -191,16 +204,16 @@ impl NavigationHandler {
             KeyCode::Char('G') => { view.move_to_bottom(table); true }
             KeyCode::Char('0') | KeyCode::Char('^') => { view.move_to_first_col(); true }
             KeyCode::Char('$') => { view.move_to_last_col(table); true }
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('d') if ctrl => {
                 view.half_page_down(table); true
             }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('u') if ctrl => {
                 view.half_page_up(); true
             }
-            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('f') if ctrl => {
                 view.page_down(table); true
             }
-            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('b') if ctrl => {
                 view.page_up(); true
             }
             _ => false
@@ -500,7 +513,7 @@ impl VisualHandler {
             VisualType::Row => {
                 // Yank all selected rows
                 let rows: Vec<Vec<String>> = (start_row..=end_row)
-                    .filter_map(|r| table.get_row(r))
+                    .filter_map(|r| table.get_row_cloned(r))
                     .collect();
                 if !rows.is_empty() {
                     clipboard.yank_rows(rows);
@@ -544,7 +557,7 @@ impl VisualHandler {
                 // Delete entire rows
                 let txns: Vec<Transaction> = (start_row..=end_row)
                     .filter_map(|r| {
-                        table.get_row(r).map(|data| Transaction::DeleteRow {
+                        table.get_row_cloned(r).map(|data| Transaction::DeleteRow {
                             idx: start_row, // Always delete at start_row since indices shift
                             data,
                         })
@@ -560,7 +573,7 @@ impl VisualHandler {
                 // Delete entire columns
                 let txns: Vec<Transaction> = (start_col..=end_col)
                     .filter_map(|c| {
-                        table.get_col(c).map(|data| Transaction::DeleteCol {
+                        table.get_col_cloned(c).map(|data| Transaction::DeleteCol {
                             idx: start_col, // Always delete at start_col since indices shift
                             data,
                         })

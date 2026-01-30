@@ -1,7 +1,4 @@
-use std::fs::File;
 use std::cmp;
-use std::io::{self, BufReader, BufWriter};
-use std::path::{PathBuf, Path};
 
 use crate::mode::Mode;
 use crate::util::translate_references;
@@ -10,12 +7,63 @@ use crate::util::translate_references;
 #[derive(Debug, Clone)]
 pub struct Table {
     pub cells: Vec<Vec<String>>,
+    /// Cached column widths (max length of any cell in each column)
+    col_widths: Vec<usize>,
+    /// Whether col_widths needs full recompute
+    col_widths_dirty: bool,
 }
 
 impl Table {
     pub fn new(cells: Vec<Vec<String>>) -> Self {
-        Self {
-            cells: cells
+        let mut table = Self {
+            cells,
+            col_widths: Vec::new(),
+            col_widths_dirty: true,
+        };
+        table.recompute_col_widths();
+        table
+    }
+
+    /// Get cached column widths, recomputing if dirty
+    pub fn col_widths(&mut self) -> &[usize] {
+        if self.col_widths_dirty {
+            self.recompute_col_widths();
+        }
+        &self.col_widths
+    }
+
+    /// Get column widths without mutable borrow (may be stale)
+    pub fn col_widths_cached(&self) -> &[usize] {
+        &self.col_widths
+    }
+
+    /// Force recompute of column widths
+    pub fn recompute_col_widths(&mut self) {
+        self.col_widths = (0..self.col_count())
+            .map(|col| {
+                self.cells
+                    .iter()
+                    .filter_map(|row| row.get(col))
+                    .map(|s| s.len())
+                    .max()
+                    .unwrap_or(3)
+                    .max(3)
+            })
+            .collect();
+        self.col_widths_dirty = false;
+    }
+
+    /// Mark column widths as needing recompute
+    #[inline]
+    fn mark_widths_dirty(&mut self) {
+        self.col_widths_dirty = true;
+    }
+
+    /// Update width for a single column (when cell changes)
+    #[inline]
+    fn update_col_width(&mut self, col: usize, new_len: usize) {
+        if col < self.col_widths.len() {
+            self.col_widths[col] = self.col_widths[col].max(new_len).max(3);
         }
     }
 
@@ -26,7 +74,10 @@ impl Table {
     pub fn set_cell(&mut self, row: usize, col: usize, value: String) {
         if let Some(r) = self.cells.get_mut(row) {
             if let Some(cell) = r.get_mut(col) {
+                let new_len = value.len();
                 *cell = value;
+                // Update column width incrementally (only grows, never shrinks)
+                self.update_col_width(col, new_len);
             }
         }
     }
@@ -42,17 +93,21 @@ impl Table {
     pub fn insert_row_at(&mut self, idx: usize) {
         let new_row = vec![String::new(); self.col_count()];
         self.cells.insert(idx, new_row);
+        // Empty row doesn't change max widths
     }
 
     pub fn delete_row_at(&mut self, idx: usize) -> Option<Vec<String>> {
         if self.row_count() <= 1 {
             let row = self.cells[0].clone();
             self.cells[0] = vec![String::new(); self.col_count()];
+            self.mark_widths_dirty(); // Widths may shrink
             return Some(row);
         }
 
         if idx < self.row_count() {
-            Some(self.cells.remove(idx))
+            let removed = self.cells.remove(idx);
+            self.mark_widths_dirty(); // Widths may shrink
+            Some(removed)
         } else {
             None
         }
@@ -64,6 +119,10 @@ impl Table {
                 row.insert(idx, String::new());
             }
         }
+        // Insert new column width (minimum width)
+        if idx <= self.col_widths.len() {
+            self.col_widths.insert(idx, 3);
+        }
     }
 
     pub fn delete_col_at(&mut self, idx: usize) -> Option<Vec<String>> {
@@ -72,6 +131,7 @@ impl Table {
             for row in &mut self.cells {
                 row[0] = String::new();
             }
+            self.mark_widths_dirty();
             return Some(col);
         }
 
@@ -82,22 +142,39 @@ impl Table {
                     row.remove(idx);
                 }
             }
+            // Remove the column width entry
+            if idx < self.col_widths.len() {
+                self.col_widths.remove(idx);
+            }
             Some(col)
         } else {
             None
         }
     }
 
-    pub fn get_row(&self, idx: usize) -> Option<Vec<String>> {
+    /// Get a reference to a row (no cloning)
+    #[inline]
+    pub fn get_row(&self, idx: usize) -> Option<&[String]> {
+        self.cells.get(idx).map(|v| v.as_slice())
+    }
+
+    /// Get a cloned copy of a row (for transactions/clipboard)
+    pub fn get_row_cloned(&self, idx: usize) -> Option<Vec<String>> {
         self.cells.get(idx).cloned()
     }
 
-    pub fn get_col(&self, idx: usize) -> Option<Vec<String>> {
+    /// Get a cloned copy of a column (for transactions/clipboard)
+    pub fn get_col_cloned(&self, idx: usize) -> Option<Vec<String>> {
         if idx < self.col_count() {
             Some(self.cells.iter().map(|r| r[idx].clone()).collect())
         } else {
             None
         }
+    }
+
+    /// Iterate over column values without cloning
+    pub fn col_iter(&self, idx: usize) -> impl Iterator<Item = &String> {
+        self.cells.iter().filter_map(move |r| r.get(idx))
     }
 
     pub fn get_span(&self, start_row: usize, end_row: usize, start_col: usize, end_col: usize) -> Option<Vec<Vec<String>>> {
@@ -132,10 +209,18 @@ impl Table {
                 row.push(String::new());
             }
         }
+        // Extend col_widths if we added columns
+        while self.col_widths.len() < cols {
+            self.col_widths.push(3);
+        }
     }
 
     pub fn insert_row_with_data(&mut self, idx: usize, mut row: Vec<String>) {
         row.resize(self.col_count(), String::new());
+        // Update widths for new data
+        for (col, val) in row.iter().enumerate() {
+            self.update_col_width(col, val.len());
+        }
         self.cells.insert(idx, row);
     }
 
@@ -143,18 +228,26 @@ impl Table {
         if row.len() != self.col_count() {
             return;
         }
+        // Mark dirty since we might shrink widths
+        self.mark_widths_dirty();
         self.cells[idx] = row;
     }
 
     pub fn insert_col_with_data(&mut self, idx: usize, col: Vec<String>) {
+        let max_width = col.iter().map(|s| s.len()).max().unwrap_or(0).max(3);
         for (row, value) in self.cells.iter_mut().zip(col.iter()) {
             if idx <= row.len() {
                 row.insert(idx, value.clone());
             }
         }
+        if idx <= self.col_widths.len() {
+            self.col_widths.insert(idx, max_width);
+        }
     }
 
     pub fn fill_col_with_data(&mut self, idx: usize, col: Vec<String>) {
+        // Mark dirty since widths might shrink
+        self.mark_widths_dirty();
         for (row, value) in self.cells.iter_mut().zip(col.iter()) {
             if idx < row.len() {
                 row[idx] = value.clone();
@@ -172,6 +265,7 @@ impl Table {
                     self.insert_col_at(col_idx+dy);
                 }
                 self.cells[row_idx+dx][col_idx+dy] = val.clone();
+                self.update_col_width(col_idx+dy, val.len());
             }
         }
     }
@@ -179,7 +273,11 @@ impl Table {
 
 impl Default for Table {
     fn default() -> Self {
-        Self::new(vec![vec![String::new()]])
+        Table {
+            cells: vec![vec![String::new()]],
+            col_widths: vec![3],
+            col_widths_dirty: false,
+        }
     }
 }
 
@@ -289,9 +387,10 @@ impl Table {
 
         let mut indices: Vec<usize> = (start_row..self.row_count()).collect();
 
+        // Use direct indexing - indices are guaranteed valid from the range above
         indices.sort_by(|&a, &b| {
-            let cell_a = self.get_cell(a, sort_col).map(|s| s.trim()).unwrap_or("");
-            let cell_b = self.get_cell(b, sort_col).map(|s| s.trim()).unwrap_or("");
+            let cell_a = self.cells[a][sort_col].trim();
+            let cell_b = self.cells[b][sort_col].trim();
             compare_cells(cell_a, cell_b, sort_type, direction)
         });
 
@@ -317,9 +416,11 @@ impl Table {
 
         let mut indices: Vec<usize> = (start_col..self.col_count()).collect();
 
+        // Use direct indexing - indices are guaranteed valid from the range above
+        let row = &self.cells[sort_row];
         indices.sort_by(|&a, &b| {
-            let cell_a = self.get_cell(sort_row, a).map(|s| s.trim()).unwrap_or("");
-            let cell_b = self.get_cell(sort_row, b).map(|s| s.trim()).unwrap_or("");
+            let cell_a = row[a].trim();
+            let cell_b = row[b].trim();
             compare_cells(cell_a, cell_b, sort_type, direction)
         });
 
@@ -406,19 +507,14 @@ impl TableView {
     }
 
     /// Update cached column widths based on table content
+    /// Now delegates to Table's cached widths
     pub fn update_col_widths(&mut self, table: &Table) {
-        self.col_widths = (0..table.col_count())
-            .map(|col| {
-                table
-                    .cells
-                    .iter()
-                    .filter_map(|row| row.get(col))
-                    .map(|s| s.len())
-                    .max()
-                    .unwrap_or(3)
-                    .max(3)
-            })
-            .collect();
+        self.col_widths = table.col_widths_cached().to_vec();
+    }
+
+    /// Sync column widths from a mutable table (forces recompute if dirty)
+    pub fn sync_col_widths(&mut self, table: &mut Table) {
+        self.col_widths = table.col_widths().to_vec();
     }
 
     pub fn is_selected(&mut self, row_idx: usize, col_idx: usize, mode: Mode) -> bool {
@@ -581,6 +677,139 @@ impl TableView {
         self.scroll_to_cursor();
     }
 
+    // Jump navigation (Ctrl+Arrow behavior like Excel)
+    // If in occupied cell: jump to last occupied cell before empty/edge
+    // If in empty cell: jump to first occupied cell in direction
+
+    fn is_cell_occupied(table: &Table, row: usize, col: usize) -> bool {
+        table.cells.get(row)
+            .and_then(|r| r.get(col))
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+    }
+
+    pub fn jump_left(&mut self, table: &Table) {
+        if self.cursor_col == 0 {
+            return;
+        }
+
+        let current_occupied = Self::is_cell_occupied(table, self.cursor_row, self.cursor_col);
+
+        if current_occupied {
+            // Find last occupied cell before hitting empty or edge
+            let mut target = self.cursor_col - 1;
+            // First skip any empty cells
+            while target > 0 && !Self::is_cell_occupied(table, self.cursor_row, target) {
+                target -= 1;
+            }
+            // Then find the start of the occupied region
+            while target > 0 && Self::is_cell_occupied(table, self.cursor_row, target - 1) {
+                target -= 1;
+            }
+            self.cursor_col = target;
+        } else {
+            // Find first occupied cell to the left
+            let mut target = self.cursor_col - 1;
+            while target > 0 && !Self::is_cell_occupied(table, self.cursor_row, target) {
+                target -= 1;
+            }
+            self.cursor_col = target;
+        }
+        self.scroll_to_cursor();
+    }
+
+    pub fn jump_right(&mut self, table: &Table) {
+        let max_col = table.col_count().saturating_sub(1);
+        if self.cursor_col >= max_col {
+            return;
+        }
+
+        let current_occupied = Self::is_cell_occupied(table, self.cursor_row, self.cursor_col);
+
+        if current_occupied {
+            // Find last occupied cell before hitting empty or edge
+            let mut target = self.cursor_col + 1;
+            // First skip any empty cells
+            while target < max_col && !Self::is_cell_occupied(table, self.cursor_row, target) {
+                target += 1;
+            }
+            // Then find the end of the occupied region
+            while target < max_col && Self::is_cell_occupied(table, self.cursor_row, target + 1) {
+                target += 1;
+            }
+            self.cursor_col = target;
+        } else {
+            // Find first occupied cell to the right
+            let mut target = self.cursor_col + 1;
+            while target < max_col && !Self::is_cell_occupied(table, self.cursor_row, target) {
+                target += 1;
+            }
+            self.cursor_col = target;
+        }
+        self.scroll_to_cursor();
+    }
+
+    pub fn jump_up(&mut self, table: &Table) {
+        if self.cursor_row == 0 {
+            return;
+        }
+
+        let current_occupied = Self::is_cell_occupied(table, self.cursor_row, self.cursor_col);
+
+        if current_occupied {
+            // Find last occupied cell before hitting empty or edge
+            let mut target = self.cursor_row - 1;
+            // First skip any empty cells
+            while target > 0 && !Self::is_cell_occupied(table, target, self.cursor_col) {
+                target -= 1;
+            }
+            // Then find the start of the occupied region
+            while target > 0 && Self::is_cell_occupied(table, target - 1, self.cursor_col) {
+                target -= 1;
+            }
+            self.cursor_row = target;
+        } else {
+            // Find first occupied cell upward
+            let mut target = self.cursor_row - 1;
+            while target > 0 && !Self::is_cell_occupied(table, target, self.cursor_col) {
+                target -= 1;
+            }
+            self.cursor_row = target;
+        }
+        self.scroll_to_cursor();
+    }
+
+    pub fn jump_down(&mut self, table: &Table) {
+        let max_row = table.row_count().saturating_sub(1);
+        if self.cursor_row >= max_row {
+            return;
+        }
+
+        let current_occupied = Self::is_cell_occupied(table, self.cursor_row, self.cursor_col);
+
+        if current_occupied {
+            // Find last occupied cell before hitting empty or edge
+            let mut target = self.cursor_row + 1;
+            // First skip any empty cells
+            while target < max_row && !Self::is_cell_occupied(table, target, self.cursor_col) {
+                target += 1;
+            }
+            // Then find the end of the occupied region
+            while target < max_row && Self::is_cell_occupied(table, target + 1, self.cursor_col) {
+                target += 1;
+            }
+            self.cursor_row = target;
+        } else {
+            // Find first occupied cell downward
+            let mut target = self.cursor_row + 1;
+            while target < max_row && !Self::is_cell_occupied(table, target, self.cursor_col) {
+                target += 1;
+            }
+            self.cursor_row = target;
+        }
+        self.scroll_to_cursor();
+    }
+
     pub fn goto_row(&mut self, row: usize, table: &Table) {
         self.cursor_row = row.min(table.row_count().saturating_sub(1));
         self.scroll_to_cursor();
@@ -617,7 +846,7 @@ impl TableView {
     }
 
     pub fn yank_row(&self, table: &Table) -> Option<Vec<String>> {
-        table.get_row(self.cursor_row)
+        table.get_row_cloned(self.cursor_row)
     }
 
     pub fn paste_row(&mut self, table: &mut Table, row: Vec<String>) {
@@ -639,7 +868,7 @@ impl TableView {
     }
 
     pub fn yank_col(&self, table: &Table) -> Option<Vec<String>> {
-        table.get_col(self.cursor_col)
+        table.get_col_cloned(self.cursor_col)
     }
 
     pub fn paste_col(&mut self, table: &mut Table, col: Vec<String>) {
@@ -757,11 +986,11 @@ mod tests {
     use super::*;
 
     fn make_table(data: Vec<Vec<&str>>) -> Table {
-        Table {
-            cells: data.into_iter()
+        Table::new(
+            data.into_iter()
                 .map(|row| row.into_iter().map(|s| s.to_string()).collect())
-                .collect(),
-        }
+                .collect()
+        )
     }
 
     // === Table basic operations ===
@@ -894,8 +1123,8 @@ mod tests {
             vec!["c", "d"],
         ]);
 
-        assert_eq!(table.get_row(0), Some(vec!["a".to_string(), "b".to_string()]));
-        assert_eq!(table.get_row(1), Some(vec!["c".to_string(), "d".to_string()]));
+        assert_eq!(table.get_row(0).map(|r| r.to_vec()), Some(vec!["a".to_string(), "b".to_string()]));
+        assert_eq!(table.get_row(1).map(|r| r.to_vec()), Some(vec!["c".to_string(), "d".to_string()]));
         assert_eq!(table.get_row(2), None);
     }
 
@@ -966,9 +1195,9 @@ mod tests {
             vec!["c", "d"],
         ]);
 
-        assert_eq!(table.get_col(0), Some(vec!["a".to_string(), "c".to_string()]));
-        assert_eq!(table.get_col(1), Some(vec!["b".to_string(), "d".to_string()]));
-        assert_eq!(table.get_col(2), None);
+        assert_eq!(table.get_col_cloned(0), Some(vec!["a".to_string(), "c".to_string()]));
+        assert_eq!(table.get_col_cloned(1), Some(vec!["b".to_string(), "d".to_string()]));
+        assert_eq!(table.get_col_cloned(2), None);
     }
 
     // === Span operations ===

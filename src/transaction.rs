@@ -177,17 +177,15 @@ mod tests {
     use super::*;
 
     fn make_table(rows: usize, cols: usize) -> Table {
-        Table {
-            cells: vec![vec![String::new(); cols]; rows],
-        }
+        Table::new(vec![vec![String::new(); cols]; rows])
     }
 
     fn make_table_with_data(data: Vec<Vec<&str>>) -> Table {
-        Table {
-            cells: data.into_iter()
+        Table::new(
+            data.into_iter()
                 .map(|row| row.into_iter().map(|s| s.to_string()).collect())
-                .collect(),
-        }
+                .collect()
+        )
     }
 
     // === SetCell tests ===
