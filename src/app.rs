@@ -25,6 +25,7 @@ pub struct App {
     pub mode: Mode,
     pub command_buffer: String,
     pub edit_buffer: String,
+    pub edit_cursor: usize,
     pub file_io: FileIO,
     pub dirty: bool,
     pub has_selection: bool,
@@ -53,6 +54,7 @@ impl App {
             mode: Mode::Normal,
             command_buffer: String::new(),
             edit_buffer: String::new(),
+            edit_cursor: 0,
             file_io: file_io,
             dirty: false,
             has_selection: false,
@@ -400,6 +402,7 @@ impl App {
             KeyCode::Char('i') => {
                 self.mode = Mode::Insert;
                 self.edit_buffer = self.view.current_cell(&self.table).clone();
+                self.edit_cursor = self.edit_buffer.len();
             }
             KeyCode::Char('V') => {
                 self.mode = Mode::VisualRow;
@@ -657,8 +660,25 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Backspace => { self.edit_buffer.pop(); }
-            KeyCode::Char(c) => { self.edit_buffer.push(c); }
+            KeyCode::Backspace => { 
+                //self.edit_buffer.pop(); 
+                if self.edit_cursor > 0 {
+                    self.edit_cursor -= 1;
+                    self.edit_buffer.remove(self.edit_cursor);
+                }
+            }
+            KeyCode::Char(c) => { 
+                self.edit_buffer.insert(self.edit_cursor, c);
+                self.edit_cursor += 1;
+            }
+            KeyCode::Left => { 
+                if self.edit_cursor > 0 {
+                    self.edit_cursor  -= 1;
+                }
+            }
+            KeyCode::Right => { 
+                self.edit_cursor = cmp::min(self.edit_cursor+1, self.edit_buffer.len());
+            }
             KeyCode::Enter => {
                 let old_value = self.view.current_cell(&self.table).clone();
                 let txn = Transaction::SetCell {

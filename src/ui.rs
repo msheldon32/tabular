@@ -132,9 +132,20 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
                 };
 
                 let display_content = if is_cursor && app.mode == Mode::Insert {
-                    format!("{}_", &app.edit_buffer)
+                    let mut buf = app.edit_buffer.clone();
+                    if app.edit_cursor == buf.len() {
+                        buf.push(' ');
+                    }
+                    //buf.to_string()
+                    //
+                    let spans = vec![
+                        Span::raw(buf[..app.edit_cursor].to_string()),
+                        Span::styled(buf[app.edit_cursor..app.edit_cursor+1].to_string(), Style::default().add_modifier(Modifier::UNDERLINED)),
+                        Span::raw(buf[app.edit_cursor+1..].to_string())
+                    ];
+                    Line::from(spans)
                 } else {
-                    content.to_string()
+                    Line::from(vec![Span::raw(content.to_string())])
                 };
 
                 cells.push(Cell::from(display_content).style(style));

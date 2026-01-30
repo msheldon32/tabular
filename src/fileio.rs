@@ -22,6 +22,7 @@ impl FileIO {
             .delimiter(delim)
             .has_headers(false)
             .flexible(true)
+            .trim(csv::Trim::Fields)
             .from_reader(reader);
 
         let mut cells: Vec<Vec<String>> = Vec::new();
@@ -37,10 +38,10 @@ impl FileIO {
         }
 
         // find the maximum length and pad
-        let max_len = cells.iter().map(|x| x.len()).max();
+        let max_len = cells.iter().map(|x| x.len()).max().unwrap_or(0);
 
         for row in cells.iter_mut() {
-            row.resize(max_len.unwrap_or(0), String::new());
+            row.resize(max_len, String::new());
         }
 
         Ok(Table::new(cells))
