@@ -295,4 +295,46 @@ mod tests {
             panic!("Expected SetSpan transaction");
         }
     }
+
+    #[test]
+    fn test_paste_span_extends_table() {
+        let mut clipboard = Clipboard::new();
+        clipboard.yank_span(vec![
+            vec!["1".to_string(), "2".to_string(), "3".to_string()],
+            vec!["4".to_string(), "5".to_string(), "6".to_string()],
+            vec!["7".to_string(), "8".to_string(), "9".to_string()],
+        ]);
+
+        // Small 2x2 table
+        let table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        // Paste at position that will extend beyond table
+        let (msg, txn) = clipboard.paste_as_transaction(1, 1, &table);
+
+        assert_eq!(msg, "Span pasted");
+        assert!(txn.is_some());
+
+        let txn = txn.unwrap();
+        let mut table = table;
+        txn.apply(&mut table);
+
+        // Table should now be expanded
+        assert!(table.row_count() >= 4); // rows 1,2,3 + original
+        assert!(table.col_count() >= 4); // cols 1,2,3 + original
+
+        // Check pasted values
+        assert_eq!(table.cells[1][1], "1");
+        assert_eq!(table.cells[1][2], "2");
+        assert_eq!(table.cells[1][3], "3");
+        assert_eq!(table.cells[2][1], "4");
+        assert_eq!(table.cells[3][3], "9");
+
+        // Original values preserved where not overwritten
+        assert_eq!(table.cells[0][0], "a");
+        assert_eq!(table.cells[0][1], "b");
+        assert_eq!(table.cells[1][0], "c");
+    }
 }

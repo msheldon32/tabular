@@ -58,6 +58,11 @@ impl Transaction {
                 table.delete_col_at(*idx);
             }
             Transaction::SetSpan { row, col, new_data, .. } => {
+                // Ensure table is large enough for the span
+                let needed_rows = row + new_data.len();
+                let needed_cols = col + new_data.first().map(|r| r.len()).unwrap_or(0);
+                table.ensure_size(needed_rows, needed_cols);
+
                 for (dr, row_data) in new_data.iter().enumerate() {
                     for (dc, value) in row_data.iter().enumerate() {
                         table.set_cell(row + dr, col + dc, value.clone());

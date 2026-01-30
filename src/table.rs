@@ -146,12 +146,32 @@ impl Table {
         for row_iter in start_row..=end_row {
             let mut row = Vec::new();
             for col_iter in start_col..=end_col {
-                row.push(self.cells[row_iter][col_iter].clone());
+                // Return empty string for out-of-bounds cells
+                let value = self.cells
+                    .get(row_iter)
+                    .and_then(|r| r.get(col_iter))
+                    .cloned()
+                    .unwrap_or_default();
+                row.push(value);
             }
             out_vec.push(row);
         }
 
         Some(out_vec)
+    }
+
+    /// Ensure the table has at least the specified dimensions
+    pub fn ensure_size(&mut self, rows: usize, cols: usize) {
+        // Add rows if needed
+        while self.cells.len() < rows {
+            self.cells.push(vec![String::new(); self.col_count().max(cols)]);
+        }
+        // Add columns if needed
+        for row in &mut self.cells {
+            while row.len() < cols {
+                row.push(String::new());
+            }
+        }
     }
 
     pub fn insert_row_with_data(&mut self, idx: usize, mut row: Vec<String>) {
@@ -829,6 +849,42 @@ mod tests {
             vec!["a".to_string(), "b".to_string()],
             vec!["c".to_string(), "d".to_string()],
         ]);
+    }
+
+    #[test]
+    fn test_get_span_out_of_bounds() {
+        let table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        // Request span that extends beyond table bounds
+        let span = table.get_span(0, 3, 0, 3).unwrap();
+        assert_eq!(span.len(), 4); // 4 rows requested
+        assert_eq!(span[0].len(), 4); // 4 cols requested
+        // Valid cells have values, out of bounds are empty
+        assert_eq!(span[0][0], "a");
+        assert_eq!(span[0][1], "b");
+        assert_eq!(span[0][2], ""); // out of bounds
+        assert_eq!(span[2][0], ""); // out of bounds
+    }
+
+    #[test]
+    fn test_ensure_size() {
+        let mut table = make_table(vec![
+            vec!["a", "b"],
+        ]);
+
+        assert_eq!(table.row_count(), 1);
+        assert_eq!(table.col_count(), 2);
+
+        table.ensure_size(3, 4);
+
+        assert_eq!(table.row_count(), 3);
+        assert_eq!(table.col_count(), 4);
+        assert_eq!(table.cells[0][0], "a");
+        assert_eq!(table.cells[0][3], "");
+        assert_eq!(table.cells[2][0], "");
     }
 
     // === Insert with data ===
