@@ -1,8 +1,78 @@
 use std::collections::{HashMap, HashSet};
 use regex::Regex;
+use rand::Rng;
 
 use crate::table::Table;
 use crate::util::{CellRef, parse_cell_ref, parse_range, parse_row_range, parse_col_range, CalcError};
+
+/// Find a function call in the expression, returning (start, end, arguments)
+/// This properly handles nested parentheses.
+fn find_function_call(expr: &str, func_name: &str) -> Option<(usize, usize, Vec<String>)> {
+    let upper = expr.to_uppercase();
+    let pattern = format!("{}(", func_name.to_uppercase());
+
+    let start = upper.find(&pattern)?;
+    let paren_start = start + func_name.len();
+
+    // Find matching closing parenthesis
+    // Start AFTER the opening paren, so we don't count it in depth
+    let mut depth = 0;
+    let mut end = None;
+    let chars: Vec<char> = expr.chars().collect();
+
+    for (i, &ch) in chars.iter().enumerate().skip(paren_start + 1) {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                if depth == 0 {
+                    end = Some(i);
+                    break;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+
+    let end = end?;
+    let args_str = &expr[paren_start + 1..end];
+
+    // Split arguments by comma, but respect nested parentheses
+    let args = split_args(args_str);
+
+    Some((start, end + 1, args))
+}
+
+/// Split function arguments by comma, respecting nested parentheses
+fn split_args(args_str: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+
+    for ch in args_str.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                args.push(current.trim().to_string());
+                current = String::new();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.trim().is_empty() {
+        args.push(current.trim().to_string());
+    }
+
+    args
+}
 
 impl std::fmt::Display for CalcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -256,14 +326,15 @@ impl<'a> Calculator<'a> {
     }
 
     /// Helper to apply a single-argument function
-    fn apply_func_single(&self, result: &mut String, pattern: &str, func: fn(f64) -> f64, results: &HashMap<CellRef, f64>) -> Result<(), CalcError> {
-        let re = Regex::new(pattern).unwrap();
-        while let Some(caps) = re.captures(result) {
-            let full_match = caps.get(0).unwrap();
-            let arg_str = caps.get(1).unwrap().as_str();
+    fn apply_func_single(&self, result: &mut String, func_name: &str, func: fn(f64) -> f64, results: &HashMap<CellRef, f64>) -> Result<(), CalcError> {
+        while let Some((start, end, args)) = find_function_call(result, func_name) {
+            if args.len() != 1 {
+                return Err(CalcError::EvalError(format!("{} requires 1 argument", func_name)));
+            }
 
-            // Try to evaluate the argument (could be a cell ref or expression)
-            let arg_expr = self.substitute_cell_refs(arg_str, results)?;
+            // Recursively expand any nested functions in the argument
+            let arg_expanded = self.expand_functions(&args[0], results)?;
+            let arg_expr = self.substitute_cell_refs(&arg_expanded, results)?;
             let arg_val = evalexpr::eval(&arg_expr)
                 .map_err(|e| CalcError::EvalError(e.to_string()))?
                 .as_float()
@@ -273,24 +344,27 @@ impl<'a> Calculator<'a> {
             let output = func(arg_val);
             *result = format!(
                 "{}{}{}",
-                &result[..full_match.start()],
+                &result[..start],
                 output,
-                &result[full_match.end()..]
+                &result[end..]
             );
         }
         Ok(())
     }
 
     /// Helper to apply a two-argument function
-    fn apply_func_double(&self, result: &mut String, pattern: &str, func: fn(f64, f64) -> f64, results: &HashMap<CellRef, f64>) -> Result<(), CalcError> {
-        let re = Regex::new(pattern).unwrap();
-        while let Some(caps) = re.captures(result) {
-            let full_match = caps.get(0).unwrap();
-            let arg1_str = caps.get(1).unwrap().as_str();
-            let arg2_str = caps.get(2).unwrap().as_str();
+    fn apply_func_double(&self, result: &mut String, func_name: &str, func: fn(f64, f64) -> f64, results: &HashMap<CellRef, f64>) -> Result<(), CalcError> {
+        while let Some((start, end, args)) = find_function_call(result, func_name) {
+            if args.len() != 2 {
+                return Err(CalcError::EvalError(format!("{} requires 2 arguments", func_name)));
+            }
 
-            let arg1_expr = self.substitute_cell_refs(arg1_str, results)?;
-            let arg2_expr = self.substitute_cell_refs(arg2_str, results)?;
+            // Recursively expand any nested functions in arguments
+            let arg1_expanded = self.expand_functions(&args[0], results)?;
+            let arg2_expanded = self.expand_functions(&args[1], results)?;
+
+            let arg1_expr = self.substitute_cell_refs(&arg1_expanded, results)?;
+            let arg2_expr = self.substitute_cell_refs(&arg2_expanded, results)?;
 
             let arg1 = evalexpr::eval(&arg1_expr)
                 .map_err(|e| CalcError::EvalError(e.to_string()))?
@@ -306,27 +380,29 @@ impl<'a> Calculator<'a> {
             let output = func(arg1, arg2);
             *result = format!(
                 "{}{}{}",
-                &result[..full_match.start()],
+                &result[..start],
                 output,
-                &result[full_match.end()..]
+                &result[end..]
             );
         }
         Ok(())
     }
 
     /// Helper to apply an aggregate function on a range
-    fn apply_aggregate(&self, result: &mut String, pattern: &str, func: fn(&[f64]) -> f64, results: &HashMap<CellRef, f64>) -> Result<(), CalcError> {
-        let re = Regex::new(pattern).unwrap();
-        while let Some(caps) = re.captures(result) {
-            let full_match = caps.get(0).unwrap();
-            let range = caps.get(1).unwrap().as_str();
+    fn apply_aggregate(&self, result: &mut String, func_name: &str, func: fn(&[f64]) -> f64, results: &HashMap<CellRef, f64>) -> Result<(), CalcError> {
+        while let Some((start, end, args)) = find_function_call(result, func_name) {
+            if args.len() != 1 {
+                return Err(CalcError::EvalError(format!("{} requires 1 argument (a range)", func_name)));
+            }
+
+            let range = &args[0];
             let values = self.get_range_values(range, results)?;
             let output = func(&values);
             *result = format!(
                 "{}{}{}",
-                &result[..full_match.start()],
+                &result[..start],
                 output,
-                &result[full_match.end()..]
+                &result[end..]
             );
         }
         Ok(())
@@ -339,33 +415,36 @@ impl<'a> Calculator<'a> {
         // === Aggregate functions (take ranges) ===
 
         // SUM
-        self.apply_aggregate(&mut result, r"(?i)SUM\(([^)]+)\)", |vals| vals.iter().sum(), results)?;
+        self.apply_aggregate(&mut result, "SUM", |vals| vals.iter().sum(), results)?;
 
         // AVG / AVERAGE
-        self.apply_aggregate(&mut result, r"(?i)(?:AVG|AVERAGE)\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "AVG", |vals| {
+            if vals.is_empty() { 0.0 } else { vals.iter().sum::<f64>() / vals.len() as f64 }
+        }, results)?;
+        self.apply_aggregate(&mut result, "AVERAGE", |vals| {
             if vals.is_empty() { 0.0 } else { vals.iter().sum::<f64>() / vals.len() as f64 }
         }, results)?;
 
         // MIN
-        self.apply_aggregate(&mut result, r"(?i)MIN\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "MIN", |vals| {
             vals.iter().cloned().fold(f64::INFINITY, f64::min)
         }, results)?;
 
         // MAX
-        self.apply_aggregate(&mut result, r"(?i)MAX\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "MAX", |vals| {
             vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
         }, results)?;
 
         // COUNT
-        self.apply_aggregate(&mut result, r"(?i)COUNT\(([^)]+)\)", |vals| vals.len() as f64, results)?;
+        self.apply_aggregate(&mut result, "COUNT", |vals| vals.len() as f64, results)?;
 
         // PRODUCT
-        self.apply_aggregate(&mut result, r"(?i)PRODUCT\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "PRODUCT", |vals| {
             vals.iter().product()
         }, results)?;
 
         // MEDIAN
-        self.apply_aggregate(&mut result, r"(?i)MEDIAN\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "MEDIAN", |vals| {
             if vals.is_empty() { return f64::NAN; }
             let mut sorted = vals.to_vec();
             sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -378,7 +457,7 @@ impl<'a> Calculator<'a> {
         }, results)?;
 
         // MODE (returns first mode if multiple)
-        self.apply_aggregate(&mut result, r"(?i)MODE\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "MODE", |vals| {
             if vals.is_empty() { return f64::NAN; }
             let mut counts: HashMap<i64, usize> = HashMap::new();
             for &v in vals {
@@ -390,7 +469,7 @@ impl<'a> Calculator<'a> {
         }, results)?;
 
         // STDEV (sample standard deviation)
-        self.apply_aggregate(&mut result, r"(?i)STDEV\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "STDEV", |vals| {
             if vals.len() < 2 { return f64::NAN; }
             let mean = vals.iter().sum::<f64>() / vals.len() as f64;
             let variance = vals.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (vals.len() - 1) as f64;
@@ -398,7 +477,7 @@ impl<'a> Calculator<'a> {
         }, results)?;
 
         // STDEVP (population standard deviation)
-        self.apply_aggregate(&mut result, r"(?i)STDEVP\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "STDEVP", |vals| {
             if vals.is_empty() { return f64::NAN; }
             let mean = vals.iter().sum::<f64>() / vals.len() as f64;
             let variance = vals.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / vals.len() as f64;
@@ -406,21 +485,21 @@ impl<'a> Calculator<'a> {
         }, results)?;
 
         // VAR (sample variance)
-        self.apply_aggregate(&mut result, r"(?i)VAR\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "VAR", |vals| {
             if vals.len() < 2 { return f64::NAN; }
             let mean = vals.iter().sum::<f64>() / vals.len() as f64;
             vals.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (vals.len() - 1) as f64
         }, results)?;
 
         // VARP (population variance)
-        self.apply_aggregate(&mut result, r"(?i)VARP\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "VARP", |vals| {
             if vals.is_empty() { return f64::NAN; }
             let mean = vals.iter().sum::<f64>() / vals.len() as f64;
             vals.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / vals.len() as f64
         }, results)?;
 
         // GEOMEAN (geometric mean)
-        self.apply_aggregate(&mut result, r"(?i)GEOMEAN\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "GEOMEAN", |vals| {
             if vals.is_empty() { return f64::NAN; }
             let product: f64 = vals.iter().product();
             if product < 0.0 { return f64::NAN; }
@@ -428,33 +507,33 @@ impl<'a> Calculator<'a> {
         }, results)?;
 
         // HARMEAN (harmonic mean)
-        self.apply_aggregate(&mut result, r"(?i)HARMEAN\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "HARMEAN", |vals| {
             if vals.is_empty() { return f64::NAN; }
             let sum_recip: f64 = vals.iter().map(|x| 1.0 / x).sum();
             vals.len() as f64 / sum_recip
         }, results)?;
 
         // SUMSQ (sum of squares)
-        self.apply_aggregate(&mut result, r"(?i)SUMSQ\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "SUMSQ", |vals| {
             vals.iter().map(|x| x * x).sum()
         }, results)?;
 
         // AVEDEV (average absolute deviation)
-        self.apply_aggregate(&mut result, r"(?i)AVEDEV\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "AVEDEV", |vals| {
             if vals.is_empty() { return f64::NAN; }
             let mean = vals.iter().sum::<f64>() / vals.len() as f64;
             vals.iter().map(|x| (x - mean).abs()).sum::<f64>() / vals.len() as f64
         }, results)?;
 
         // DEVSQ (sum of squared deviations from mean)
-        self.apply_aggregate(&mut result, r"(?i)DEVSQ\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "DEVSQ", |vals| {
             if vals.is_empty() { return 0.0; }
             let mean = vals.iter().sum::<f64>() / vals.len() as f64;
             vals.iter().map(|x| (x - mean).powi(2)).sum()
         }, results)?;
 
         // KURT (kurtosis)
-        self.apply_aggregate(&mut result, r"(?i)KURT\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "KURT", |vals| {
             let n = vals.len() as f64;
             if n < 4.0 { return f64::NAN; }
             let mean = vals.iter().sum::<f64>() / n;
@@ -466,7 +545,7 @@ impl<'a> Calculator<'a> {
         }, results)?;
 
         // SKEW (skewness)
-        self.apply_aggregate(&mut result, r"(?i)SKEW\(([^)]+)\)", |vals| {
+        self.apply_aggregate(&mut result, "SKEW", |vals| {
             let n = vals.len() as f64;
             if n < 3.0 { return f64::NAN; }
             let mean = vals.iter().sum::<f64>() / n;
@@ -480,13 +559,12 @@ impl<'a> Calculator<'a> {
         // === Two-range functions ===
 
         // CORREL (Pearson correlation)
-        let correl_re = Regex::new(r"(?i)CORREL\(([^,]+),([^)]+)\)").unwrap();
-        while let Some(caps) = correl_re.captures(&result) {
-            let full_match = caps.get(0).unwrap();
-            let range1 = caps.get(1).unwrap().as_str().trim();
-            let range2 = caps.get(2).unwrap().as_str().trim();
-            let vals1 = self.get_range_values(range1, results)?;
-            let vals2 = self.get_range_values(range2, results)?;
+        while let Some((start, end, args)) = find_function_call(&result, "CORREL") {
+            if args.len() != 2 {
+                return Err(CalcError::EvalError("CORREL requires 2 arguments".to_string()));
+            }
+            let vals1 = self.get_range_values(&args[0], results)?;
+            let vals2 = self.get_range_values(&args[1], results)?;
 
             let corr = if vals1.len() != vals2.len() || vals1.is_empty() {
                 f64::NAN
@@ -502,17 +580,16 @@ impl<'a> Calculator<'a> {
                 if std1 == 0.0 || std2 == 0.0 { f64::NAN } else { cov / (std1 * std2) }
             };
 
-            result = format!("{}{}{}", &result[..full_match.start()], corr, &result[full_match.end()..]);
+            result = format!("{}{}{}", &result[..start], corr, &result[end..]);
         }
 
         // COVAR (covariance - population)
-        let covar_re = Regex::new(r"(?i)COVAR\(([^,]+),([^)]+)\)").unwrap();
-        while let Some(caps) = covar_re.captures(&result) {
-            let full_match = caps.get(0).unwrap();
-            let range1 = caps.get(1).unwrap().as_str().trim();
-            let range2 = caps.get(2).unwrap().as_str().trim();
-            let vals1 = self.get_range_values(range1, results)?;
-            let vals2 = self.get_range_values(range2, results)?;
+        while let Some((start, end, args)) = find_function_call(&result, "COVAR") {
+            if args.len() != 2 {
+                return Err(CalcError::EvalError("COVAR requires 2 arguments".to_string()));
+            }
+            let vals1 = self.get_range_values(&args[0], results)?;
+            let vals2 = self.get_range_values(&args[1], results)?;
 
             let cov = if vals1.len() != vals2.len() || vals1.is_empty() {
                 f64::NAN
@@ -525,18 +602,20 @@ impl<'a> Calculator<'a> {
                     .sum::<f64>() / n
             };
 
-            result = format!("{}{}{}", &result[..full_match.start()], cov, &result[full_match.end()..]);
+            result = format!("{}{}{}", &result[..start], cov, &result[end..]);
         }
 
         // PERCENTILE
-        let percentile_re = Regex::new(r"(?i)PERCENTILE\(([^,]+),([^)]+)\)").unwrap();
-        while let Some(caps) = percentile_re.captures(&result) {
-            let full_match = caps.get(0).unwrap();
-            let range = caps.get(1).unwrap().as_str().trim();
-            let k_str = caps.get(2).unwrap().as_str().trim();
+        while let Some((start, end, args)) = find_function_call(&result, "PERCENTILE") {
+            if args.len() != 2 {
+                return Err(CalcError::EvalError("PERCENTILE requires 2 arguments".to_string()));
+            }
+            let range = &args[0];
+            let k_str = &args[1];
 
             let vals = self.get_range_values(range, results)?;
-            let k_expr = self.substitute_cell_refs(k_str, results)?;
+            let k_expanded = self.expand_functions(k_str, results)?;
+            let k_expr = self.substitute_cell_refs(&k_expanded, results)?;
             let k = evalexpr::eval(&k_expr)
                 .map_err(|e| CalcError::EvalError(e.to_string()))?
                 .as_float()
@@ -558,18 +637,20 @@ impl<'a> Calculator<'a> {
                 }
             };
 
-            result = format!("{}{}{}", &result[..full_match.start()], pct, &result[full_match.end()..]);
+            result = format!("{}{}{}", &result[..start], pct, &result[end..]);
         }
 
         // QUARTILE
-        let quartile_re = Regex::new(r"(?i)QUARTILE\(([^,]+),([^)]+)\)").unwrap();
-        while let Some(caps) = quartile_re.captures(&result) {
-            let full_match = caps.get(0).unwrap();
-            let range = caps.get(1).unwrap().as_str().trim();
-            let q_str = caps.get(2).unwrap().as_str().trim();
+        while let Some((start, end, args)) = find_function_call(&result, "QUARTILE") {
+            if args.len() != 2 {
+                return Err(CalcError::EvalError("QUARTILE requires 2 arguments".to_string()));
+            }
+            let range = &args[0];
+            let q_str = &args[1];
 
             let vals = self.get_range_values(range, results)?;
-            let q_expr = self.substitute_cell_refs(q_str, results)?;
+            let q_expanded = self.expand_functions(q_str, results)?;
+            let q_expr = self.substitute_cell_refs(&q_expanded, results)?;
             let q = evalexpr::eval(&q_expr)
                 .map_err(|e| CalcError::EvalError(e.to_string()))?
                 .as_int()
@@ -591,51 +672,51 @@ impl<'a> Calculator<'a> {
                 }
             };
 
-            result = format!("{}{}{}", &result[..full_match.start()], pct, &result[full_match.end()..]);
+            result = format!("{}{}{}", &result[..start], pct, &result[end..]);
         }
 
         // === Math functions (single argument) ===
 
-        self.apply_func_single(&mut result, r"(?i)ABS\(([^)]+)\)", |x| x.abs(), results)?;
-        self.apply_func_single(&mut result, r"(?i)SQRT\(([^)]+)\)", |x| x.sqrt(), results)?;
-        self.apply_func_single(&mut result, r"(?i)EXP\(([^)]+)\)", |x| x.exp(), results)?;
-        self.apply_func_single(&mut result, r"(?i)LN\(([^)]+)\)", |x| x.ln(), results)?;
-        self.apply_func_single(&mut result, r"(?i)LOG10\(([^)]+)\)", |x| x.log10(), results)?;
-        self.apply_func_single(&mut result, r"(?i)LOG2\(([^)]+)\)", |x| x.log2(), results)?;
-        self.apply_func_single(&mut result, r"(?i)SIN\(([^)]+)\)", |x| x.sin(), results)?;
-        self.apply_func_single(&mut result, r"(?i)COS\(([^)]+)\)", |x| x.cos(), results)?;
-        self.apply_func_single(&mut result, r"(?i)TAN\(([^)]+)\)", |x| x.tan(), results)?;
-        self.apply_func_single(&mut result, r"(?i)ASIN\(([^)]+)\)", |x| x.asin(), results)?;
-        self.apply_func_single(&mut result, r"(?i)ACOS\(([^)]+)\)", |x| x.acos(), results)?;
-        self.apply_func_single(&mut result, r"(?i)ATAN\(([^)]+)\)", |x| x.atan(), results)?;
-        self.apply_func_single(&mut result, r"(?i)SINH\(([^)]+)\)", |x| x.sinh(), results)?;
-        self.apply_func_single(&mut result, r"(?i)COSH\(([^)]+)\)", |x| x.cosh(), results)?;
-        self.apply_func_single(&mut result, r"(?i)TANH\(([^)]+)\)", |x| x.tanh(), results)?;
-        self.apply_func_single(&mut result, r"(?i)FLOOR\(([^)]+)\)", |x| x.floor(), results)?;
-        self.apply_func_single(&mut result, r"(?i)CEIL\(([^)]+)\)", |x| x.ceil(), results)?;
-        self.apply_func_single(&mut result, r"(?i)TRUNC\(([^)]+)\)", |x| x.trunc(), results)?;
-        self.apply_func_single(&mut result, r"(?i)SIGN\(([^)]+)\)", |x| {
+        self.apply_func_single(&mut result, "ABS", |x| x.abs(), results)?;
+        self.apply_func_single(&mut result, "SQRT", |x| x.sqrt(), results)?;
+        self.apply_func_single(&mut result, "EXP", |x| x.exp(), results)?;
+        self.apply_func_single(&mut result, "LN", |x| x.ln(), results)?;
+        self.apply_func_single(&mut result, "LOG10", |x| x.log10(), results)?;
+        self.apply_func_single(&mut result, "LOG2", |x| x.log2(), results)?;
+        self.apply_func_single(&mut result, "SIN", |x| x.sin(), results)?;
+        self.apply_func_single(&mut result, "COS", |x| x.cos(), results)?;
+        self.apply_func_single(&mut result, "TAN", |x| x.tan(), results)?;
+        self.apply_func_single(&mut result, "ASIN", |x| x.asin(), results)?;
+        self.apply_func_single(&mut result, "ACOS", |x| x.acos(), results)?;
+        self.apply_func_single(&mut result, "ATAN", |x| x.atan(), results)?;
+        self.apply_func_single(&mut result, "SINH", |x| x.sinh(), results)?;
+        self.apply_func_single(&mut result, "COSH", |x| x.cosh(), results)?;
+        self.apply_func_single(&mut result, "TANH", |x| x.tanh(), results)?;
+        self.apply_func_single(&mut result, "FLOOR", |x| x.floor(), results)?;
+        self.apply_func_single(&mut result, "CEIL", |x| x.ceil(), results)?;
+        self.apply_func_single(&mut result, "TRUNC", |x| x.trunc(), results)?;
+        self.apply_func_single(&mut result, "SIGN", |x| {
             if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { 0.0 }
         }, results)?;
-        self.apply_func_single(&mut result, r"(?i)FACT\(([^)]+)\)", |x| {
+        self.apply_func_single(&mut result, "FACT", |x| {
             let n = x as u64;
             (1..=n).product::<u64>() as f64
         }, results)?;
-        self.apply_func_single(&mut result, r"(?i)DEGREES\(([^)]+)\)", |x| x.to_degrees(), results)?;
-        self.apply_func_single(&mut result, r"(?i)RADIANS\(([^)]+)\)", |x| x.to_radians(), results)?;
+        self.apply_func_single(&mut result, "DEGREES", |x| x.to_degrees(), results)?;
+        self.apply_func_single(&mut result, "RADIANS", |x| x.to_radians(), results)?;
 
         // === Math functions (two arguments) ===
 
-        self.apply_func_double(&mut result, r"(?i)POW\(([^,]+),([^)]+)\)", |x, y| x.powf(y), results)?;
-        self.apply_func_double(&mut result, r"(?i)POWER\(([^,]+),([^)]+)\)", |x, y| x.powf(y), results)?;
-        self.apply_func_double(&mut result, r"(?i)MOD\(([^,]+),([^)]+)\)", |x, y| x % y, results)?;
-        self.apply_func_double(&mut result, r"(?i)LOG\(([^,]+),([^)]+)\)", |x, base| x.log(base), results)?;
-        self.apply_func_double(&mut result, r"(?i)ATAN2\(([^,]+),([^)]+)\)", |y, x| y.atan2(x), results)?;
-        self.apply_func_double(&mut result, r"(?i)ROUND\(([^,]+),([^)]+)\)", |x, digits| {
+        self.apply_func_double(&mut result, "POW", |x, y| x.powf(y), results)?;
+        self.apply_func_double(&mut result, "POWER", |x, y| x.powf(y), results)?;
+        self.apply_func_double(&mut result, "MOD", |x, y| x % y, results)?;
+        self.apply_func_double(&mut result, "LOG", |x, base| x.log(base), results)?;
+        self.apply_func_double(&mut result, "ATAN2", |y, x| y.atan2(x), results)?;
+        self.apply_func_double(&mut result, "ROUND", |x, digits| {
             let factor = 10f64.powi(digits as i32);
             (x * factor).round() / factor
         }, results)?;
-        self.apply_func_double(&mut result, r"(?i)COMBIN\(([^,]+),([^)]+)\)", |n, k| {
+        self.apply_func_double(&mut result, "COMBIN", |n, k| {
             // n choose k
             let n = n as u64;
             let k = k as u64;
@@ -643,14 +724,14 @@ impl<'a> Calculator<'a> {
             let k = k.min(n - k);
             (0..k).fold(1u64, |acc, i| acc * (n - i) / (i + 1)) as f64
         }, results)?;
-        self.apply_func_double(&mut result, r"(?i)PERMUT\(([^,]+),([^)]+)\)", |n, k| {
+        self.apply_func_double(&mut result, "PERMUT", |n, k| {
             // n permute k = n! / (n-k)!
             let n = n as u64;
             let k = k as u64;
             if k > n { return 0.0; }
             ((n - k + 1)..=n).product::<u64>() as f64
         }, results)?;
-        self.apply_func_double(&mut result, r"(?i)GCD\(([^,]+),([^)]+)\)", |a, b| {
+        self.apply_func_double(&mut result, "GCD", |a, b| {
             let mut a = a.abs() as u64;
             let mut b = b.abs() as u64;
             while b != 0 {
@@ -660,7 +741,7 @@ impl<'a> Calculator<'a> {
             }
             a as f64
         }, results)?;
-        self.apply_func_double(&mut result, r"(?i)LCM\(([^,]+),([^)]+)\)", |a, b| {
+        self.apply_func_double(&mut result, "LCM", |a, b| {
             let a = a.abs() as u64;
             let b = b.abs() as u64;
             if a == 0 || b == 0 { return 0.0; }
@@ -681,14 +762,11 @@ impl<'a> Calculator<'a> {
         let e_re = Regex::new(r"(?i)\bE\(\)").unwrap();
         result = e_re.replace_all(&result, std::f64::consts::E.to_string().as_str()).to_string();
 
-        // Simple RAND() - returns random number between 0 and 1
+        // RAND() - returns uniform random number in [0, 1)
         let rand_re = Regex::new(r"(?i)\bRAND\(\)").unwrap();
+        let mut rng = rand::thread_rng();
         while rand_re.is_match(&result) {
-            // Simple pseudo-random using system time
-            let rand_val = (std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .subsec_nanos() as f64) / 1_000_000_000.0;
+            let rand_val: f64 = rng.gen();
             result = rand_re.replace(&result, rand_val.to_string().as_str()).to_string();
         }
 
@@ -734,7 +812,7 @@ mod tests {
         let table = make_table(vec![
             vec!["10", "20", "=A1+B1"],
         ]);
-        let calc = Calculator::new(&table);
+        let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].2, "30");
@@ -747,7 +825,7 @@ mod tests {
             vec!["4", "5", "6"],
             vec!["=sum(A1:C2)"],
         ]);
-        let calc = Calculator::new(&table);
+        let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
         assert_eq!(results[0].2, "21");
     }
@@ -758,7 +836,7 @@ mod tests {
             vec!["10", "20", "30", "40"],
             vec!["=avg(A1:D1)"],
         ]);
-        let calc = Calculator::new(&table);
+        let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
         assert_eq!(results[0].2, "25");
     }
@@ -769,7 +847,7 @@ mod tests {
             vec!["2", "4", "4", "4", "5", "5", "7", "9"],
             vec!["=stdev(A1:H1)"],
         ]);
-        let calc = Calculator::new(&table);
+        let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
         // Sample std dev of [2,4,4,4,5,5,7,9] = 2.138...
         let val: f64 = results[0].2.parse().unwrap();
@@ -782,7 +860,7 @@ mod tests {
             vec!["1", "3", "5", "7", "9"],
             vec!["=median(A1:E1)"],
         ]);
-        let calc = Calculator::new(&table);
+        let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
         assert_eq!(results[0].2, "5");
     }
@@ -795,7 +873,7 @@ mod tests {
             vec!["3", "6"],
             vec!["=correl(A1:A3,B1:B3)"],
         ]);
-        let calc = Calculator::new(&table);
+        let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
         // Perfect positive correlation
         let val: f64 = results[0].2.parse().unwrap();
@@ -811,7 +889,7 @@ mod tests {
             vec!["=floor(3.7)"],
             vec!["=ceil(3.2)"],
         ]);
-        let calc = Calculator::new(&table);
+        let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
         assert_eq!(results.iter().find(|r| r.0 == 0).unwrap().2, "4");
         assert_eq!(results.iter().find(|r| r.0 == 1).unwrap().2, "5");
@@ -826,7 +904,7 @@ mod tests {
             vec!["=sin(0)"],
             vec!["=cos(0)"],
         ]);
-        let calc = Calculator::new(&table);
+        let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
         let sin_val: f64 = results.iter().find(|r| r.0 == 0).unwrap().2.parse().unwrap();
         let cos_val: f64 = results.iter().find(|r| r.0 == 1).unwrap().2.parse().unwrap();
@@ -840,7 +918,7 @@ mod tests {
             vec!["=PI()"],
             vec!["=E()"],
         ]);
-        let calc = Calculator::new(&table);
+        let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
         let pi_val: f64 = results.iter().find(|r| r.0 == 0).unwrap().2.parse().unwrap();
         let e_val: f64 = results.iter().find(|r| r.0 == 1).unwrap().2.parse().unwrap();
@@ -855,7 +933,7 @@ mod tests {
             vec!["=permut(5,2)"],  // 5 permute 2 = 20
             vec!["=fact(5)"],      // 5! = 120
         ]);
-        let calc = Calculator::new(&table);
+        let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
         assert_eq!(results.iter().find(|r| r.0 == 0).unwrap().2, "10");
         assert_eq!(results.iter().find(|r| r.0 == 1).unwrap().2, "20");
@@ -868,7 +946,7 @@ mod tests {
             vec!["=gcd(12,18)"],  // 6
             vec!["=lcm(12,18)"],  // 36
         ]);
-        let calc = Calculator::new(&table);
+        let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
         assert_eq!(results.iter().find(|r| r.0 == 0).unwrap().2, "6");
         assert_eq!(results.iter().find(|r| r.0 == 1).unwrap().2, "36");
@@ -880,8 +958,86 @@ mod tests {
             vec!["1", "2", "3", "4", "5"],
             vec!["=percentile(A1:E1,0.5)"],  // median = 3
         ]);
-        let calc = Calculator::new(&table);
+        let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
         assert_eq!(results[0].2, "3");
+    }
+
+    #[test]
+    fn test_nested_functions() {
+        let table = make_table(vec![
+            vec!["=sqrt(abs(-16))"],          // sqrt(16) = 4
+            vec!["=pow(sqrt(4),2)"],          // pow(2,2) = 4
+            vec!["=abs(floor(-3.7))"],        // abs(-4) = 4
+            vec!["=round(sqrt(2),2)"],        // round(1.414..., 2) = 1.41
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.0 == 0).unwrap().2, "4");
+        assert_eq!(results.iter().find(|r| r.0 == 1).unwrap().2, "4");
+        assert_eq!(results.iter().find(|r| r.0 == 2).unwrap().2, "4");
+        assert_eq!(results.iter().find(|r| r.0 == 3).unwrap().2, "1.41");
+    }
+
+    #[test]
+    fn test_deeply_nested_functions() {
+        let table = make_table(vec![
+            vec!["=sqrt(sqrt(sqrt(256)))"],   // sqrt(sqrt(sqrt(256))) = sqrt(sqrt(16)) = sqrt(4) = 2
+            vec!["=abs(abs(abs(-5)))"],       // 5
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.0 == 0).unwrap().2, "2");
+        assert_eq!(results.iter().find(|r| r.0 == 1).unwrap().2, "5");
+    }
+
+    #[test]
+    fn test_column_range_sum() {
+        // Test SUM(A:A), SUM(B:B), etc.
+        // Put formulas in column D to avoid circular refs
+        let table = make_table(vec![
+            vec!["1", "10", "100", "=sum(A:A)"],
+            vec!["2", "20", "200", "=sum(B:B)"],
+            vec!["3", "30", "300", "=sum(C:C)"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        // A:A = 1+2+3 = 6, B:B = 10+20+30 = 60, C:C = 100+200+300 = 600
+        assert_eq!(results.iter().find(|r| r.0 == 0 && r.1 == 3).unwrap().2, "6");
+        assert_eq!(results.iter().find(|r| r.0 == 1 && r.1 == 3).unwrap().2, "60");
+        assert_eq!(results.iter().find(|r| r.0 == 2 && r.1 == 3).unwrap().2, "600");
+    }
+
+    #[test]
+    fn test_row_range_sum_1indexed() {
+        // Test SUM(1:1), SUM(2:2), etc. - should be 1-indexed
+        // Put formulas in row 4 to avoid circular refs
+        let table = make_table(vec![
+            vec!["1", "2", "3"],       // Row 1 (index 0)
+            vec!["10", "20", "30"],    // Row 2 (index 1)
+            vec!["100", "200", "300"], // Row 3 (index 2)
+            vec!["=sum(1:1)", "=sum(2:2)", "=sum(3:3)"],  // Row 4 (index 3)
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        // Row 1 = 1+2+3 = 6, Row 2 = 10+20+30 = 60, Row 3 = 100+200+300 = 600
+        assert_eq!(results.iter().find(|r| r.0 == 3 && r.1 == 0).unwrap().2, "6");
+        assert_eq!(results.iter().find(|r| r.0 == 3 && r.1 == 1).unwrap().2, "60");
+        assert_eq!(results.iter().find(|r| r.0 == 3 && r.1 == 2).unwrap().2, "600");
+    }
+
+    #[test]
+    fn test_lowercase_column_range() {
+        // Test that lowercase column ranges work
+        // Put formulas in column C to avoid circular refs
+        let table = make_table(vec![
+            vec!["1", "10", "=sum(a:a)"],
+            vec!["2", "20", "=sum(b:b)"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        // A:A = 1+2 = 3, B:B = 10+20 = 30
+        assert_eq!(results.iter().find(|r| r.0 == 0 && r.1 == 2).unwrap().2, "3");
+        assert_eq!(results.iter().find(|r| r.0 == 1 && r.1 == 2).unwrap().2, "30");
     }
 }

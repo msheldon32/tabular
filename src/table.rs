@@ -761,7 +761,7 @@ mod tests {
 
     #[test]
     fn test_table_new() {
-        let table = Table::new();
+        let table = Table::new(vec![vec!["".to_string()]]);
         assert_eq!(table.row_count(), 1);
         assert_eq!(table.col_count(), 1);
         assert_eq!(table.cells[0][0], "");

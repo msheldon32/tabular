@@ -140,12 +140,15 @@ pub fn parse_cell_ref(s: &str) -> Option<CellRef> {
 
 /// Parse a range like "A1:A10" and return all cell refs
 pub fn parse_range(s: &str, row_count: usize, col_count: usize, skip_header: bool) -> Result<Vec<CellRef>, CalcError> {
-    // delegation
-    let row_range_re = Regex::new(r"\d+:\d+").unwrap();
-    let col_range_re = Regex::new(r"[A-Z]+:[A-Z]+").unwrap();
+    // Normalize to uppercase for matching
+    let upper = s.to_uppercase();
 
-    if (row_range_re.is_match(&s)) { return parse_row_range(s, col_count); }
-    if (col_range_re.is_match(&s)) { return parse_col_range(s, row_count, skip_header); }
+    // delegation
+    let row_range_re = Regex::new(r"^\d+:\d+$").unwrap();
+    let col_range_re = Regex::new(r"^[A-Z]+:[A-Z]+$").unwrap();
+
+    if row_range_re.is_match(&upper) { return parse_row_range(&upper, col_count); }
+    if col_range_re.is_match(&upper) { return parse_col_range(&upper, row_count, skip_header); }
 
     let parts: Vec<&str> = s.split(':').collect();
     if parts.len() != 2 {
@@ -172,22 +175,26 @@ pub fn parse_range(s: &str, row_count: usize, col_count: usize, skip_header: boo
     Ok(refs)
 }
 
-/// Parse a range of rows such as "1:10"
+/// Parse a range of rows such as "1:10" (1-indexed, so row 1 is internal index 0)
 pub fn parse_row_range(s: &str, col_count: usize) -> Result<Vec<CellRef>, CalcError> {
     let parts: Vec<&str> = s.split(':').collect();
     if parts.len() != 2 {
         return Err(CalcError::ParseError(format!("Invalid range: {}", s)));
     }
 
-    let row_start: usize = parts[0].parse()?;
-    let row_end: usize = parts[1].parse()?;
-    if row_start*row_end == 0 {
+    let row_start_1indexed: usize = parts[0].parse()?;
+    let row_end_1indexed: usize = parts[1].parse()?;
+    if row_start_1indexed == 0 || row_end_1indexed == 0 {
         return Err(CalcError::InvalidReference(s.to_string()));
     }
 
+    // Convert to 0-indexed
+    let row_start = row_start_1indexed - 1;
+    let row_end = row_end_1indexed - 1;
+
     let mut refs = Vec::new();
     let col_start = 0;
-    let col_end = col_count-1;
+    let col_end = col_count - 1;
 
     for row in row_start..=row_end {
         for col in col_start..=col_end {
@@ -205,22 +212,23 @@ pub fn parse_col_range(s: &str, row_count: usize, skip_header: bool) -> Result<V
         return Err(CalcError::ParseError(format!("Invalid range: {}", s)));
     }
 
-    let col_start: usize = col_from_letters(parts[0]);
-    let col_end: usize = col_from_letters(parts[1]);
-    if col_start*col_end == 0 {
+    // Validate that both parts are non-empty letter sequences
+    if parts[0].is_empty() || parts[1].is_empty() {
         return Err(CalcError::InvalidReference(s.to_string()));
     }
 
+    let col_start: usize = col_from_letters(parts[0]);
+    let col_end: usize = col_from_letters(parts[1]);
+
     let mut refs = Vec::new();
-    let row_start = if (skip_header) {
-        1
-    } else {
-        0
-    };
-    let row_end = row_count-1;
+    let row_start = if skip_header { 1 } else { 0 };
+    let row_end = row_count - 1;
+
+    let col_min = col_start.min(col_end);
+    let col_max = col_start.max(col_end);
 
     for row in row_start..=row_end {
-        for col in col_start..=col_end {
+        for col in col_min..=col_max {
             refs.push(CellRef { row, col });
         }
     }
@@ -344,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_parse_range_column() {
-        let refs = parse_range("A1:A3").unwrap();
+        let refs = parse_range("A1:A3", 100, 26, false).unwrap();
         assert_eq!(refs.len(), 3);
         assert_eq!(refs[0], CellRef { row: 0, col: 0 });
         assert_eq!(refs[1], CellRef { row: 1, col: 0 });
@@ -353,7 +361,7 @@ mod tests {
 
     #[test]
     fn test_parse_range_row() {
-        let refs = parse_range("A1:C1").unwrap();
+        let refs = parse_range("A1:C1", 100, 26, false).unwrap();
         assert_eq!(refs.len(), 3);
         assert_eq!(refs[0], CellRef { row: 0, col: 0 });
         assert_eq!(refs[1], CellRef { row: 0, col: 1 });
@@ -362,7 +370,7 @@ mod tests {
 
     #[test]
     fn test_parse_range_rectangular() {
-        let refs = parse_range("A1:B2").unwrap();
+        let refs = parse_range("A1:B2", 100, 26, false).unwrap();
         assert_eq!(refs.len(), 4);
         assert!(refs.contains(&CellRef { row: 0, col: 0 }));
         assert!(refs.contains(&CellRef { row: 0, col: 1 }));
@@ -373,23 +381,23 @@ mod tests {
     #[test]
     fn test_parse_range_reversed() {
         // Should work even if end comes before start
-        let refs = parse_range("B2:A1").unwrap();
+        let refs = parse_range("B2:A1", 100, 26, false).unwrap();
         assert_eq!(refs.len(), 4);
     }
 
     #[test]
     fn test_parse_range_single_cell() {
-        let refs = parse_range("A1:A1").unwrap();
+        let refs = parse_range("A1:A1", 100, 26, false).unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0], CellRef { row: 0, col: 0 });
     }
 
     #[test]
     fn test_parse_range_invalid() {
-        assert!(parse_range("A1").is_err());
-        assert!(parse_range("A1:").is_err());
-        assert!(parse_range(":A1").is_err());
-        assert!(parse_range("A1:B").is_err());
+        assert!(parse_range("A1", 100, 26, false).is_err());
+        assert!(parse_range("A1:", 100, 26, false).is_err());
+        assert!(parse_range(":A1", 100, 26, false).is_err());
+        assert!(parse_range("A1:B", 100, 26, false).is_err());
     }
 
     // === translate_references tests ===
