@@ -57,6 +57,11 @@ pub fn translate_references(s: &str, row_diff: isize, col_diff: isize) -> String
     let bytes = s.as_bytes();
     let mut out = String::with_capacity(s.len());
 
+    if s.chars().next() != Some('=') {
+        // for equations only
+        return String::from(s);
+    }
+
     let mut i = 0;
     while i < bytes.len() {
         // Look for a potential column start: ASCII letter
