@@ -27,7 +27,7 @@ tabular <file.csv>
 | `l` / `→` | Move right |
 | `gg` | Jump to first row |
 | `G` | Jump to last row |
-| `0` | Jump to first column |
+| `0` / '^' | Jump to first column |
 | `$` | Jump to last column |
 | `Ctrl+d` | Half page down |
 | `Ctrl+u` | Half page up |

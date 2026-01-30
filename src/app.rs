@@ -102,6 +102,9 @@ impl App {
             KeyCode::Char('0') => {
                 self.view.move_to_first_col();
             }
+            KeyCode::Char('^') => {
+                self.view.move_to_first_col();
+            }
             KeyCode::Char('$') => {
                 self.view.move_to_last_col(&self.table);
             }
