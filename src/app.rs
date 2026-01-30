@@ -1,3 +1,4 @@
+use std::cmp;
 use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -6,16 +7,18 @@ use crossterm::event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::calculator::Calculator;
+use crate::clipboard::Clipboard;
 use crate::command::Command;
 use crate::mode::Mode;
 use crate::table::{Table, TableView};
+use crate::transaction::{History, Transaction};
 use crate::ui;
-use crate::clipboard::Clipboard;
 
 pub struct App {
     pub table: Table,
     pub view: TableView,
     pub clipboard: Clipboard,
+    pub history: History,
     pub mode: Mode,
     pub command_buffer: String,
     pub edit_buffer: String,
@@ -38,12 +41,11 @@ impl App {
         let mut view = TableView::new();
         view.update_col_widths(&table);
 
-        let clipboard = Clipboard::new();
-
         Ok(Self {
             table,
             view,
-            clipboard,
+            clipboard: Clipboard::new(),
+            history: History::new(),
             mode: Mode::Normal,
             command_buffer: String::new(),
             edit_buffer: String::new(),
@@ -57,7 +59,6 @@ impl App {
     }
 
     pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
-        // Initial column width calculation
         self.view.update_col_widths(&self.table);
 
         while !self.should_quit {
@@ -73,53 +74,143 @@ impl App {
         Ok(())
     }
 
+    // === Transaction helpers ===
+
+    /// Execute a transaction, record it in history, and mark dirty
+    fn execute(&mut self, txn: Transaction) {
+        txn.apply(&mut self.table);
+        self.history.record(txn);
+        self.dirty = true;
+    }
+
+    /// Execute and return to normal mode
+    fn execute_and_finish(&mut self, txn: Transaction) {
+        self.execute(txn);
+        self.finish_edit();
+    }
+
+    /// Return to normal mode and update column widths
+    fn finish_edit(&mut self) {
+        self.mode = Mode::Normal;
+        self.view.update_col_widths(&self.table);
+    }
+
+    /// Check for escape key (Esc or Ctrl+[)
+    fn is_escape(key: KeyEvent) -> bool {
+        key.code == KeyCode::Esc
+            || (key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL))
+    }
+
+    // === Span helpers ===
+
+    fn selection_bounds(&self) -> (usize, usize, usize, usize) {
+        let start_row = cmp::min(self.view.cursor_row, self.view.support_row);
+        let end_row = cmp::max(self.view.cursor_row, self.view.support_row);
+        let start_col = cmp::min(self.view.cursor_col, self.view.support_col);
+        let end_col = cmp::max(self.view.cursor_col, self.view.support_col);
+        (start_row, end_row, start_col, end_col)
+    }
+
+    fn create_clear_span_txn(&self, start_row: usize, end_row: usize, start_col: usize, end_col: usize) -> Transaction {
+        let old_data = self.table.get_span(start_row, end_row, start_col, end_col)
+            .unwrap_or_default();
+        let new_data = vec![vec![String::new(); end_col - start_col + 1]; end_row - start_row + 1];
+        Transaction::SetSpan {
+            row: start_row,
+            col: start_col,
+            old_data,
+            new_data,
+        }
+    }
+
+    fn create_drag_down_txn(&self, whole_row: bool) -> Transaction {
+        let (start_row, end_row, mut start_col, mut end_col) = self.selection_bounds();
+        if whole_row {
+            start_col = 0;
+            end_col = self.table.col_count() - 1;
+        }
+
+        let old_data = self.table.get_span(start_row, end_row, start_col, end_col)
+            .unwrap_or_default();
+
+        let mut new_data = old_data.clone();
+        for row_idx in 1..new_data.len() {
+            for col_idx in 0..new_data[row_idx].len() {
+                new_data[row_idx][col_idx] = crate::util::translate_references(
+                    &new_data[0][col_idx],
+                    row_idx as isize,
+                    0,
+                );
+            }
+        }
+
+        Transaction::SetSpan {
+            row: start_row,
+            col: start_col,
+            old_data,
+            new_data,
+        }
+    }
+
+    fn create_drag_right_txn(&self, whole_col: bool) -> Transaction {
+        let (mut start_row, mut end_row, start_col, end_col) = self.selection_bounds();
+        if whole_col {
+            start_row = 0;
+            end_row = self.table.row_count() - 1;
+        }
+
+        let old_data = self.table.get_span(start_row, end_row, start_col, end_col)
+            .unwrap_or_default();
+
+        let mut new_data = old_data.clone();
+        for row_idx in 0..new_data.len() {
+            for col_idx in 1..new_data[row_idx].len() {
+                new_data[row_idx][col_idx] = crate::util::translate_references(
+                    &new_data[row_idx][0],
+                    0,
+                    col_idx as isize,
+                );
+            }
+        }
+
+        Transaction::SetSpan {
+            row: start_row,
+            col: start_col,
+            old_data,
+            new_data,
+        }
+    }
+
+    // === Key handling ===
+
     fn handle_key(&mut self, key: KeyEvent) {
         match self.mode {
             Mode::Normal => self.handle_normal_mode(key),
             Mode::Insert => self.handle_insert_mode(key),
             Mode::Command => self.handle_command_mode(key),
+            Mode::Visual => self.handle_visual_mode(key),
             Mode::VisualRow => self.handle_visual_row_mode(key),
             Mode::VisualCol => self.handle_visual_col_mode(key),
-            Mode::Visual => self.handle_visual_mode(key)
         }
     }
 
     fn handle_navigation(&mut self, key: KeyEvent) {
         if let Some(pending) = self.pending_key.take() {
-            match (pending, key.code) {
-                ('g', KeyCode::Char('g')) => {
-                    self.view.move_to_top();
-                }
-                _ => {
-                    // Invalid sequence, ignore
-                }
+            if pending == 'g' && key.code == KeyCode::Char('g') {
+                self.view.move_to_top();
+                return;
             }
         }
+
         match key.code {
-            // Navigation
             KeyCode::Char('h') | KeyCode::Left => self.view.move_left(),
             KeyCode::Char('j') | KeyCode::Down => self.view.move_down(&self.table),
             KeyCode::Char('k') | KeyCode::Up => self.view.move_up(),
             KeyCode::Char('l') | KeyCode::Right => self.view.move_right(&self.table),
-
-            // Jump navigation
-            KeyCode::Char('g') => {
-                self.pending_key = Some('g');
-            }
-            KeyCode::Char('G') => {
-                self.view.move_to_bottom(&self.table);
-            }
-            KeyCode::Char('0') => {
-                self.view.move_to_first_col();
-            }
-            KeyCode::Char('^') => {
-                self.view.move_to_first_col();
-            }
-            KeyCode::Char('$') => {
-                self.view.move_to_last_col(&self.table);
-            }
-
-            // Page navigation
+            KeyCode::Char('g') => self.pending_key = Some('g'),
+            KeyCode::Char('G') => self.view.move_to_bottom(&self.table),
+            KeyCode::Char('0') | KeyCode::Char('^') => self.view.move_to_first_col(),
+            KeyCode::Char('$') => self.view.move_to_last_col(&self.table),
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.view.half_page_down(&self.table);
             }
@@ -137,12 +228,8 @@ impl App {
     }
 
     fn handle_visual_mode(&mut self, key: KeyEvent) {
-        let is_escape = key.code == KeyCode::Esc
-            || (key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL));
-
-        if is_escape {
-            self.mode = Mode::Normal;
-            self.view.update_col_widths(&self.table);
+        if Self::is_escape(key) {
+            self.finish_edit();
             return;
         }
 
@@ -150,55 +237,31 @@ impl App {
 
         match key.code {
             KeyCode::Char('y') => {
-                if let Some(span) = self.view.yank_span(&mut self.table) {
-                    self.clipboard.yank_span(span)
+                if let Some(span) = self.view.yank_span(&self.table) {
+                    self.clipboard.yank_span(span);
                 }
-
-                self.mode = Mode::Normal;
-                self.view.update_col_widths(&mut self.table);
-                return;
+                self.finish_edit();
             }
-
             KeyCode::Char('x') => {
-                self.view.clear_span(&mut self.table);
-                self.dirty = true;
-
-                self.mode = Mode::Normal;
-                self.view.update_col_widths(&mut self.table);
-                return;
+                let (sr, er, sc, ec) = self.selection_bounds();
+                let txn = self.create_clear_span_txn(sr, er, sc, ec);
+                self.execute_and_finish(txn);
             }
-
-            // Dragging down (from top row)
             KeyCode::Char('q') => {
-                self.view.drag_down(&mut self.table, false);
-                self.dirty = true;
-
-                self.mode = Mode::Normal;
-                self.view.update_col_widths(&mut self.table);
-                return;
+                let txn = self.create_drag_down_txn(false);
+                self.execute_and_finish(txn);
             }
-
-            // Dragging right (from left column)
             KeyCode::Char('Q') => {
-                self.view.drag_right(&mut self.table, false);
-                self.dirty = true;
-
-                self.mode = Mode::Normal;
-                self.view.update_col_widths(&mut self.table);
-                return;
+                let txn = self.create_drag_right_txn(false);
+                self.execute_and_finish(txn);
             }
-
             _ => {}
         }
     }
 
     fn handle_visual_row_mode(&mut self, key: KeyEvent) {
-        let is_escape = key.code == KeyCode::Esc
-            || (key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL));
-
-        if is_escape {
-            self.mode = Mode::Normal;
-            self.view.update_col_widths(&self.table);
+        if Self::is_escape(key) {
+            self.finish_edit();
             return;
         }
 
@@ -206,45 +269,27 @@ impl App {
 
         match key.code {
             KeyCode::Char('y') => {
-                if let Some(span) = self.view.yank_row(&mut self.table) {
-                    self.clipboard.yank_row(span)
+                if let Some(row) = self.view.yank_row(&self.table) {
+                    self.clipboard.yank_row(row);
                 }
-
-                self.mode = Mode::Normal;
-                self.view.update_col_widths(&mut self.table);
-                return;
+                self.finish_edit();
             }
-
             KeyCode::Char('x') => {
-                self.view.clear_row_span(&mut self.table);
-                self.dirty = true;
-
-                self.mode = Mode::Normal;
-                self.view.update_col_widths(&mut self.table);
-                return;
+                let (sr, er, _, _) = self.selection_bounds();
+                let txn = self.create_clear_span_txn(sr, er, 0, self.table.col_count() - 1);
+                self.execute_and_finish(txn);
             }
-
-            // dragging down (from top row)
             KeyCode::Char('q') => {
-                self.view.drag_down(&mut self.table, true);
-                self.dirty = true;
-
-                self.mode = Mode::Normal;
-                self.view.update_col_widths(&mut self.table);
-                return;
+                let txn = self.create_drag_down_txn(true);
+                self.execute_and_finish(txn);
             }
-
             _ => {}
         }
     }
 
     fn handle_visual_col_mode(&mut self, key: KeyEvent) {
-        let is_escape = key.code == KeyCode::Esc
-            || (key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL));
-
-        if is_escape {
-            self.mode = Mode::Normal;
-            self.view.update_col_widths(&self.table);
+        if Self::is_escape(key) {
+            self.finish_edit();
             return;
         }
 
@@ -252,119 +297,101 @@ impl App {
 
         match key.code {
             KeyCode::Char('y') => {
-                if let Some(span) = self.view.yank_col(&mut self.table) {
-                    self.clipboard.yank_col(span)
+                if let Some(col) = self.view.yank_col(&self.table) {
+                    self.clipboard.yank_col(col);
                 }
-
-                self.mode = Mode::Normal;
-                self.view.update_col_widths(&mut self.table);
-                return;
+                self.finish_edit();
             }
-
             KeyCode::Char('x') => {
-                self.view.clear_col_span(&mut self.table);
-                self.dirty = true;
-
-                self.mode = Mode::Normal;
-                self.view.update_col_widths(&mut self.table);
-                return;
+                let (_, _, sc, ec) = self.selection_bounds();
+                let txn = self.create_clear_span_txn(0, self.table.row_count() - 1, sc, ec);
+                self.execute_and_finish(txn);
             }
-
-            // dragging right (from left column)
             KeyCode::Char('Q') => {
-                self.view.drag_right(&mut self.table, true);
-                self.dirty = true;
-
-                self.mode = Mode::Normal;
-                self.view.update_col_widths(&mut self.table);
-                return;
+                let txn = self.create_drag_right_txn(true);
+                self.execute_and_finish(txn);
             }
-
             _ => {}
         }
     }
 
     fn handle_normal_mode(&mut self, key: KeyEvent) {
-        // Handle pending key sequences (dr, dc, yr, yc, gg)
+        // Handle pending key sequences
         if let Some(pending) = self.pending_key.take() {
             match (pending, key.code) {
                 ('d', KeyCode::Char('r')) => {
-                    if let Some(row) = self.view.delete_row(&mut self.table) {
-                        self.clipboard.yank_row(row);
-                        self.dirty = true;
+                    if let Some(row_data) = self.table.get_row(self.view.cursor_row) {
+                        let txn = Transaction::DeleteRow {
+                            idx: self.view.cursor_row,
+                            data: row_data.clone(),
+                        };
+                        self.execute(txn);
+                        self.clipboard.yank_row(row_data);
+                        self.view.clamp_cursor(&self.table);
+                        self.view.update_col_widths(&self.table);
                         self.message = Some("Row deleted".to_string());
-                        return;
                     }
+                    return;
                 }
                 ('d', KeyCode::Char('c')) => {
-                    if let Some(col) = self.view.delete_col(&mut self.table) {
-                        self.clipboard.yank_col(col);
-                        self.dirty = true;
+                    if let Some(col_data) = self.table.get_col(self.view.cursor_col) {
+                        let txn = Transaction::DeleteCol {
+                            idx: self.view.cursor_col,
+                            data: col_data.clone(),
+                        };
+                        self.execute(txn);
+                        self.clipboard.yank_col(col_data);
+                        self.view.clamp_cursor(&self.table);
+                        self.view.update_col_widths(&self.table);
                         self.message = Some("Column deleted".to_string());
-                        return;
                     }
+                    return;
                 }
                 ('y', KeyCode::Char('r')) => {
-                    if let Some(row) = self.view.yank_row(&self.table) {
+                    if let Some(row) = self.table.get_row(self.view.cursor_row) {
                         self.clipboard.yank_row(row);
                         self.message = Some("Row yanked".to_string());
-                        return;
                     }
+                    return;
                 }
                 ('y', KeyCode::Char('c')) => {
-                    if let Some(col) = self.view.yank_col(&self.table) {
+                    if let Some(col) = self.table.get_col(self.view.cursor_col) {
                         self.clipboard.yank_col(col);
                         self.message = Some("Column yanked".to_string());
-                        return;
                     }
+                    return;
                 }
                 ('g', KeyCode::Char('g')) => {
                     self.view.move_to_top();
                     return;
                 }
-                _ => {
-                    // Invalid sequence, ignore
-                }
+                _ => {}
             }
         }
 
         self.handle_navigation(key);
 
         match key.code {
-            // Insert mode
             KeyCode::Char('i') => {
                 self.mode = Mode::Insert;
                 self.edit_buffer = self.view.current_cell(&self.table).clone();
             }
-
-            // Visual row mode
             KeyCode::Char('V') => {
                 self.mode = Mode::VisualRow;
                 self.view.set_support();
             }
-
-            // Visual column mode
             KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.mode = Mode::VisualCol;
                 self.view.set_support();
-
-                return;
             }
-
-            // Vanilla Visual mode
             KeyCode::Char('v') => {
                 self.mode = Mode::Visual;
                 self.view.set_support();
             }
-
-
-            // Command mode
             KeyCode::Char(':') => {
                 self.mode = Mode::Command;
                 self.command_buffer.clear();
             }
-
-            // Quit
             KeyCode::Char('q') => {
                 if self.dirty {
                     self.message = Some("Unsaved changes! Use :q! to force quit".to_string());
@@ -375,80 +402,113 @@ impl App {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.should_quit = true;
             }
-
-            // Row operations
             KeyCode::Char('o') => {
-                self.view.insert_row_below(&mut self.table);
-                self.dirty = true;
+                let txn = Transaction::InsertRow { idx: self.view.cursor_row + 1 };
+                self.execute(txn);
+                self.view.cursor_row += 1;
+                self.view.scroll_to_cursor();
                 self.message = Some("Row added".to_string());
             }
             KeyCode::Char('O') => {
-                self.view.insert_row_above(&mut self.table);
-                self.dirty = true;
+                let txn = Transaction::InsertRow { idx: self.view.cursor_row };
+                self.execute(txn);
+                self.view.scroll_to_cursor();
                 self.message = Some("Row added".to_string());
             }
-            KeyCode::Char('d') => {
-                self.pending_key = Some('d');
-            }
-            KeyCode::Char('y') => {
-                self.pending_key = Some('y');
-            }
+            KeyCode::Char('d') => self.pending_key = Some('d'),
+            KeyCode::Char('y') => self.pending_key = Some('y'),
             KeyCode::Char('p') => {
-                let (message, succeeded) = self.clipboard.paste(&mut self.view, &mut self.table);
-
-                if succeeded {
-                    self.dirty = true;
+                let (message, txn_opt) = self.clipboard.paste_as_transaction(
+                    self.view.cursor_row,
+                    self.view.cursor_col,
+                    &self.table,
+                );
+                if let Some(txn) = txn_opt {
+                    self.execute(txn);
+                    self.view.update_col_widths(&self.table);
                 }
                 self.message = Some(message);
             }
-
-            // Column operations
+            KeyCode::Char('a') => {
+                let txn = Transaction::InsertCol { idx: self.view.cursor_col };
+                self.execute(txn);
+                self.view.update_col_widths(&self.table);
+                self.message = Some("Column added".to_string());
+            }
             KeyCode::Char('A') => {
-                self.view.insert_col_after(&mut self.table);
-                self.dirty = true;
+                let txn = Transaction::InsertCol { idx: self.view.cursor_col + 1 };
+                self.execute(txn);
+                self.view.update_col_widths(&self.table);
                 self.message = Some("Column added".to_string());
             }
             KeyCode::Char('X') => {
-                self.view.delete_col(&mut self.table);
-                self.dirty = true;
-                self.message = Some("Column deleted".to_string());
+                if let Some(col_data) = self.table.get_col(self.view.cursor_col) {
+                    let txn = Transaction::DeleteCol {
+                        idx: self.view.cursor_col,
+                        data: col_data,
+                    };
+                    self.execute(txn);
+                    self.view.clamp_cursor(&self.table);
+                    self.view.update_col_widths(&self.table);
+                    self.message = Some("Column deleted".to_string());
+                }
             }
-
-            // Cell operations
             KeyCode::Char('x') => {
-                *self.view.current_cell_mut(&mut self.table) = String::new();
-                self.dirty = true;
+                let old_value = self.view.current_cell(&self.table).clone();
+                let txn = Transaction::SetCell {
+                    row: self.view.cursor_row,
+                    col: self.view.cursor_col,
+                    old_value,
+                    new_value: String::new(),
+                };
+                self.execute(txn);
             }
-
+            KeyCode::Char('u') => {
+                if let Some(inverse) = self.history.undo() {
+                    inverse.apply(&mut self.table);
+                    self.view.clamp_cursor(&self.table);
+                    self.view.update_col_widths(&self.table);
+                    self.message = Some("Undo".to_string());
+                    // Note: dirty state management for undo is complex; keeping it simple
+                }
+            }
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(txn) = self.history.redo() {
+                    txn.apply(&mut self.table);
+                    self.view.clamp_cursor(&self.table);
+                    self.view.update_col_widths(&self.table);
+                    self.message = Some("Redo".to_string());
+                }
+            }
             _ => {}
         }
     }
 
     fn handle_insert_mode(&mut self, key: KeyEvent) {
-        // Ctrl+[ is equivalent to Escape and often faster in terminals
-        let is_escape = key.code == KeyCode::Esc
-            || (key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL));
-
-        if is_escape {
-            *self.view.current_cell_mut(&mut self.table) = self.edit_buffer.clone();
-            self.dirty = true;
-            self.mode = Mode::Normal;
-            self.view.update_col_widths(&self.table);
+        if Self::is_escape(key) {
+            let old_value = self.view.current_cell(&self.table).clone();
+            let txn = Transaction::SetCell {
+                row: self.view.cursor_row,
+                col: self.view.cursor_col,
+                old_value,
+                new_value: self.edit_buffer.clone(),
+            };
+            self.execute_and_finish(txn);
             return;
         }
 
         match key.code {
-            KeyCode::Backspace => {
-                self.edit_buffer.pop();
-            }
-            KeyCode::Char(c) => {
-                self.edit_buffer.push(c);
-            }
+            KeyCode::Backspace => { self.edit_buffer.pop(); }
+            KeyCode::Char(c) => { self.edit_buffer.push(c); }
             KeyCode::Enter => {
-                *self.view.current_cell_mut(&mut self.table) = self.edit_buffer.clone();
-                self.dirty = true;
-                self.mode = Mode::Normal;
-                self.view.update_col_widths(&self.table);
+                let old_value = self.view.current_cell(&self.table).clone();
+                let txn = Transaction::SetCell {
+                    row: self.view.cursor_row,
+                    col: self.view.cursor_col,
+                    old_value,
+                    new_value: self.edit_buffer.clone(),
+                };
+                self.execute_and_finish(txn);
             }
             _ => {}
         }
@@ -457,11 +517,7 @@ impl App {
     }
 
     fn handle_command_mode(&mut self, key: KeyEvent) {
-        // Ctrl+[ is equivalent to Escape
-        let is_escape = key.code == KeyCode::Esc
-            || (key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL));
-
-        if is_escape {
+        if Self::is_escape(key) {
             self.mode = Mode::Normal;
             self.command_buffer.clear();
             return;
@@ -477,12 +533,8 @@ impl App {
                     self.mode = Mode::Normal;
                 }
             }
-            KeyCode::Backspace => {
-                self.command_buffer.pop();
-            }
-            KeyCode::Char(c) => {
-                self.command_buffer.push(c);
-            }
+            KeyCode::Backspace => { self.command_buffer.pop(); }
+            KeyCode::Char(c) => { self.command_buffer.push(c); }
             _ => {}
         }
     }
@@ -496,9 +548,7 @@ impl App {
                             self.dirty = false;
                             self.message = Some(format!("Saved to {}", path.display()));
                         }
-                        Err(e) => {
-                            self.message = Some(format!("Error saving: {}", e));
-                        }
+                        Err(e) => self.message = Some(format!("Error saving: {}", e)),
                     }
                 } else {
                     self.message = Some("No file path specified".to_string());
@@ -511,32 +561,34 @@ impl App {
                     self.should_quit = true;
                 }
             }
-            Command::ForceQuit => {
-                self.should_quit = true;
-            }
+            Command::ForceQuit => self.should_quit = true,
             Command::WriteQuit => {
                 if let Some(ref path) = self.file_path {
                     match self.table.save_csv(path) {
-                        Ok(()) => {
-                            self.should_quit = true;
-                        }
-                        Err(e) => {
-                            self.message = Some(format!("Error saving: {}", e));
-                        }
+                        Ok(()) => self.should_quit = true,
+                        Err(e) => self.message = Some(format!("Error saving: {}", e)),
                     }
                 } else {
                     self.message = Some("No file path specified".to_string());
                 }
             }
             Command::AddColumn => {
-                self.view.insert_col_after(&mut self.table);
-                self.dirty = true;
+                let txn = Transaction::InsertCol { idx: self.view.cursor_col + 1 };
+                self.execute(txn);
+                self.view.update_col_widths(&self.table);
                 self.message = Some("Column added".to_string());
             }
             Command::DeleteColumn => {
-                self.view.delete_col(&mut self.table);
-                self.dirty = true;
-                self.message = Some("Column deleted".to_string());
+                if let Some(col_data) = self.table.get_col(self.view.cursor_col) {
+                    let txn = Transaction::DeleteCol {
+                        idx: self.view.cursor_col,
+                        data: col_data,
+                    };
+                    self.execute(txn);
+                    self.view.clamp_cursor(&self.table);
+                    self.view.update_col_widths(&self.table);
+                    self.message = Some("Column deleted".to_string());
+                }
             }
             Command::ToggleHeader => {
                 self.header_mode = !self.header_mode;
@@ -549,33 +601,33 @@ impl App {
                 let calc = Calculator::new(&self.table);
                 match calc.evaluate_all() {
                     Ok(updates) => {
-                        let count = updates.len();
-                        for (row, col, value) in updates {
-                            self.table.set_cell(row, col, value);
-                        }
-                        if count > 0 {
-                            self.dirty = true;
-                            self.view.update_col_widths(&self.table);
-                            self.message = Some(format!("Evaluated {} formula(s)", count));
-                        } else {
+                        if updates.is_empty() {
                             self.message = Some("No formulas found".to_string());
+                            return;
                         }
+                        let txns: Vec<Transaction> = updates
+                            .into_iter()
+                            .map(|(row, col, new_value)| {
+                                let old_value = self.table.get_cell(row, col)
+                                    .cloned()
+                                    .unwrap_or_default();
+                                Transaction::SetCell { row, col, old_value, new_value }
+                            })
+                            .collect();
+                        let count = txns.len();
+                        self.execute(Transaction::Batch(txns));
+                        self.view.update_col_widths(&self.table);
+                        self.message = Some(format!("Evaluated {} formula(s)", count));
                     }
-                    Err(e) => {
-                        self.message = Some(format!("{}", e));
-                    }
+                    Err(e) => self.message = Some(format!("{}", e)),
                 }
             }
-            Command::NavigateRow(row) => {
-                self.view.cursor_row = row;
-            }
+            Command::NavigateRow(row) => self.view.cursor_row = row,
             Command::NavigateCell(cell) => {
                 self.view.cursor_row = cell.row;
                 self.view.cursor_col = cell.col;
             }
-            Command::Unknown(s) => {
-                self.message = Some(format!("Unknown command: {}", s));
-            }
+            Command::Unknown(s) => self.message = Some(format!("Unknown command: {}", s)),
         }
     }
 }

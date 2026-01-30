@@ -1,10 +1,11 @@
 mod app;
 mod calculator;
+mod clipboard;
 mod command;
 mod mode;
 mod table;
+mod transaction;
 mod ui;
-mod clipboard;
 mod util;
 
 use std::io;

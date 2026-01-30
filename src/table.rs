@@ -447,7 +447,7 @@ impl TableView {
         self.update_col_widths(table);
     }
 
-    pub fn yank_span(&mut self, table: &mut Table) -> Option<Vec<Vec<String>>> {
+    pub fn yank_span(&self, table: &Table) -> Option<Vec<Vec<String>>> {
         let start_row = cmp::min(self.cursor_row, self.support_row);
         let end_row = cmp::max(self.cursor_row, self.support_row);
         let start_col = cmp::min(self.cursor_col, self.support_col);
@@ -567,5 +567,631 @@ impl TableView {
 impl Default for TableView {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_table(data: Vec<Vec<&str>>) -> Table {
+        Table {
+            cells: data.into_iter()
+                .map(|row| row.into_iter().map(|s| s.to_string()).collect())
+                .collect(),
+        }
+    }
+
+    // === Table basic operations ===
+
+    #[test]
+    fn test_table_new() {
+        let table = Table::new();
+        assert_eq!(table.row_count(), 1);
+        assert_eq!(table.col_count(), 1);
+        assert_eq!(table.cells[0][0], "");
+    }
+
+    #[test]
+    fn test_table_get_cell() {
+        let table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        assert_eq!(table.get_cell(0, 0), Some(&"a".to_string()));
+        assert_eq!(table.get_cell(0, 1), Some(&"b".to_string()));
+        assert_eq!(table.get_cell(1, 0), Some(&"c".to_string()));
+        assert_eq!(table.get_cell(1, 1), Some(&"d".to_string()));
+        assert_eq!(table.get_cell(2, 0), None);
+        assert_eq!(table.get_cell(0, 2), None);
+    }
+
+    #[test]
+    fn test_table_set_cell() {
+        let mut table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        table.set_cell(0, 1, "x".to_string());
+        assert_eq!(table.cells[0][1], "x");
+
+        // Out of bounds should not panic
+        table.set_cell(10, 10, "y".to_string());
+    }
+
+    #[test]
+    fn test_table_row_col_count() {
+        let table = make_table(vec![
+            vec!["a", "b", "c"],
+            vec!["d", "e", "f"],
+        ]);
+
+        assert_eq!(table.row_count(), 2);
+        assert_eq!(table.col_count(), 3);
+    }
+
+    // === Row operations ===
+
+    #[test]
+    fn test_insert_row_at_beginning() {
+        let mut table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        table.insert_row_at(0);
+
+        assert_eq!(table.row_count(), 3);
+        assert_eq!(table.cells[0], vec!["", ""]);
+        assert_eq!(table.cells[1], vec!["a", "b"]);
+    }
+
+    #[test]
+    fn test_insert_row_at_middle() {
+        let mut table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        table.insert_row_at(1);
+
+        assert_eq!(table.row_count(), 3);
+        assert_eq!(table.cells[0], vec!["a", "b"]);
+        assert_eq!(table.cells[1], vec!["", ""]);
+        assert_eq!(table.cells[2], vec!["c", "d"]);
+    }
+
+    #[test]
+    fn test_insert_row_at_end() {
+        let mut table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        table.insert_row_at(2);
+
+        assert_eq!(table.row_count(), 3);
+        assert_eq!(table.cells[2], vec!["", ""]);
+    }
+
+    #[test]
+    fn test_delete_row_at() {
+        let mut table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+            vec!["e", "f"],
+        ]);
+
+        let deleted = table.delete_row_at(1);
+
+        assert_eq!(deleted, Some(vec!["c".to_string(), "d".to_string()]));
+        assert_eq!(table.row_count(), 2);
+        assert_eq!(table.cells[0], vec!["a", "b"]);
+        assert_eq!(table.cells[1], vec!["e", "f"]);
+    }
+
+    #[test]
+    fn test_delete_last_row_clears_instead() {
+        let mut table = make_table(vec![
+            vec!["a", "b"],
+        ]);
+
+        let deleted = table.delete_row_at(0);
+
+        assert_eq!(deleted, Some(vec!["a".to_string(), "b".to_string()]));
+        assert_eq!(table.row_count(), 1);
+        assert_eq!(table.cells[0], vec!["", ""]);
+    }
+
+    #[test]
+    fn test_get_row() {
+        let table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        assert_eq!(table.get_row(0), Some(vec!["a".to_string(), "b".to_string()]));
+        assert_eq!(table.get_row(1), Some(vec!["c".to_string(), "d".to_string()]));
+        assert_eq!(table.get_row(2), None);
+    }
+
+    // === Column operations ===
+
+    #[test]
+    fn test_insert_col_at_beginning() {
+        let mut table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        table.insert_col_at(0);
+
+        assert_eq!(table.col_count(), 3);
+        assert_eq!(table.cells[0], vec!["", "a", "b"]);
+        assert_eq!(table.cells[1], vec!["", "c", "d"]);
+    }
+
+    #[test]
+    fn test_insert_col_at_middle() {
+        let mut table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        table.insert_col_at(1);
+
+        assert_eq!(table.col_count(), 3);
+        assert_eq!(table.cells[0], vec!["a", "", "b"]);
+        assert_eq!(table.cells[1], vec!["c", "", "d"]);
+    }
+
+    #[test]
+    fn test_delete_col_at() {
+        let mut table = make_table(vec![
+            vec!["a", "b", "c"],
+            vec!["d", "e", "f"],
+        ]);
+
+        let deleted = table.delete_col_at(1);
+
+        assert_eq!(deleted, Some(vec!["b".to_string(), "e".to_string()]));
+        assert_eq!(table.col_count(), 2);
+        assert_eq!(table.cells[0], vec!["a", "c"]);
+        assert_eq!(table.cells[1], vec!["d", "f"]);
+    }
+
+    #[test]
+    fn test_delete_last_col_clears_instead() {
+        let mut table = make_table(vec![
+            vec!["a"],
+            vec!["b"],
+        ]);
+
+        let deleted = table.delete_col_at(0);
+
+        assert_eq!(deleted, Some(vec!["a".to_string(), "b".to_string()]));
+        assert_eq!(table.col_count(), 1);
+        assert_eq!(table.cells[0], vec![""]);
+        assert_eq!(table.cells[1], vec![""]);
+    }
+
+    #[test]
+    fn test_get_col() {
+        let table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        assert_eq!(table.get_col(0), Some(vec!["a".to_string(), "c".to_string()]));
+        assert_eq!(table.get_col(1), Some(vec!["b".to_string(), "d".to_string()]));
+        assert_eq!(table.get_col(2), None);
+    }
+
+    // === Span operations ===
+
+    #[test]
+    fn test_get_span() {
+        let table = make_table(vec![
+            vec!["a", "b", "c"],
+            vec!["d", "e", "f"],
+            vec!["g", "h", "i"],
+        ]);
+
+        let span = table.get_span(0, 1, 0, 1).unwrap();
+        assert_eq!(span, vec![
+            vec!["a".to_string(), "b".to_string()],
+            vec!["d".to_string(), "e".to_string()],
+        ]);
+    }
+
+    #[test]
+    fn test_get_span_single_cell() {
+        let table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        let span = table.get_span(0, 0, 0, 0).unwrap();
+        assert_eq!(span, vec![vec!["a".to_string()]]);
+    }
+
+    #[test]
+    fn test_get_span_full_table() {
+        let table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        let span = table.get_span(0, 1, 0, 1).unwrap();
+        assert_eq!(span, vec![
+            vec!["a".to_string(), "b".to_string()],
+            vec!["c".to_string(), "d".to_string()],
+        ]);
+    }
+
+    // === Insert with data ===
+
+    #[test]
+    fn test_insert_row_with_data() {
+        let mut table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        table.insert_row_with_data(1, vec!["x".to_string(), "y".to_string()]);
+
+        assert_eq!(table.row_count(), 3);
+        assert_eq!(table.cells[1], vec!["x", "y"]);
+    }
+
+    #[test]
+    fn test_insert_row_with_data_pads_short_row() {
+        let mut table = make_table(vec![
+            vec!["a", "b", "c"],
+        ]);
+
+        table.insert_row_with_data(1, vec!["x".to_string()]);
+
+        assert_eq!(table.cells[1], vec!["x", "", ""]);
+    }
+
+    #[test]
+    fn test_insert_col_with_data() {
+        let mut table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        table.insert_col_with_data(1, vec!["x".to_string(), "y".to_string()]);
+
+        assert_eq!(table.cells[0], vec!["a", "x", "b"]);
+        assert_eq!(table.cells[1], vec!["c", "y", "d"]);
+    }
+
+    // === Fill operations ===
+
+    #[test]
+    fn test_fill_row_with_data() {
+        let mut table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        table.fill_row_with_data(0, vec!["x".to_string(), "y".to_string()]);
+
+        assert_eq!(table.cells[0], vec!["x", "y"]);
+        assert_eq!(table.cells[1], vec!["c", "d"]);
+    }
+
+    #[test]
+    fn test_fill_row_with_data_wrong_size_ignored() {
+        let mut table = make_table(vec![
+            vec!["a", "b"],
+        ]);
+
+        table.fill_row_with_data(0, vec!["x".to_string()]); // Wrong size
+
+        assert_eq!(table.cells[0], vec!["a", "b"]); // Unchanged
+    }
+
+    #[test]
+    fn test_fill_col_with_data() {
+        let mut table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        table.fill_col_with_data(0, vec!["x".to_string(), "y".to_string()]);
+
+        assert_eq!(table.cells[0], vec!["x", "b"]);
+        assert_eq!(table.cells[1], vec!["y", "d"]);
+    }
+
+    #[test]
+    fn test_fill_span_with_data() {
+        let mut table = make_table(vec![
+            vec!["a", "b", "c"],
+            vec!["d", "e", "f"],
+            vec!["g", "h", "i"],
+        ]);
+
+        table.fill_span_with_data(0, 0, vec![
+            vec!["1".to_string(), "2".to_string()],
+            vec!["3".to_string(), "4".to_string()],
+        ]);
+
+        assert_eq!(table.cells[0], vec!["1", "2", "c"]);
+        assert_eq!(table.cells[1], vec!["3", "4", "f"]);
+        assert_eq!(table.cells[2], vec!["g", "h", "i"]);
+    }
+
+    // === TableView tests ===
+
+    #[test]
+    fn test_tableview_new() {
+        let view = TableView::new();
+        assert_eq!(view.cursor_row, 0);
+        assert_eq!(view.cursor_col, 0);
+        assert_eq!(view.viewport_row, 0);
+        assert_eq!(view.viewport_col, 0);
+    }
+
+    #[test]
+    fn test_tableview_navigation() {
+        let mut view = TableView::new();
+        let table = make_table(vec![
+            vec!["a", "b", "c"],
+            vec!["d", "e", "f"],
+            vec!["g", "h", "i"],
+        ]);
+
+        view.move_right(&table);
+        assert_eq!(view.cursor_col, 1);
+
+        view.move_down(&table);
+        assert_eq!(view.cursor_row, 1);
+
+        view.move_left();
+        assert_eq!(view.cursor_col, 0);
+
+        view.move_up();
+        assert_eq!(view.cursor_row, 0);
+    }
+
+    #[test]
+    fn test_tableview_navigation_bounds() {
+        let mut view = TableView::new();
+        let table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        // Can't go negative
+        view.move_left();
+        assert_eq!(view.cursor_col, 0);
+
+        view.move_up();
+        assert_eq!(view.cursor_row, 0);
+
+        // Can't go past bounds
+        view.cursor_col = 1;
+        view.cursor_row = 1;
+
+        view.move_right(&table);
+        assert_eq!(view.cursor_col, 1);
+
+        view.move_down(&table);
+        assert_eq!(view.cursor_row, 1);
+    }
+
+    #[test]
+    fn test_tableview_move_to_edges() {
+        let mut view = TableView::new();
+        let table = make_table(vec![
+            vec!["a", "b", "c"],
+            vec!["d", "e", "f"],
+            vec!["g", "h", "i"],
+        ]);
+
+        view.cursor_col = 1;
+        view.cursor_row = 1;
+
+        view.move_to_first_col();
+        assert_eq!(view.cursor_col, 0);
+
+        view.move_to_last_col(&table);
+        assert_eq!(view.cursor_col, 2);
+
+        view.move_to_top();
+        assert_eq!(view.cursor_row, 0);
+
+        view.move_to_bottom(&table);
+        assert_eq!(view.cursor_row, 2);
+    }
+
+    #[test]
+    fn test_tableview_clamp_cursor() {
+        let mut view = TableView::new();
+        view.cursor_row = 100;
+        view.cursor_col = 100;
+
+        let table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+        ]);
+
+        view.clamp_cursor(&table);
+
+        assert_eq!(view.cursor_row, 1);
+        assert_eq!(view.cursor_col, 1);
+    }
+
+    #[test]
+    fn test_tableview_current_cell() {
+        let view = TableView::new();
+        let table = make_table(vec![
+            vec!["hello", "world"],
+        ]);
+
+        assert_eq!(view.current_cell(&table), "hello");
+    }
+
+    #[test]
+    fn test_tableview_update_col_widths() {
+        let mut view = TableView::new();
+        let table = make_table(vec![
+            vec!["a", "longer", "x"],
+            vec!["bb", "y", "shortest"],
+        ]);
+
+        view.update_col_widths(&table);
+
+        assert_eq!(view.col_widths[0], 3); // min width is 3
+        assert_eq!(view.col_widths[1], 6); // "longer"
+        assert_eq!(view.col_widths[2], 8); // "shortest"
+    }
+
+    #[test]
+    fn test_tableview_set_support() {
+        let mut view = TableView::new();
+        view.cursor_row = 5;
+        view.cursor_col = 3;
+
+        view.set_support();
+
+        assert_eq!(view.support_row, 5);
+        assert_eq!(view.support_col, 3);
+    }
+
+    #[test]
+    fn test_tableview_yank_row() {
+        let view = TableView::new();
+        let table = make_table(vec![
+            vec!["a", "b", "c"],
+            vec!["d", "e", "f"],
+        ]);
+
+        let row = view.yank_row(&table).unwrap();
+        assert_eq!(row, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn test_tableview_yank_col() {
+        let view = TableView::new();
+        let table = make_table(vec![
+            vec!["a", "b"],
+            vec!["c", "d"],
+            vec!["e", "f"],
+        ]);
+
+        let col = view.yank_col(&table).unwrap();
+        assert_eq!(col, vec!["a".to_string(), "c".to_string(), "e".to_string()]);
+    }
+
+    #[test]
+    fn test_tableview_yank_span() {
+        let mut view = TableView::new();
+        view.cursor_row = 0;
+        view.cursor_col = 0;
+        view.support_row = 1;
+        view.support_col = 1;
+
+        let table = make_table(vec![
+            vec!["a", "b", "c"],
+            vec!["d", "e", "f"],
+            vec!["g", "h", "i"],
+        ]);
+
+        let span = view.yank_span(&table).unwrap();
+        assert_eq!(span, vec![
+            vec!["a".to_string(), "b".to_string()],
+            vec!["d".to_string(), "e".to_string()],
+        ]);
+    }
+
+    #[test]
+    fn test_tableview_is_selected_visual() {
+        let mut view = TableView::new();
+        view.cursor_row = 0;
+        view.cursor_col = 0;
+        view.support_row = 2;
+        view.support_col = 2;
+
+        assert!(view.is_selected(0, 0, Mode::Visual));
+        assert!(view.is_selected(1, 1, Mode::Visual));
+        assert!(view.is_selected(2, 2, Mode::Visual));
+        assert!(!view.is_selected(3, 0, Mode::Visual));
+        assert!(!view.is_selected(0, 3, Mode::Visual));
+    }
+
+    #[test]
+    fn test_tableview_is_selected_visual_row() {
+        let mut view = TableView::new();
+        view.cursor_row = 1;
+        view.cursor_col = 1;
+        view.support_row = 2;
+        view.support_col = 1;
+
+        // In VisualRow, columns don't matter
+        assert!(view.is_selected(1, 0, Mode::VisualRow));
+        assert!(view.is_selected(1, 100, Mode::VisualRow));
+        assert!(view.is_selected(2, 0, Mode::VisualRow));
+        assert!(!view.is_selected(0, 0, Mode::VisualRow));
+        assert!(!view.is_selected(3, 0, Mode::VisualRow));
+    }
+
+    #[test]
+    fn test_tableview_is_selected_visual_col() {
+        let mut view = TableView::new();
+        view.cursor_row = 1;
+        view.cursor_col = 1;
+        view.support_row = 1;
+        view.support_col = 2;
+
+        // In VisualCol, rows don't matter
+        assert!(view.is_selected(0, 1, Mode::VisualCol));
+        assert!(view.is_selected(100, 1, Mode::VisualCol));
+        assert!(view.is_selected(0, 2, Mode::VisualCol));
+        assert!(!view.is_selected(0, 0, Mode::VisualCol));
+        assert!(!view.is_selected(0, 3, Mode::VisualCol));
+    }
+
+    #[test]
+    fn test_tableview_page_navigation() {
+        let mut view = TableView::new();
+        view.visible_rows = 10;
+
+        let table = make_table(vec![vec!["x"]; 100]); // 100 rows
+
+        view.page_down(&table);
+        assert_eq!(view.cursor_row, 9);
+
+        view.page_down(&table);
+        assert_eq!(view.cursor_row, 18);
+
+        view.page_up();
+        assert_eq!(view.cursor_row, 9);
+
+        view.half_page_down(&table);
+        assert_eq!(view.cursor_row, 14);
+
+        view.half_page_up();
+        assert_eq!(view.cursor_row, 9);
+    }
+
+    #[test]
+    fn test_tableview_expand_column() {
+        let mut view = TableView::new();
+        view.col_widths = vec![5, 5, 5];
+        view.cursor_col = 1;
+
+        view.expand_column(10);
+        assert_eq!(view.col_widths[1], 10);
+
+        // Shouldn't shrink
+        view.expand_column(3);
+        assert_eq!(view.col_widths[1], 10);
     }
 }

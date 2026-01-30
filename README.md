@@ -27,7 +27,7 @@ tabular <file.csv>
 | `l` / `→` | Move right |
 | `gg` | Jump to first row |
 | `G` | Jump to last row |
-| `0` / '^' | Jump to first column |
+| `0` / `^` | Jump to first column |
 | `$` | Jump to last column |
 | `Ctrl+d` | Half page down |
 | `Ctrl+u` | Half page up |
@@ -38,19 +38,26 @@ tabular <file.csv>
 | Key | Action |
 |-----|--------|
 | `i` | Enter insert mode |
-| `v` | Enter visual mode |
-| `V` | Enter visual (row) mode |
-| `Ctrl+v` | Enter visual (column) mode |
 | `x` | Clear current cell |
 | `o` | Insert row below |
 | `O` | Insert row above |
+| `a` | Insert column to the left |
+| `A` | Insert column to the right |
 | `dr` | Delete current row |
 | `dc` | Delete current column |
+| `X` | Delete current column |
 | `yr` | Yank (copy) current row |
 | `yc` | Yank (copy) current column |
-| `p` | Paste row/column below/after |
-| `A` | Insert column to the right |
-| `X` | Delete current column |
+| `p` | Paste yanked content |
+| `u` | Undo |
+| `Ctrl+r` | Redo |
+
+#### Visual Modes
+| Key | Action |
+|-----|--------|
+| `v` | Enter visual mode (select cells) |
+| `V` | Enter visual row mode (select rows) |
+| `Ctrl+v` | Enter visual column mode (select columns) |
 
 #### Other
 | Key | Action |
@@ -72,10 +79,24 @@ tabular <file.csv>
 
 
 ### Visual Mode
+
+All visual modes support navigation keys (`h`, `j`, `k`, `l`, etc.) to extend the selection.
+
 | Key | Action |
 |-----|--------|
-| `y` | Yank (copy) current selection |
-| `x` | Clear current selection |
+| `y` | Yank (copy) selection |
+| `x` | Clear selection |
+| `q` | Drag down (fill from top row) |
+| `Q` | Drag right (fill from left column) |
+| `Escape` / `Ctrl+[` | Cancel and return to normal mode |
+
+#### Drag Fill
+
+The drag feature works like spreadsheet drag-fill:
+- **`q` (drag down)**: Copies the first row of the selection to all rows below, translating cell references (e.g., `A1` becomes `A2`, `A3`, etc.)
+- **`Q` (drag right)**: Copies the first column of the selection to all columns to the right, translating cell references (e.g., `A1` becomes `B1`, `C1`, etc.)
+
+In **visual row mode** (`V`), `q` fills entire rows. In **visual column mode** (`Ctrl+v`), `Q` fills entire columns.
 
 
 ### Command Mode
@@ -86,12 +107,20 @@ tabular <file.csv>
 | `:q` | Quit (fails if unsaved changes) |
 | `:q!` | Force quit without saving |
 | `:wq` | Save and quit |
-| `:addcol` | Add column at end |
+| `:addcol` | Add column after current |
 | `:delcol` | Delete current column |
 | `:header` | Toggle header mode |
 | `:calc` | Evaluate all formulas |
-| `:[NUMBER]` | Jump to row [NUMBER] |
-| `:[CELL]` | Jump to [CELL] |
+| `:[NUMBER]` | Jump to row NUMBER |
+| `:[CELL]` | Jump to CELL (e.g., `:A1`, `:B5`) |
+
+## Undo/Redo
+
+All editing operations can be undone and redone:
+- `u` - Undo last change
+- `Ctrl+r` - Redo last undone change
+
+The undo history tracks cell edits, row/column insertions and deletions, drag fills, and more.
 
 ## Formulas
 
@@ -138,7 +167,7 @@ Cells starting with `=` are treated as formulas. Run `:calc` to evaluate all for
 ## Status Bar
 
 The status bar shows:
-- Current mode (NORMAL/INSERT/COMMAND)
+- Current mode (NORMAL/INSERT/COMMAND/VISUAL)
 - File name
 - `[+]` indicator if there are unsaved changes
 - Cursor position in Excel format (e.g., A1, B2, AA15)
