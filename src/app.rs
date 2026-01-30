@@ -8,8 +8,8 @@ use crate::calculator::Calculator;
 use crate::clipboard::Clipboard;
 use crate::command::Command;
 use crate::input::{
-    is_escape, CommandHandler, InsertHandler, KeyResult, NavigationHandler,
-    SearchHandler, VisualHandler, VisualType,
+    is_escape, CommandHandler, InsertHandler, KeyBuffer, KeyBufferResult, KeyResult,
+    NavigationHandler, SearchHandler, SequenceAction, VisualHandler, VisualType,
 };
 use crate::mode::Mode;
 use crate::table::{SortDirection, Table, TableView};
@@ -32,6 +32,7 @@ pub struct App {
     pub should_quit: bool,
     pub header_mode: bool,
     // Mode handlers
+    key_buffer: KeyBuffer,
     nav_handler: NavigationHandler,
     search_handler: SearchHandler,
     insert_handler: InsertHandler,
@@ -56,6 +57,7 @@ impl App {
             message: None,
             should_quit: false,
             header_mode: true,
+            key_buffer: KeyBuffer::new(),
             nav_handler: NavigationHandler::new(),
             search_handler: SearchHandler::new(),
             insert_handler: InsertHandler::new(),
@@ -142,66 +144,77 @@ impl App {
             &mut self.view,
             &self.table,
             &mut self.clipboard,
-            &mut self.nav_handler,
+            &self.nav_handler,
+            &mut self.key_buffer,
         );
         self.process_key_result(result);
     }
 
     fn handle_normal_mode(&mut self, key: KeyEvent) {
-        // Handle pending key sequences (d/y combinations)
-        if let Some(pending) = self.nav_handler.pending_key() {
-            self.nav_handler.set_pending_key(None);
-            match (pending, key.code) {
-                ('d', KeyCode::Char('r')) => {
-                    if let Some(row_data) = self.table.get_row(self.view.cursor_row) {
-                        let txn = Transaction::DeleteRow {
-                            idx: self.view.cursor_row,
-                            data: row_data.clone(),
-                        };
-                        self.execute(txn);
-                        self.clipboard.yank_row(row_data);
-                        self.view.clamp_cursor(&self.table);
-                        self.view.update_col_widths(&self.table);
-                        self.message = Some("Row deleted".to_string());
-                    }
-                    return;
-                }
-                ('d', KeyCode::Char('c')) => {
-                    if let Some(col_data) = self.table.get_col(self.view.cursor_col) {
-                        let txn = Transaction::DeleteCol {
-                            idx: self.view.cursor_col,
-                            data: col_data.clone(),
-                        };
-                        self.execute(txn);
-                        self.clipboard.yank_col(col_data);
-                        self.view.clamp_cursor(&self.table);
-                        self.view.update_col_widths(&self.table);
-                        self.message = Some("Column deleted".to_string());
-                    }
-                    return;
-                }
-                ('y', KeyCode::Char('r')) => {
-                    if let Some(row) = self.table.get_row(self.view.cursor_row) {
-                        self.clipboard.yank_row(row);
-                        self.message = Some("Row yanked".to_string());
-                    }
-                    return;
-                }
-                ('y', KeyCode::Char('c')) => {
-                    if let Some(col) = self.table.get_col(self.view.cursor_col) {
-                        self.clipboard.yank_col(col);
-                        self.message = Some("Column yanked".to_string());
-                    }
-                    return;
-                }
-                ('g', KeyCode::Char('g')) => {
-                    self.view.move_to_top();
-                    return;
-                }
-                _ => {}
+        // Process through key buffer for sequences
+        match self.key_buffer.process(key) {
+            KeyBufferResult::Action(action) => {
+                self.execute_sequence_action(action);
+                return;
+            }
+            KeyBufferResult::Pending => {
+                // Waiting for more keys
+                return;
+            }
+            KeyBufferResult::Fallthrough(key) => {
+                // Process as single key
+                self.handle_normal_key(key);
             }
         }
+    }
 
+    fn execute_sequence_action(&mut self, action: SequenceAction) {
+        match action {
+            SequenceAction::MoveToTop => {
+                self.view.move_to_top();
+            }
+            SequenceAction::DeleteRow => {
+                if let Some(row_data) = self.table.get_row(self.view.cursor_row) {
+                    let txn = Transaction::DeleteRow {
+                        idx: self.view.cursor_row,
+                        data: row_data.clone(),
+                    };
+                    self.execute(txn);
+                    self.clipboard.yank_row(row_data);
+                    self.view.clamp_cursor(&self.table);
+                    self.view.update_col_widths(&self.table);
+                    self.message = Some("Row deleted".to_string());
+                }
+            }
+            SequenceAction::DeleteCol => {
+                if let Some(col_data) = self.table.get_col(self.view.cursor_col) {
+                    let txn = Transaction::DeleteCol {
+                        idx: self.view.cursor_col,
+                        data: col_data.clone(),
+                    };
+                    self.execute(txn);
+                    self.clipboard.yank_col(col_data);
+                    self.view.clamp_cursor(&self.table);
+                    self.view.update_col_widths(&self.table);
+                    self.message = Some("Column deleted".to_string());
+                }
+            }
+            SequenceAction::YankRow => {
+                if let Some(row) = self.table.get_row(self.view.cursor_row) {
+                    self.clipboard.yank_row(row);
+                    self.message = Some("Row yanked".to_string());
+                }
+            }
+            SequenceAction::YankCol => {
+                if let Some(col) = self.table.get_col(self.view.cursor_col) {
+                    self.clipboard.yank_col(col);
+                    self.message = Some("Column yanked".to_string());
+                }
+            }
+        }
+    }
+
+    fn handle_normal_key(&mut self, key: KeyEvent) {
         // Handle navigation
         self.nav_handler.handle(key, &mut self.view, &self.table);
 
@@ -253,8 +266,6 @@ impl App {
                 self.view.scroll_to_cursor();
                 self.message = Some("Row added".to_string());
             }
-            KeyCode::Char('d') => self.nav_handler.set_pending_key(Some('d')),
-            KeyCode::Char('y') => self.nav_handler.set_pending_key(Some('y')),
             KeyCode::Char('p') => {
                 let (message, txn_opt) = self.clipboard.paste_as_transaction(
                     self.view.cursor_row,

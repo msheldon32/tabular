@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::clipboard::Clipboard;
@@ -31,40 +33,114 @@ pub fn is_escape(key: KeyEvent) -> bool {
         || (key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL))
 }
 
-/// Navigation handler shared across modes
-pub struct NavigationHandler {
-    pending_key: Option<char>,
+/// Actions resulting from key sequences
+#[derive(Clone, Debug, PartialEq)]
+pub enum SequenceAction {
+    MoveToTop,  // gg
+    DeleteRow,  // dr
+    DeleteCol,  // dc
+    YankRow,    // yr
+    YankCol,    // yc
 }
+
+/// Result of processing a key through the buffer
+pub enum KeyBufferResult {
+    /// A sequence matched, execute this action
+    Action(SequenceAction),
+    /// Waiting for more keys (buffer is a valid prefix)
+    Pending,
+    /// No sequence matched, process this key normally
+    Fallthrough(KeyEvent),
+}
+
+/// Buffer for accumulating multi-key sequences
+pub struct KeyBuffer {
+    keys: Vec<char>,
+    last_key_time: Instant,
+    timeout: Duration,
+}
+
+impl KeyBuffer {
+    pub fn new() -> Self {
+        Self {
+            keys: Vec::new(),
+            last_key_time: Instant::now(),
+            timeout: Duration::from_millis(1000),
+        }
+    }
+
+    /// Process a key event, returning what action to take
+    pub fn process(&mut self, key: KeyEvent) -> KeyBufferResult {
+        // Clear buffer if too much time has passed since last key
+        if self.last_key_time.elapsed() > self.timeout {
+            self.keys.clear();
+        }
+
+        // Only buffer character keys (no modifiers except shift)
+        let c = match key.code {
+            KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => c,
+            _ => {
+                // Non-char key breaks any sequence
+                self.keys.clear();
+                return KeyBufferResult::Fallthrough(key);
+            }
+        };
+
+        self.keys.push(c);
+        self.last_key_time = Instant::now();
+
+        // Try to match a complete sequence
+        if let Some(action) = self.match_sequence() {
+            self.keys.clear();
+            return KeyBufferResult::Action(action);
+        }
+
+        // Check if current buffer could be a prefix of any sequence
+        if self.is_valid_prefix() {
+            return KeyBufferResult::Pending;
+        }
+
+        // No match and not a valid prefix - clear and fall through
+        self.keys.clear();
+        KeyBufferResult::Fallthrough(key)
+    }
+
+    /// Clear the buffer (e.g., on mode change)
+    pub fn clear(&mut self) {
+        self.keys.clear();
+    }
+
+    fn match_sequence(&self) -> Option<SequenceAction> {
+        match self.keys.as_slice() {
+            ['g', 'g'] => Some(SequenceAction::MoveToTop),
+            ['d', 'r'] => Some(SequenceAction::DeleteRow),
+            ['d', 'c'] => Some(SequenceAction::DeleteCol),
+            ['y', 'r'] => Some(SequenceAction::YankRow),
+            ['y', 'c'] => Some(SequenceAction::YankCol),
+            _ => None,
+        }
+    }
+
+    fn is_valid_prefix(&self) -> bool {
+        matches!(self.keys.as_slice(), ['g'] | ['d'] | ['y'])
+    }
+}
+
+/// Navigation handler shared across modes
+pub struct NavigationHandler;
 
 impl NavigationHandler {
     pub fn new() -> Self {
-        Self { pending_key: None }
-    }
-
-    pub fn pending_key(&self) -> Option<char> {
-        self.pending_key
-    }
-
-    pub fn set_pending_key(&mut self, key: Option<char>) {
-        self.pending_key = key;
+        Self
     }
 
     /// Handle navigation keys, returns true if the key was handled
-    pub fn handle(&mut self, key: KeyEvent, view: &mut TableView, table: &Table) -> bool {
-        // Handle pending 'gg' sequence
-        if let Some(pending) = self.pending_key.take() {
-            if pending == 'g' && key.code == KeyCode::Char('g') {
-                view.move_to_top();
-                return true;
-            }
-        }
-
+    pub fn handle(&self, key: KeyEvent, view: &mut TableView, table: &Table) -> bool {
         match key.code {
             KeyCode::Char('h') | KeyCode::Left => { view.move_left(); true }
             KeyCode::Char('j') | KeyCode::Down => { view.move_down(table); true }
             KeyCode::Char('k') | KeyCode::Up => { view.move_up(); true }
             KeyCode::Char('l') | KeyCode::Right => { view.move_right(table); true }
-            KeyCode::Char('g') => { self.pending_key = Some('g'); true }
             KeyCode::Char('G') => { view.move_to_bottom(table); true }
             KeyCode::Char('0') | KeyCode::Char('^') => { view.move_to_first_col(); true }
             KeyCode::Char('$') => { view.move_to_last_col(table); true }
@@ -298,22 +374,40 @@ impl VisualHandler {
         view: &mut TableView,
         table: &Table,
         clipboard: &mut Clipboard,
-        nav: &mut NavigationHandler,
+        nav: &NavigationHandler,
+        key_buffer: &mut KeyBuffer,
     ) -> KeyResult {
         if is_escape(key) {
+            key_buffer.clear();
             return KeyResult::Finish;
         }
 
-        // Handle navigation
-        nav.handle(key, view, table);
+        // Process through key buffer for sequences
+        match key_buffer.process(key) {
+            KeyBufferResult::Action(SequenceAction::MoveToTop) => {
+                view.move_to_top();
+                return KeyResult::Continue;
+            }
+            KeyBufferResult::Action(_) => {
+                // Other sequences (dr, dc, yr, yc) not used in visual mode
+                return KeyResult::Continue;
+            }
+            KeyBufferResult::Pending => {
+                return KeyResult::Continue;
+            }
+            KeyBufferResult::Fallthrough(key) => {
+                // Handle navigation
+                nav.handle(key, view, table);
 
-        match key.code {
-            KeyCode::Char('y') => self.handle_yank(view, table, clipboard),
-            KeyCode::Char('x') => self.handle_delete(view, table),
-            KeyCode::Char(':') => KeyResult::SwitchMode(crate::mode::Mode::Command),
-            KeyCode::Char('q') => self.handle_drag_down(view, table),
-            KeyCode::Char('Q') => self.handle_drag_right(view, table),
-            _ => KeyResult::Continue,
+                match key.code {
+                    KeyCode::Char('y') => self.handle_yank(view, table, clipboard),
+                    KeyCode::Char('x') => self.handle_delete(view, table),
+                    KeyCode::Char(':') => KeyResult::SwitchMode(crate::mode::Mode::Command),
+                    KeyCode::Char('q') => self.handle_drag_down(view, table),
+                    KeyCode::Char('Q') => self.handle_drag_right(view, table),
+                    _ => KeyResult::Continue,
+                }
+            }
         }
     }
 
