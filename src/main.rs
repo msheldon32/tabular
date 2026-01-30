@@ -1,4 +1,5 @@
 mod app;
+mod calculator;
 mod command;
 mod mode;
 mod table;

@@ -22,7 +22,7 @@ fn col_to_letters(mut col: usize) -> String {
     result
 }
 
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -37,37 +37,47 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_command_line(frame, app, chunks[2]);
 }
 
-fn render_table(frame: &mut Frame, app: &App, area: Rect) {
+fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
     let col_count = app.table.col_count();
-    if col_count == 0 {
+    let row_count = app.table.row_count();
+    if col_count == 0 || row_count == 0 {
         return;
     }
 
-    // Calculate row number width (for padding)
-    let row_num_width = app.table.row_count().to_string().len().max(3);
+    // Calculate available space for data (accounting for borders and row numbers)
+    let row_num_width = row_count.to_string().len().max(3);
+    let available_width = area.width.saturating_sub(4 + row_num_width as u16); // borders + row nums
+    let available_height = area.height.saturating_sub(4); // borders + header
 
-    // Calculate column widths based on content
-    let data_col_widths: Vec<usize> = (0..col_count)
-        .map(|col| {
-            let content_width = app
-                .table
-                .cells
-                .iter()
-                .filter_map(|row| row.get(col))
-                .map(|s| s.len())
-                .max()
-                .unwrap_or(3);
-            // Also consider column header width (A, B, ..., AA, etc.)
-            let header_width = col_to_letters(col).len();
-            content_width.max(header_width).max(3)
-        })
-        .collect();
+    // Update visible rows/cols in view
+    app.view.visible_rows = available_height as usize;
 
-    // Build column width constraints: row number column + data columns
-    let mut col_widths: Vec<Constraint> = Vec::with_capacity(col_count + 1);
+    // Calculate how many columns fit in available width
+    let mut total_width = 0u16;
+    let mut visible_cols = 0usize;
+    for col in app.view.viewport_col..col_count {
+        let col_width = app.view.col_widths.get(col).copied().unwrap_or(3);
+        let cell_width = col_width as u16 + 2; // padding
+        if total_width + cell_width > available_width && visible_cols > 0 {
+            break;
+        }
+        total_width += cell_width;
+        visible_cols += 1;
+    }
+    app.view.visible_cols = visible_cols.max(1);
+
+    // Ensure cursor is visible
+    app.view.scroll_to_cursor();
+
+    // Calculate column widths for visible columns
+    let mut col_widths: Vec<Constraint> = Vec::with_capacity(visible_cols + 1);
     col_widths.push(Constraint::Length(row_num_width as u16 + 1)); // Row number column
-    for w in &data_col_widths {
-        col_widths.push(Constraint::Length(*w as u16 + 2));
+
+    let end_col = (app.view.viewport_col + visible_cols).min(col_count);
+    for col in app.view.viewport_col..end_col {
+        let w = app.view.col_widths.get(col).copied().unwrap_or(3);
+        let header_w = col_to_letters(col).len();
+        col_widths.push(Constraint::Length(w.max(header_w) as u16 + 2));
     }
 
     // Build header row with column letters
@@ -75,11 +85,12 @@ fn render_table(frame: &mut Frame, app: &App, area: Rect) {
         .fg(Color::Cyan)
         .add_modifier(Modifier::BOLD);
 
-    let mut header_cells: Vec<Cell> = Vec::with_capacity(col_count + 1);
+    let mut header_cells: Vec<Cell> = Vec::with_capacity(visible_cols + 1);
     header_cells.push(Cell::from("").style(header_style)); // Empty corner cell
-    for col in 0..col_count {
+
+    for col in app.view.viewport_col..end_col {
         let letter = col_to_letters(col);
-        let style = if col == app.table.cursor_col {
+        let style = if col == app.view.cursor_col {
             header_style.bg(Color::DarkGray)
         } else {
             header_style
@@ -88,19 +99,18 @@ fn render_table(frame: &mut Frame, app: &App, area: Rect) {
     }
     let header_row = Row::new(header_cells);
 
-    // Build data rows
-    let rows: Vec<Row> = app
-        .table
-        .cells
-        .iter()
-        .enumerate()
-        .map(|(row_idx, row)| {
+    // Calculate visible row range
+    let end_row = (app.view.viewport_row + app.view.visible_rows).min(row_count);
+
+    // Build data rows (only visible ones)
+    let rows: Vec<Row> = (app.view.viewport_row..end_row)
+        .map(|row_idx| {
             let is_header_row = app.header_mode && row_idx == 0;
 
-            let mut cells: Vec<Cell> = Vec::with_capacity(col_count + 1);
+            let mut cells: Vec<Cell> = Vec::with_capacity(visible_cols + 1);
 
             // Row number cell
-            let row_num_style = if row_idx == app.table.cursor_row {
+            let row_num_style = if row_idx == app.view.cursor_row {
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
@@ -109,9 +119,13 @@ fn render_table(frame: &mut Frame, app: &App, area: Rect) {
             };
             cells.push(Cell::from(format!("{}", row_idx + 1)).style(row_num_style));
 
-            // Data cells
-            for (col_idx, content) in row.iter().enumerate() {
-                let is_cursor = row_idx == app.table.cursor_row && col_idx == app.table.cursor_col;
+            // Data cells (only visible columns)
+            for col_idx in app.view.viewport_col..end_col {
+                let content = app.table.get_cell(row_idx, col_idx)
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+
+                let is_cursor = row_idx == app.view.cursor_row && col_idx == app.view.cursor_col;
 
                 let style = if is_cursor {
                     Style::default()
@@ -129,7 +143,7 @@ fn render_table(frame: &mut Frame, app: &App, area: Rect) {
                 let display_content = if is_cursor && app.mode == Mode::Insert {
                     format!("{}_", &app.edit_buffer)
                 } else {
-                    content.clone()
+                    content.to_string()
                 };
 
                 cells.push(Cell::from(display_content).style(style));
@@ -139,9 +153,24 @@ fn render_table(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let table = RatatuiTable::new(rows, col_widths.clone())
+    // Build title with scroll indicator
+    let title = if app.view.viewport_row > 0 || app.view.viewport_col > 0 {
+        format!(
+            "Table [{}-{}/{} rows, {}-{}/{} cols]",
+            app.view.viewport_row + 1,
+            end_row,
+            row_count,
+            col_to_letters(app.view.viewport_col),
+            col_to_letters(end_col.saturating_sub(1)),
+            col_to_letters(col_count.saturating_sub(1))
+        )
+    } else {
+        format!("Table [{} rows, {} cols]", row_count, col_count)
+    };
+
+    let table = RatatuiTable::new(rows, col_widths)
         .header(header_row)
-        .block(Block::default().borders(Borders::ALL).title("Table"));
+        .block(Block::default().borders(Borders::ALL).title(title));
 
     frame.render_widget(table, area);
 }
@@ -163,8 +192,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let position = format!(
         "{}{} ",
-        col_to_letters(app.table.cursor_col),
-        app.table.cursor_row + 1
+        col_to_letters(app.view.cursor_col),
+        app.view.cursor_row + 1
     );
 
     let status = Line::from(vec![

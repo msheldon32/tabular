@@ -5,13 +5,15 @@ use std::time::Duration;
 use crossterm::event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::CrosstermBackend, Terminal};
 
+use crate::calculator::Calculator;
 use crate::command::Command;
 use crate::mode::Mode;
-use crate::table::Table;
+use crate::table::{Table, TableView};
 use crate::ui;
 
 pub struct App {
     pub table: Table,
+    pub view: TableView,
     pub mode: Mode,
     pub command_buffer: String,
     pub edit_buffer: String,
@@ -33,8 +35,12 @@ impl App {
             Table::new()
         };
 
+        let mut view = TableView::new();
+        view.update_col_widths(&table);
+
         Ok(Self {
             table,
+            view,
             mode: Mode::Normal,
             command_buffer: String::new(),
             edit_buffer: String::new(),
@@ -50,6 +56,9 @@ impl App {
     }
 
     pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
+        // Initial column width calculation
+        self.view.update_col_widths(&self.table);
+
         while !self.should_quit {
             terminal.draw(|f| ui::render(f, self))?;
 
@@ -72,19 +81,19 @@ impl App {
     }
 
     fn handle_normal_mode(&mut self, key: KeyEvent) {
-        // Handle pending key sequences (dd, yy)
+        // Handle pending key sequences (dr, dc, yr, yc, gg)
         if let Some(pending) = self.pending_key.take() {
             match (pending, key.code) {
                 ('d', KeyCode::Char('r')) => {
-                    if let Some(row) = self.table.delete_row() {
+                    if let Some(row) = self.view.delete_row(&mut self.table) {
                         self.yanked_row = Some(row);
                         self.yanked_col = None;
                         self.dirty = true;
                         self.message = Some("Row deleted".to_string());
                     }
                 }
-                ('d', KeyCode::Char('r')) => {
-                    if let Some(col) = self.table.delete_column() {
+                ('d', KeyCode::Char('c')) => {
+                    if let Some(col) = self.view.delete_col(&mut self.table) {
                         self.yanked_row = None;
                         self.yanked_col = Some(col);
                         self.dirty = true;
@@ -92,14 +101,21 @@ impl App {
                     }
                 }
                 ('y', KeyCode::Char('r')) => {
-                    self.yanked_row = Some(self.table.yank_row());
-                    self.yanked_col = None;
-                    self.message = Some("Row yanked".to_string());
+                    if let Some(row) = self.view.yank_row(&self.table) {
+                        self.yanked_row = Some(row);
+                        self.yanked_col = None;
+                        self.message = Some("Row yanked".to_string());
+                    }
                 }
                 ('y', KeyCode::Char('c')) => {
-                    self.yanked_col = Some(self.table.yank_column());
-                    self.yanked_row = None;
-                    self.message = Some("Column yanked".to_string());
+                    if let Some(col) = self.view.yank_col(&self.table) {
+                        self.yanked_col = Some(col);
+                        self.yanked_row = None;
+                        self.message = Some("Column yanked".to_string());
+                    }
+                }
+                ('g', KeyCode::Char('g')) => {
+                    self.view.move_to_top();
                 }
                 _ => {
                     // Invalid sequence, ignore
@@ -109,18 +125,53 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Char('h') | KeyCode::Left => self.table.move_left(),
-            KeyCode::Char('j') | KeyCode::Down => self.table.move_down(),
-            KeyCode::Char('k') | KeyCode::Up => self.table.move_up(),
-            KeyCode::Char('l') | KeyCode::Right => self.table.move_right(),
+            // Navigation
+            KeyCode::Char('h') | KeyCode::Left => self.view.move_left(),
+            KeyCode::Char('j') | KeyCode::Down => self.view.move_down(&self.table),
+            KeyCode::Char('k') | KeyCode::Up => self.view.move_up(),
+            KeyCode::Char('l') | KeyCode::Right => self.view.move_right(&self.table),
+
+            // Jump navigation
+            KeyCode::Char('g') => {
+                self.pending_key = Some('g');
+            }
+            KeyCode::Char('G') => {
+                self.view.move_to_bottom(&self.table);
+            }
+            KeyCode::Char('0') => {
+                self.view.move_to_first_col();
+            }
+            KeyCode::Char('$') => {
+                self.view.move_to_last_col(&self.table);
+            }
+
+            // Page navigation
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.view.half_page_down(&self.table);
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.view.half_page_up();
+            }
+            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.view.page_down(&self.table);
+            }
+            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.view.page_up();
+            }
+
+            // Insert mode
             KeyCode::Char('i') => {
                 self.mode = Mode::Insert;
-                self.edit_buffer = self.table.current_cell().clone();
+                self.edit_buffer = self.view.current_cell(&self.table).clone();
             }
+
+            // Command mode
             KeyCode::Char(':') => {
                 self.mode = Mode::Command;
                 self.command_buffer.clear();
             }
+
+            // Quit
             KeyCode::Char('q') => {
                 if self.dirty {
                     self.message = Some("Unsaved changes! Use :q! to force quit".to_string());
@@ -131,14 +182,15 @@ impl App {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.should_quit = true;
             }
+
             // Row operations
             KeyCode::Char('o') => {
-                self.table.insert_row_below();
+                self.view.insert_row_below(&mut self.table);
                 self.dirty = true;
                 self.message = Some("Row added".to_string());
             }
             KeyCode::Char('O') => {
-                self.table.insert_row_above();
+                self.view.insert_row_above(&mut self.table);
                 self.dirty = true;
                 self.message = Some("Row added".to_string());
             }
@@ -150,33 +202,36 @@ impl App {
             }
             KeyCode::Char('p') => {
                 if let Some(row) = self.yanked_row.clone() {
-                    self.table.paste_row_below(row);
+                    self.view.paste_row_below(&mut self.table, row);
                     self.dirty = true;
                     self.message = Some("Row pasted".to_string());
                 } else if let Some(col) = self.yanked_col.clone() {
-                    self.table.paste_column_after(col);
+                    self.view.paste_col_after(&mut self.table, col);
                     self.dirty = true;
                     self.message = Some("Column pasted".to_string());
                 } else {
                     self.message = Some("Nothing to paste".to_string());
                 }
             }
+
             // Column operations
             KeyCode::Char('A') => {
-                self.table.add_column_after();
+                self.view.insert_col_after(&mut self.table);
                 self.dirty = true;
                 self.message = Some("Column added".to_string());
             }
             KeyCode::Char('X') => {
-                self.table.delete_column();
+                self.view.delete_col(&mut self.table);
                 self.dirty = true;
                 self.message = Some("Column deleted".to_string());
             }
+
             // Cell operations
             KeyCode::Char('x') => {
-                *self.table.current_cell_mut() = String::new();
+                *self.view.current_cell_mut(&mut self.table) = String::new();
                 self.dirty = true;
             }
+
             _ => {}
         }
     }
@@ -187,7 +242,7 @@ impl App {
             || (key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL));
 
         if is_escape {
-            *self.table.current_cell_mut() = self.edit_buffer.clone();
+            *self.view.current_cell_mut(&mut self.table) = self.edit_buffer.clone();
             self.dirty = true;
             self.mode = Mode::Normal;
             return;
@@ -201,7 +256,7 @@ impl App {
                 self.edit_buffer.push(c);
             }
             KeyCode::Enter => {
-                *self.table.current_cell_mut() = self.edit_buffer.clone();
+                *self.view.current_cell_mut(&mut self.table) = self.edit_buffer.clone();
                 self.dirty = true;
                 self.mode = Mode::Normal;
             }
@@ -281,12 +336,12 @@ impl App {
                 }
             }
             Command::AddColumn => {
-                self.table.add_column_after();
+                self.view.insert_col_after(&mut self.table);
                 self.dirty = true;
                 self.message = Some("Column added".to_string());
             }
             Command::DeleteColumn => {
-                self.table.delete_column();
+                self.view.delete_col(&mut self.table);
                 self.dirty = true;
                 self.message = Some("Column deleted".to_string());
             }
@@ -296,6 +351,27 @@ impl App {
                     "Header mode {}",
                     if self.header_mode { "on" } else { "off" }
                 ));
+            }
+            Command::Calc => {
+                let calc = Calculator::new(&self.table);
+                match calc.evaluate_all() {
+                    Ok(updates) => {
+                        let count = updates.len();
+                        for (row, col, value) in updates {
+                            self.table.set_cell(row, col, value);
+                        }
+                        if count > 0 {
+                            self.dirty = true;
+                            self.view.update_col_widths(&self.table);
+                            self.message = Some(format!("Evaluated {} formula(s)", count));
+                        } else {
+                            self.message = Some("No formulas found".to_string());
+                        }
+                    }
+                    Err(e) => {
+                        self.message = Some(format!("{}", e));
+                    }
+                }
             }
             Command::Unknown(s) => {
                 self.message = Some(format!("Unknown command: {}", s));

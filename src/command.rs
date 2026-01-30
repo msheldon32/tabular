@@ -7,6 +7,7 @@ pub enum Command {
     AddColumn,
     DeleteColumn,
     ToggleHeader,
+    Calc,
     Unknown(String),
 }
 
@@ -22,6 +23,7 @@ impl Command {
             "addcol" => Command::AddColumn,
             "delcol" => Command::DeleteColumn,
             "header" => Command::ToggleHeader,
+            "calc" => Command::Calc,
             _ => Command::Unknown(trimmed.to_string()),
         }
     }
@@ -40,6 +42,7 @@ mod tests {
         assert_eq!(Command::parse("addcol"), Command::AddColumn);
         assert_eq!(Command::parse("delcol"), Command::DeleteColumn);
         assert_eq!(Command::parse("header"), Command::ToggleHeader);
+        assert_eq!(Command::parse("calc"), Command::Calc);
         assert_eq!(
             Command::parse("unknown"),
             Command::Unknown("unknown".to_string())
