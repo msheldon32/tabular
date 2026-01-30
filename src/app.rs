@@ -24,6 +24,7 @@ pub struct App {
     pub edit_buffer: String,
     pub file_path: Option<PathBuf>,
     pub dirty: bool,
+    pub has_selection: bool,
     pub message: Option<String>,
     pub should_quit: bool,
     pub pending_key: Option<char>,
@@ -56,6 +57,7 @@ impl App {
             edit_buffer: String::new(),
             file_path,
             dirty: false,
+            has_selection: false,
             message: None,
             should_quit: false,
             pending_key: None,
@@ -240,6 +242,7 @@ impl App {
     fn handle_visual_mode(&mut self, key: KeyEvent) {
         if Self::is_escape(key) {
             self.finish_edit();
+            self.has_selection = false;
             return;
         }
 
@@ -257,6 +260,10 @@ impl App {
                 let txn = self.create_clear_span_txn(sr, er, sc, ec);
                 self.execute_and_finish(txn);
             }
+            KeyCode::Char(':') => {
+                self.mode = Mode::Command;
+                self.command_buffer.clear();
+            }
             KeyCode::Char('q') => {
                 let txn = self.create_drag_down_txn(false);
                 self.execute_and_finish(txn);
@@ -272,6 +279,7 @@ impl App {
     fn handle_visual_row_mode(&mut self, key: KeyEvent) {
         if Self::is_escape(key) {
             self.finish_edit();
+            self.has_selection = false;
             return;
         }
 
@@ -289,6 +297,10 @@ impl App {
                 let txn = self.create_clear_span_txn(sr, er, 0, self.table.col_count() - 1);
                 self.execute_and_finish(txn);
             }
+            KeyCode::Char(':') => {
+                self.mode = Mode::Command;
+                self.command_buffer.clear();
+            }
             KeyCode::Char('q') => {
                 let txn = self.create_drag_down_txn(true);
                 self.execute_and_finish(txn);
@@ -300,6 +312,7 @@ impl App {
     fn handle_visual_col_mode(&mut self, key: KeyEvent) {
         if Self::is_escape(key) {
             self.finish_edit();
+            self.has_selection = false;
             return;
         }
 
@@ -316,6 +329,10 @@ impl App {
                 let (_, _, sc, ec) = self.selection_bounds();
                 let txn = self.create_clear_span_txn(0, self.table.row_count() - 1, sc, ec);
                 self.execute_and_finish(txn);
+            }
+            KeyCode::Char(':') => {
+                self.mode = Mode::Command;
+                self.command_buffer.clear();
             }
             KeyCode::Char('Q') => {
                 let txn = self.create_drag_right_txn(true);
@@ -388,14 +405,17 @@ impl App {
             }
             KeyCode::Char('V') => {
                 self.mode = Mode::VisualRow;
+                self.has_selection = true;
                 self.view.set_support();
             }
             KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.mode = Mode::VisualCol;
+                self.has_selection = true;
                 self.view.set_support();
             }
             KeyCode::Char('v') => {
                 self.mode = Mode::Visual;
+                self.has_selection = true;
                 self.view.set_support();
             }
             KeyCode::Char(':') => {
@@ -660,6 +680,7 @@ impl App {
     fn handle_command_mode(&mut self, key: KeyEvent) {
         if Self::is_escape(key) {
             self.mode = Mode::Normal;
+            self.has_selection = false;
             self.command_buffer.clear();
             return;
         }
@@ -777,6 +798,8 @@ impl App {
             }
             Command::Unknown(s) => self.message = Some(format!("Unknown command: {}", s)),
         }
+        
+        self.has_selection = false;
     }
 
     fn execute_replace(&mut self, cmd: crate::command::ReplaceCommand) {
@@ -788,21 +811,29 @@ impl App {
                 (0..self.table.row_count(), 0..self.table.col_count())
             }
             ReplaceScope::Selection => {
-                // Use the visual selection bounds (stored in view)
-                let start_row = std::cmp::min(self.view.cursor_row, self.view.support_row);
-                let end_row = std::cmp::max(self.view.cursor_row, self.view.support_row);
-                let start_col = std::cmp::min(self.view.cursor_col, self.view.support_col);
-                let end_col = std::cmp::max(self.view.cursor_col, self.view.support_col);
-                (start_row..end_row + 1, start_col..end_col + 1)
+                if (self.has_selection) {
+                    // Use the visual selection bounds (stored in view)
+                    let start_row = std::cmp::min(self.view.cursor_row, self.view.support_row);
+                    let end_row = std::cmp::max(self.view.cursor_row, self.view.support_row);
+                    let start_col = std::cmp::min(self.view.cursor_col, self.view.support_col);
+                    let end_col = std::cmp::max(self.view.cursor_col, self.view.support_col);
+                    (start_row..end_row + 1, start_col..end_col + 1)
+                } else {
+                    (self.view.cursor_row..self.view.cursor_row+1, self.view.cursor_col..self.view.cursor_col+1)
+                }
             }
         };
 
         let mut replacements = 0;
         let mut txns: Vec<Transaction> = Vec::new();
 
+        let mut found = false;
+
         for row in row_range.clone() {
             for col in col_range.clone() {
                 if let Some(cell) = self.table.get_cell(row, col) {
+                    found = true;
+
                     let old_value = cell.clone();
                     let new_value = if cmd.global {
                         old_value.replace(&cmd.pattern, &cmd.replacement)
@@ -820,6 +851,13 @@ impl App {
                         });
                     }
                 }
+
+                if found && !cmd.global {
+                    break;
+                }
+            }
+            if found && !cmd.global {
+                break;
             }
         }
 
