@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use regex::Regex;
 
 use crate::table::Table;
 
@@ -111,21 +112,11 @@ impl<'a> Calculator<'a> {
     /// Parse a cell reference like "A1" or "AA123"
     fn parse_cell_ref(&self, s: &str) -> Option<CellRef> {
         let s = s.trim().to_uppercase();
-        let mut col_end = 0;
-        for (i, c) in s.chars().enumerate() {
-            if c.is_ascii_alphabetic() {
-                col_end = i + 1;
-            } else {
-                break;
-            }
-        }
+        let re = Regex::new(r"^([A-Z]+)(\d+)$").ok()?;
+        let caps = re.captures(&s)?;
 
-        if col_end == 0 || col_end >= s.len() {
-            return None;
-        }
-
-        let col_str = &s[..col_end];
-        let row_str = &s[col_end..];
+        let col_str = caps.get(1)?.as_str();
+        let row_str = caps.get(2)?.as_str();
 
         let row: usize = row_str.parse().ok()?;
         if row == 0 {
@@ -169,18 +160,17 @@ impl<'a> Calculator<'a> {
         let upper = formula.to_uppercase();
 
         // Find ranges first (e.g., A1:B10)
-        let range_re = regex_lite(r"[A-Z]+[0-9]+:[A-Z]+[0-9]+");
-        for cap in find_all_matches(&upper, &range_re) {
-            for cell_ref in self.parse_range(&cap)? {
+        let range_re = Regex::new(r"[A-Z]+\d+:[A-Z]+\d+").unwrap();
+        for cap in range_re.find_iter(&upper) {
+            for cell_ref in self.parse_range(cap.as_str())? {
                 refs.insert(cell_ref);
             }
         }
 
-        // Find single cell refs (not part of ranges)
-        let cell_re = regex_lite(r"[A-Z]+[0-9]+");
-        for cap in find_all_matches(&upper, &cell_re) {
-            // Skip if this is part of a range (contains :)
-            if let Some(cell_ref) = self.parse_cell_ref(&cap) {
+        // Find single cell refs
+        let cell_re = Regex::new(r"[A-Z]+\d+").unwrap();
+        for cap in cell_re.find_iter(&upper) {
+            if let Some(cell_ref) = self.parse_cell_ref(cap.as_str()) {
                 refs.insert(cell_ref);
             }
         }
@@ -316,47 +306,77 @@ impl<'a> Calculator<'a> {
         let mut result = formula.to_string();
 
         // Handle SUM
-        while let Some(start) = upper_find(&result, "SUM(") {
-            let end = find_matching_paren(&result, start + 4)?;
-            let range = &result[start + 4..end];
+        let sum_re = Regex::new(r"(?i)SUM\(([^)]+)\)").unwrap();
+        while let Some(caps) = sum_re.captures(&result) {
+            let full_match = caps.get(0).unwrap();
+            let range = caps.get(1).unwrap().as_str();
             let values = self.get_range_values(range, results)?;
             let sum: f64 = values.iter().sum();
-            result = format!("{}{}{}", &result[..start], sum, &result[end + 1..]);
+            result = format!(
+                "{}{}{}",
+                &result[..full_match.start()],
+                sum,
+                &result[full_match.end()..]
+            );
         }
 
         // Handle AVG
-        while let Some(start) = upper_find(&result, "AVG(") {
-            let end = find_matching_paren(&result, start + 4)?;
-            let range = &result[start + 4..end];
+        let avg_re = Regex::new(r"(?i)AVG\(([^)]+)\)").unwrap();
+        while let Some(caps) = avg_re.captures(&result) {
+            let full_match = caps.get(0).unwrap();
+            let range = caps.get(1).unwrap().as_str();
             let values = self.get_range_values(range, results)?;
             let avg = if values.is_empty() { 0.0 } else { values.iter().sum::<f64>() / values.len() as f64 };
-            result = format!("{}{}{}", &result[..start], avg, &result[end + 1..]);
+            result = format!(
+                "{}{}{}",
+                &result[..full_match.start()],
+                avg,
+                &result[full_match.end()..]
+            );
         }
 
         // Handle MIN
-        while let Some(start) = upper_find(&result, "MIN(") {
-            let end = find_matching_paren(&result, start + 4)?;
-            let range = &result[start + 4..end];
+        let min_re = Regex::new(r"(?i)MIN\(([^)]+)\)").unwrap();
+        while let Some(caps) = min_re.captures(&result) {
+            let full_match = caps.get(0).unwrap();
+            let range = caps.get(1).unwrap().as_str();
             let values = self.get_range_values(range, results)?;
             let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-            result = format!("{}{}{}", &result[..start], min, &result[end + 1..]);
+            result = format!(
+                "{}{}{}",
+                &result[..full_match.start()],
+                min,
+                &result[full_match.end()..]
+            );
         }
 
         // Handle MAX
-        while let Some(start) = upper_find(&result, "MAX(") {
-            let end = find_matching_paren(&result, start + 4)?;
-            let range = &result[start + 4..end];
+        let max_re = Regex::new(r"(?i)MAX\(([^)]+)\)").unwrap();
+        while let Some(caps) = max_re.captures(&result) {
+            let full_match = caps.get(0).unwrap();
+            let range = caps.get(1).unwrap().as_str();
             let values = self.get_range_values(range, results)?;
             let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            result = format!("{}{}{}", &result[..start], max, &result[end + 1..]);
+            result = format!(
+                "{}{}{}",
+                &result[..full_match.start()],
+                max,
+                &result[full_match.end()..]
+            );
         }
 
         // Handle COUNT
-        while let Some(start) = upper_find(&result, "COUNT(") {
-            let end = find_matching_paren(&result, start + 6)?;
-            let range = &result[start + 6..end];
+        let count_re = Regex::new(r"(?i)COUNT\(([^)]+)\)").unwrap();
+        while let Some(caps) = count_re.captures(&result) {
+            let full_match = caps.get(0).unwrap();
+            let range = caps.get(1).unwrap().as_str();
             let values = self.get_range_values(range, results)?;
-            result = format!("{}{}{}", &result[..start], values.len(), &result[end + 1..]);
+            result = format!(
+                "{}{}{}",
+                &result[..full_match.start()],
+                values.len(),
+                &result[full_match.end()..]
+            );
         }
 
         Ok(result)
@@ -366,18 +386,14 @@ impl<'a> Calculator<'a> {
     fn substitute_cell_refs(&self, formula: &str, results: &HashMap<CellRef, f64>) -> Result<String, CalcError> {
         let mut result = formula.to_string();
 
-        // Find and replace cell references (longest first to handle AA1 before A1)
-        let cell_re = regex_lite(r"[A-Za-z]+[0-9]+");
-        let mut matches: Vec<(usize, usize, String)> = Vec::new();
+        // Find all cell references and replace from end to start
+        let cell_re = Regex::new(r"[A-Za-z]+\d+").unwrap();
+        let matches: Vec<_> = cell_re.find_iter(&result.to_uppercase())
+            .map(|m| (m.start(), m.end(), m.as_str().to_string()))
+            .collect();
 
-        for m in find_all_matches_with_pos(&result, &cell_re) {
-            matches.push(m);
-        }
-
-        // Sort by position descending to replace from end to start
-        matches.sort_by(|a, b| b.0.cmp(&a.0));
-
-        for (start, end, cell_str) in matches {
+        // Replace from end to start to preserve positions
+        for (start, end, cell_str) in matches.into_iter().rev() {
             if let Some(cell_ref) = self.parse_cell_ref(&cell_str) {
                 let value = self.get_cell_value(&cell_ref, results)?;
                 result = format!("{}{}{}", &result[..start], value, &result[end..]);
@@ -385,121 +401,6 @@ impl<'a> Calculator<'a> {
         }
 
         Ok(result)
-    }
-}
-
-// Simple regex-like matching without regex crate
-fn regex_lite(pattern: &str) -> String {
-    pattern.to_string()
-}
-
-fn find_all_matches(text: &str, _pattern: &str) -> Vec<String> {
-    let mut matches = Vec::new();
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-
-    while i < chars.len() {
-        // Try to match [A-Z]+[0-9]+ pattern possibly with :
-        if chars[i].is_ascii_alphabetic() {
-            let start = i;
-            while i < chars.len() && chars[i].is_ascii_alphabetic() {
-                i += 1;
-            }
-            if i < chars.len() && chars[i].is_ascii_digit() {
-                while i < chars.len() && chars[i].is_ascii_digit() {
-                    i += 1;
-                }
-                // Check for range
-                if i < chars.len() && chars[i] == ':' {
-                    let colon = i;
-                    i += 1;
-                    if i < chars.len() && chars[i].is_ascii_alphabetic() {
-                        while i < chars.len() && chars[i].is_ascii_alphabetic() {
-                            i += 1;
-                        }
-                        if i < chars.len() && chars[i].is_ascii_digit() {
-                            while i < chars.len() && chars[i].is_ascii_digit() {
-                                i += 1;
-                            }
-                            matches.push(chars[start..i].iter().collect());
-                            continue;
-                        }
-                    }
-                    i = colon; // Reset to just after first cell ref
-                }
-                matches.push(chars[start..i].iter().collect());
-                continue;
-            }
-            // Not a valid cell ref, continue from where we stopped
-        }
-        i += 1;
-    }
-
-    matches
-}
-
-fn find_all_matches_with_pos(text: &str, _pattern: &str) -> Vec<(usize, usize, String)> {
-    let mut matches = Vec::new();
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-    let mut byte_pos = 0;
-
-    while i < chars.len() {
-        if chars[i].is_ascii_alphabetic() && chars[i].is_ascii_uppercase() {
-            let start_i = i;
-            let start_byte = byte_pos;
-
-            while i < chars.len() && chars[i].is_ascii_alphabetic() && chars[i].is_ascii_uppercase() {
-                byte_pos += chars[i].len_utf8();
-                i += 1;
-            }
-
-            if i < chars.len() && chars[i].is_ascii_digit() {
-                while i < chars.len() && chars[i].is_ascii_digit() {
-                    byte_pos += chars[i].len_utf8();
-                    i += 1;
-                }
-                // Skip ranges - they should be expanded already
-                if i < chars.len() && chars[i] == ':' {
-                    // It's a range, skip the whole thing
-                    continue;
-                }
-                matches.push((start_byte, byte_pos, chars[start_i..i].iter().collect()));
-                continue;
-            }
-        }
-
-        byte_pos += chars[i].len_utf8();
-        i += 1;
-    }
-
-    matches
-}
-
-fn upper_find(text: &str, pattern: &str) -> Option<usize> {
-    text.to_uppercase().find(pattern)
-}
-
-fn find_matching_paren(text: &str, start: usize) -> Result<usize, CalcError> {
-    let chars: Vec<char> = text.chars().collect();
-    let mut depth = 1;
-    let mut i = start;
-
-    while i < chars.len() && depth > 0 {
-        match chars[i] {
-            '(' => depth += 1,
-            ')' => depth -= 1,
-            _ => {}
-        }
-        if depth > 0 {
-            i += 1;
-        }
-    }
-
-    if depth != 0 {
-        Err(CalcError::ParseError("Unmatched parenthesis".to_string()))
-    } else {
-        Ok(i)
     }
 }
 
