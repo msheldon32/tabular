@@ -557,6 +557,32 @@ impl TableView {
         self.scroll_to_cursor();
     }
 
+    // Movement with count
+    pub fn move_left_n(&mut self, n: usize) {
+        self.cursor_col = self.cursor_col.saturating_sub(n);
+        self.scroll_to_cursor();
+    }
+
+    pub fn move_right_n(&mut self, n: usize, table: &Table) {
+        self.cursor_col = (self.cursor_col + n).min(table.col_count().saturating_sub(1));
+        self.scroll_to_cursor();
+    }
+
+    pub fn move_up_n(&mut self, n: usize) {
+        self.cursor_row = self.cursor_row.saturating_sub(n);
+        self.scroll_to_cursor();
+    }
+
+    pub fn move_down_n(&mut self, n: usize, table: &Table) {
+        self.cursor_row = (self.cursor_row + n).min(table.row_count().saturating_sub(1));
+        self.scroll_to_cursor();
+    }
+
+    pub fn goto_row(&mut self, row: usize, table: &Table) {
+        self.cursor_row = row.min(table.row_count().saturating_sub(1));
+        self.scroll_to_cursor();
+    }
+
     /// Get current cell content
     pub fn current_cell<'a>(&self, table: &'a Table) -> &'a String {
         table.get_cell(self.cursor_row, self.cursor_col)

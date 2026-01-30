@@ -36,26 +36,33 @@ pub fn is_escape(key: KeyEvent) -> bool {
 /// Actions resulting from key sequences
 #[derive(Clone, Debug, PartialEq)]
 pub enum SequenceAction {
-    MoveToTop,  // gg
-    DeleteRow,  // dr
-    DeleteCol,  // dc
-    YankRow,    // yr
-    YankCol,    // yc
+    MoveToTop,   // gg
+    GotoRow,     // [count]G - go to specific row
+    DeleteRow,   // dr
+    DeleteCol,   // dc
+    YankRow,     // yr
+    YankCol,     // yc
+    // Motion actions (can have count)
+    MoveDown,    // j
+    MoveUp,      // k
+    MoveLeft,    // h
+    MoveRight,   // l
 }
 
 /// Result of processing a key through the buffer
 pub enum KeyBufferResult {
-    /// A sequence matched, execute this action
-    Action(SequenceAction),
+    /// A sequence matched, execute this action with optional count
+    Action(SequenceAction, usize),
     /// Waiting for more keys (buffer is a valid prefix)
     Pending,
-    /// No sequence matched, process this key normally
-    Fallthrough(KeyEvent),
+    /// No sequence matched, process this key normally (with optional count)
+    Fallthrough(KeyEvent, usize),
 }
 
-/// Buffer for accumulating multi-key sequences
+/// Buffer for accumulating multi-key sequences with optional count prefix
 pub struct KeyBuffer {
     keys: Vec<char>,
+    count: Option<usize>,
     last_key_time: Instant,
     timeout: Duration,
 }
@@ -64,6 +71,7 @@ impl KeyBuffer {
     pub fn new() -> Self {
         Self {
             keys: Vec::new(),
+            count: None,
             last_key_time: Instant::now(),
             timeout: Duration::from_millis(1000),
         }
@@ -74,6 +82,7 @@ impl KeyBuffer {
         // Clear buffer if too much time has passed since last key
         if self.last_key_time.elapsed() > self.timeout {
             self.keys.clear();
+            self.count = None;
         }
 
         // Only buffer character keys (no modifiers except shift)
@@ -81,18 +90,31 @@ impl KeyBuffer {
             KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => c,
             _ => {
                 // Non-char key breaks any sequence
+                let count = self.take_count();
                 self.keys.clear();
-                return KeyBufferResult::Fallthrough(key);
+                return KeyBufferResult::Fallthrough(key, count);
             }
         };
 
-        self.keys.push(c);
         self.last_key_time = Instant::now();
+
+        // Accumulate digits as count prefix (but not '0' at start - that's a motion)
+        if c.is_ascii_digit() && (self.count.is_some() || c != '0' || !self.keys.is_empty()) {
+            if self.keys.is_empty() {
+                // Still in count prefix phase
+                let digit = c.to_digit(10).unwrap() as usize;
+                self.count = Some(self.count.unwrap_or(0) * 10 + digit);
+                return KeyBufferResult::Pending;
+            }
+        }
+
+        self.keys.push(c);
 
         // Try to match a complete sequence
         if let Some(action) = self.match_sequence() {
+            let count = self.take_count();
             self.keys.clear();
-            return KeyBufferResult::Action(action);
+            return KeyBufferResult::Action(action, count);
         }
 
         // Check if current buffer could be a prefix of any sequence
@@ -101,22 +123,33 @@ impl KeyBuffer {
         }
 
         // No match and not a valid prefix - clear and fall through
+        let count = self.take_count();
         self.keys.clear();
-        KeyBufferResult::Fallthrough(key)
+        KeyBufferResult::Fallthrough(key, count)
     }
 
     /// Clear the buffer (e.g., on mode change)
     pub fn clear(&mut self) {
         self.keys.clear();
+        self.count = None;
+    }
+
+    fn take_count(&mut self) -> usize {
+        self.count.take().unwrap_or(1)
     }
 
     fn match_sequence(&self) -> Option<SequenceAction> {
         match self.keys.as_slice() {
             ['g', 'g'] => Some(SequenceAction::MoveToTop),
+            ['G'] => Some(SequenceAction::GotoRow),
             ['d', 'r'] => Some(SequenceAction::DeleteRow),
             ['d', 'c'] => Some(SequenceAction::DeleteCol),
             ['y', 'r'] => Some(SequenceAction::YankRow),
             ['y', 'c'] => Some(SequenceAction::YankCol),
+            ['j'] => Some(SequenceAction::MoveDown),
+            ['k'] => Some(SequenceAction::MoveUp),
+            ['h'] => Some(SequenceAction::MoveLeft),
+            ['l'] => Some(SequenceAction::MoveRight),
             _ => None,
         }
     }
@@ -384,19 +417,23 @@ impl VisualHandler {
 
         // Process through key buffer for sequences
         match key_buffer.process(key) {
-            KeyBufferResult::Action(SequenceAction::MoveToTop) => {
-                view.move_to_top();
-                return KeyResult::Continue;
-            }
-            KeyBufferResult::Action(_) => {
-                // Other sequences (dr, dc, yr, yc) not used in visual mode
-                return KeyResult::Continue;
+            KeyBufferResult::Action(action, count) => {
+                match action {
+                    SequenceAction::MoveToTop => view.move_to_top(),
+                    SequenceAction::GotoRow => view.goto_row(count.saturating_sub(1), table),
+                    SequenceAction::MoveDown => view.move_down_n(count, table),
+                    SequenceAction::MoveUp => view.move_up_n(count),
+                    SequenceAction::MoveLeft => view.move_left_n(count),
+                    SequenceAction::MoveRight => view.move_right_n(count, table),
+                    _ => {} // Other sequences (dr, dc, yr, yc) not used in visual mode
+                }
+                KeyResult::Continue
             }
             KeyBufferResult::Pending => {
-                return KeyResult::Continue;
+                KeyResult::Continue
             }
-            KeyBufferResult::Fallthrough(key) => {
-                // Handle navigation
+            KeyBufferResult::Fallthrough(key, _count) => {
+                // Handle navigation (already handled by KeyBuffer for hjkl)
                 nav.handle(key, view, table);
 
                 match key.code {

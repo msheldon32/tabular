@@ -6,13 +6,13 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::calculator::Calculator;
 use crate::clipboard::Clipboard;
-use crate::command::Command;
+use crate::command::{Command, ReplaceCommand};
 use crate::input::{
     is_escape, CommandHandler, InsertHandler, KeyBuffer, KeyBufferResult, KeyResult,
     NavigationHandler, SearchHandler, SequenceAction, VisualHandler, VisualType,
 };
 use crate::mode::Mode;
-use crate::table::{SortDirection, Table, TableView};
+use crate::table::{SortDirection, Table, TableView, SortType};
 use crate::transaction::{History, Transaction};
 use crate::ui;
 use crate::fileio::FileIO;
@@ -153,51 +153,73 @@ impl App {
     fn handle_normal_mode(&mut self, key: KeyEvent) {
         // Process through key buffer for sequences
         match self.key_buffer.process(key) {
-            KeyBufferResult::Action(action) => {
-                self.execute_sequence_action(action);
+            KeyBufferResult::Action(action, count) => {
+                self.execute_sequence_action(action, count);
                 return;
             }
             KeyBufferResult::Pending => {
                 // Waiting for more keys
                 return;
             }
-            KeyBufferResult::Fallthrough(key) => {
+            KeyBufferResult::Fallthrough(key, count) => {
                 // Process as single key
-                self.handle_normal_key(key);
+                self.handle_normal_key(key, count);
             }
         }
     }
 
-    fn execute_sequence_action(&mut self, action: SequenceAction) {
+    fn execute_sequence_action(&mut self, action: SequenceAction, count: usize) {
         match action {
             SequenceAction::MoveToTop => {
                 self.view.move_to_top();
             }
+            SequenceAction::GotoRow => {
+                // count is 1-indexed, convert to 0-indexed
+                self.view.goto_row(count.saturating_sub(1), &self.table);
+            }
+            SequenceAction::MoveDown => {
+                self.view.move_down_n(count, &self.table);
+            }
+            SequenceAction::MoveUp => {
+                self.view.move_up_n(count);
+            }
+            SequenceAction::MoveLeft => {
+                self.view.move_left_n(count);
+            }
+            SequenceAction::MoveRight => {
+                self.view.move_right_n(count, &self.table);
+            }
             SequenceAction::DeleteRow => {
-                if let Some(row_data) = self.table.get_row(self.view.cursor_row) {
-                    let txn = Transaction::DeleteRow {
-                        idx: self.view.cursor_row,
-                        data: row_data.clone(),
-                    };
-                    self.execute(txn);
-                    self.clipboard.yank_row(row_data);
-                    self.view.clamp_cursor(&self.table);
-                    self.view.update_col_widths(&self.table);
-                    self.message = Some("Row deleted".to_string());
+                for _ in 0..count {
+                    if let Some(row_data) = self.table.get_row(self.view.cursor_row) {
+                        let txn = Transaction::DeleteRow {
+                            idx: self.view.cursor_row,
+                            data: row_data.clone(),
+                        };
+                        self.execute(txn);
+                        self.clipboard.yank_row(row_data);
+                        self.view.clamp_cursor(&self.table);
+                    }
                 }
+                self.view.update_col_widths(&self.table);
+                let msg = if count == 1 { "Row deleted".to_string() } else { format!("{} rows deleted", count) };
+                self.message = Some(msg);
             }
             SequenceAction::DeleteCol => {
-                if let Some(col_data) = self.table.get_col(self.view.cursor_col) {
-                    let txn = Transaction::DeleteCol {
-                        idx: self.view.cursor_col,
-                        data: col_data.clone(),
-                    };
-                    self.execute(txn);
-                    self.clipboard.yank_col(col_data);
-                    self.view.clamp_cursor(&self.table);
-                    self.view.update_col_widths(&self.table);
-                    self.message = Some("Column deleted".to_string());
+                for _ in 0..count {
+                    if let Some(col_data) = self.table.get_col(self.view.cursor_col) {
+                        let txn = Transaction::DeleteCol {
+                            idx: self.view.cursor_col,
+                            data: col_data.clone(),
+                        };
+                        self.execute(txn);
+                        self.clipboard.yank_col(col_data);
+                        self.view.clamp_cursor(&self.table);
+                    }
                 }
+                self.view.update_col_widths(&self.table);
+                let msg = if count == 1 { "Column deleted".to_string() } else { format!("{} columns deleted", count) };
+                self.message = Some(msg);
             }
             SequenceAction::YankRow => {
                 if let Some(row) = self.table.get_row(self.view.cursor_row) {
@@ -214,8 +236,8 @@ impl App {
         }
     }
 
-    fn handle_normal_key(&mut self, key: KeyEvent) {
-        // Handle navigation
+    fn handle_normal_key(&mut self, key: KeyEvent, _count: usize) {
+        // Handle navigation (hjkl already handled by KeyBuffer with count)
         self.nav_handler.handle(key, &mut self.view, &self.table);
 
         match key.code {
@@ -534,7 +556,7 @@ impl App {
         self.has_selection = false;
     }
 
-    fn execute_replace(&mut self, cmd: crate::command::ReplaceCommand) {
+    fn execute_replace(&mut self, cmd: ReplaceCommand) {
         use crate::command::ReplaceScope;
 
         // Determine which cells to search
@@ -636,8 +658,8 @@ impl App {
 
         let sort_type = self.table.probe_column_type(sort_col, skip_header);
         let type_str = match sort_type {
-            crate::table::SortType::Numeric => "numeric",
-            crate::table::SortType::Text => "text",
+            SortType::Numeric => "numeric",
+            SortType::Text => "text",
         };
         let dir_str = match direction {
             SortDirection::Ascending => "ascending",
@@ -680,8 +702,8 @@ impl App {
 
         let sort_type = self.table.probe_row_type(sort_row, skip_first);
         let type_str = match sort_type {
-            crate::table::SortType::Numeric => "numeric",
-            crate::table::SortType::Text => "text",
+            SortType::Numeric => "numeric",
+            SortType::Text => "text",
         };
         let dir_str = match direction {
             SortDirection::Ascending => "ascending",

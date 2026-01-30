@@ -96,6 +96,14 @@ impl FileIO {
         let path = self.file_path.as_ref().ok_or(io::ErrorKind::NotFound)?;
         let delim = self.format.and_then(|f| f.delimiter()).unwrap_or(b',');
 
+        // Check if file exists - if not, create empty table
+        if !path.exists() {
+            return Ok(LoadResult {
+                table: Table::new(vec![vec![String::new(); 5]; 10]),
+                warnings: vec![format!("New file: {}", path.display())],
+            });
+        }
+
         let file = File::open(path)?;
         let reader = BufReader::new(file);
         let mut csv_reader = csv::ReaderBuilder::new()

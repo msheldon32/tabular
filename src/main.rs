@@ -21,7 +21,6 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use app::App;
-use table::Table;
 use fileio::FileIO;
 
 fn main() -> io::Result<()> {
@@ -35,10 +34,16 @@ fn main() -> io::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut file_io = FileIO::new(file_path)?;
-    let mut table = file_io.load_table()?.table;
+    let file_io = FileIO::new(file_path)?;
+    let load_result = file_io.load_table()?;
 
-    let mut app = App::new(table, file_io);
+    let mut app = App::new(load_result.table, file_io);
+
+    // Show any warnings from loading (e.g., "New file", "Padded rows")
+    if !load_result.warnings.is_empty() {
+        app.message = Some(load_result.warnings.join("; "));
+    }
+
     let result = app.run(&mut terminal);
 
     disable_raw_mode()?;
