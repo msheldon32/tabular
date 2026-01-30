@@ -726,6 +726,7 @@ impl App {
                     }
                     Err(e) => self.message = Some(format!("Error saving: {}", e)),
                 }
+                self.should_quit = true;
             }
             Command::AddColumn => {
                 let txn = Transaction::InsertCol { idx: self.view.cursor_col + 1 };
