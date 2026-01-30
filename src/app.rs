@@ -28,6 +28,11 @@ pub struct App {
     pub should_quit: bool,
     pub pending_key: Option<char>,
     pub header_mode: bool,
+    // Search state
+    pub search_pattern: Option<String>,
+    pub search_matches: Vec<(usize, usize)>,  // (row, col) of matching cells
+    pub search_index: usize,                   // Current match index
+    pub search_buffer: String,                 // Buffer for typing search pattern
 }
 
 impl App {
@@ -55,6 +60,10 @@ impl App {
             should_quit: false,
             pending_key: None,
             header_mode: true,
+            search_pattern: None,
+            search_matches: Vec::new(),
+            search_index: 0,
+            search_buffer: String::new(),
         })
     }
 
@@ -191,6 +200,7 @@ impl App {
             Mode::Visual => self.handle_visual_mode(key),
             Mode::VisualRow => self.handle_visual_row_mode(key),
             Mode::VisualCol => self.handle_visual_col_mode(key),
+            Mode::Search => self.handle_search_mode(key),
         }
     }
 
@@ -480,8 +490,139 @@ impl App {
                     self.message = Some("Redo".to_string());
                 }
             }
+            KeyCode::Char('/') => {
+                self.mode = Mode::Search;
+                self.search_buffer.clear();
+            }
+            KeyCode::Char('n') => {
+                self.goto_next_match();
+            }
+            KeyCode::Char('N') => {
+                self.goto_prev_match();
+            }
             _ => {}
         }
+    }
+
+    fn handle_search_mode(&mut self, key: KeyEvent) {
+        if Self::is_escape(key) {
+            self.mode = Mode::Normal;
+            self.search_buffer.clear();
+            return;
+        }
+
+        match key.code {
+            KeyCode::Enter => {
+                if !self.search_buffer.is_empty() {
+                    self.search_pattern = Some(self.search_buffer.clone());
+                    self.perform_search();
+                    self.goto_next_match();
+                }
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Backspace => {
+                self.search_buffer.pop();
+            }
+            KeyCode::Char(c) => {
+                self.search_buffer.push(c);
+            }
+            _ => {}
+        }
+    }
+
+    fn perform_search(&mut self) {
+        self.search_matches.clear();
+        self.search_index = 0;
+
+        if let Some(ref pattern) = self.search_pattern {
+            let pattern_lower = pattern.to_lowercase();
+
+            for row in 0..self.table.row_count() {
+                for col in 0..self.table.col_count() {
+                    if let Some(cell) = self.table.get_cell(row, col) {
+                        if cell.to_lowercase().contains(&pattern_lower) {
+                            self.search_matches.push((row, col));
+                        }
+                    }
+                }
+            }
+
+            if self.search_matches.is_empty() {
+                self.message = Some(format!("Pattern not found: {}", pattern));
+            } else {
+                self.message = Some(format!("{} match(es) found", self.search_matches.len()));
+            }
+        }
+    }
+
+    fn goto_next_match(&mut self) {
+        if self.search_matches.is_empty() {
+            if self.search_pattern.is_some() {
+                self.message = Some("No matches".to_string());
+            }
+            return;
+        }
+
+        // Find the next match after current cursor position
+        let current_pos = (self.view.cursor_row, self.view.cursor_col);
+        let mut next_index = None;
+
+        for (i, &(row, col)) in self.search_matches.iter().enumerate() {
+            if (row, col) > current_pos {
+                next_index = Some(i);
+                break;
+            }
+        }
+
+        // Wrap around if no match found after cursor
+        let index = next_index.unwrap_or(0);
+        self.search_index = index;
+
+        let (row, col) = self.search_matches[index];
+        self.view.cursor_row = row;
+        self.view.cursor_col = col;
+        self.view.scroll_to_cursor();
+
+        self.message = Some(format!(
+            "[{}/{}] matches",
+            index + 1,
+            self.search_matches.len()
+        ));
+    }
+
+    fn goto_prev_match(&mut self) {
+        if self.search_matches.is_empty() {
+            if self.search_pattern.is_some() {
+                self.message = Some("No matches".to_string());
+            }
+            return;
+        }
+
+        // Find the previous match before current cursor position
+        let current_pos = (self.view.cursor_row, self.view.cursor_col);
+        let mut prev_index = None;
+
+        for (i, &(row, col)) in self.search_matches.iter().enumerate().rev() {
+            if (row, col) < current_pos {
+                prev_index = Some(i);
+                break;
+            }
+        }
+
+        // Wrap around if no match found before cursor
+        let index = prev_index.unwrap_or(self.search_matches.len() - 1);
+        self.search_index = index;
+
+        let (row, col) = self.search_matches[index];
+        self.view.cursor_row = row;
+        self.view.cursor_col = col;
+        self.view.scroll_to_cursor();
+
+        self.message = Some(format!(
+            "[{}/{}] matches",
+            index + 1,
+            self.search_matches.len()
+        ));
     }
 
     fn handle_insert_mode(&mut self, key: KeyEvent) {
@@ -631,7 +772,63 @@ impl App {
             Command::SortDesc => self.sort_by_column(SortDirection::Descending),
             Command::SortRow => self.sort_by_row(SortDirection::Ascending),
             Command::SortRowDesc => self.sort_by_row(SortDirection::Descending),
+            Command::Replace(ref replace_cmd) => {
+                self.execute_replace(replace_cmd.clone());
+            }
             Command::Unknown(s) => self.message = Some(format!("Unknown command: {}", s)),
+        }
+    }
+
+    fn execute_replace(&mut self, cmd: crate::command::ReplaceCommand) {
+        use crate::command::ReplaceScope;
+
+        // Determine which cells to search
+        let (row_range, col_range) = match cmd.scope {
+            ReplaceScope::All => {
+                (0..self.table.row_count(), 0..self.table.col_count())
+            }
+            ReplaceScope::Selection => {
+                // Use the visual selection bounds (stored in view)
+                let start_row = std::cmp::min(self.view.cursor_row, self.view.support_row);
+                let end_row = std::cmp::max(self.view.cursor_row, self.view.support_row);
+                let start_col = std::cmp::min(self.view.cursor_col, self.view.support_col);
+                let end_col = std::cmp::max(self.view.cursor_col, self.view.support_col);
+                (start_row..end_row + 1, start_col..end_col + 1)
+            }
+        };
+
+        let mut replacements = 0;
+        let mut txns: Vec<Transaction> = Vec::new();
+
+        for row in row_range.clone() {
+            for col in col_range.clone() {
+                if let Some(cell) = self.table.get_cell(row, col) {
+                    let old_value = cell.clone();
+                    let new_value = if cmd.global {
+                        old_value.replace(&cmd.pattern, &cmd.replacement)
+                    } else {
+                        old_value.replacen(&cmd.pattern, &cmd.replacement, 1)
+                    };
+
+                    if new_value != old_value {
+                        replacements += 1;
+                        txns.push(Transaction::SetCell {
+                            row,
+                            col,
+                            old_value,
+                            new_value,
+                        });
+                    }
+                }
+            }
+        }
+
+        if txns.is_empty() {
+            self.message = Some(format!("Pattern not found: {}", cmd.pattern));
+        } else {
+            self.execute(Transaction::Batch(txns));
+            self.view.update_col_widths(&self.table);
+            self.message = Some(format!("{} replacement(s) made", replacements));
         }
     }
 

@@ -3,6 +3,20 @@ use regex::Regex;
 use crate::util::{CellRef, parse_cell_ref};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplaceScope {
+    All,           // %s - entire table
+    Selection,     // s - visual selection only
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplaceCommand {
+    pub pattern: String,
+    pub replacement: String,
+    pub global: bool,      // /g flag - replace all occurrences in each cell
+    pub scope: ReplaceScope,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Write,
     Quit,
@@ -16,6 +30,7 @@ pub enum Command {
     SortDesc,       // Sort rows by current column, descending
     SortRow,        // Sort columns by current row, ascending
     SortRowDesc,    // Sort columns by current row, descending
+    Replace(ReplaceCommand),
     NavigateRow(usize),
     NavigateCell(CellRef),
     Unknown(String),
@@ -24,6 +39,11 @@ pub enum Command {
 impl Command {
     pub fn parse(input: &str) -> Option<Self> {
         let trimmed = input.trim();
+
+        // Check for substitute/replace command: %s/old/new/g or s/old/new/g
+        if let Some(replace_cmd) = Self::parse_replace(trimmed) {
+            return Some(Command::Replace(replace_cmd));
+        }
 
         if let Ok(row_dest) = input.parse::<usize>() {
             return Some(Command::NavigateRow(row_dest-1));
@@ -50,6 +70,38 @@ impl Command {
             "sortrd" | "sortr!" => Some(Command::SortRowDesc),
             _ => Some(Command::Unknown(trimmed.to_string())),
         }
+    }
+
+    /// Parse a substitute/replace command
+    /// Formats: %s/old/new/g, s/old/new/g, %s/old/new, s/old/new
+    fn parse_replace(input: &str) -> Option<ReplaceCommand> {
+        // Match %s/.../.../[g] or s/.../.../[g]
+        // Use a regex that handles the delimiter
+        let re = Regex::new(r"^(%)?s/([^/]*)/([^/]*)(/g)?$").unwrap();
+
+        if let Some(caps) = re.captures(input) {
+            let scope = if caps.get(1).is_some() {
+                ReplaceScope::All
+            } else {
+                ReplaceScope::Selection
+            };
+            let pattern = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
+            let replacement = caps.get(3).map(|m| m.as_str()).unwrap_or("").to_string();
+            let global = caps.get(4).is_some();
+
+            if pattern.is_empty() {
+                return None;
+            }
+
+            return Some(ReplaceCommand {
+                pattern,
+                replacement,
+                global,
+                scope,
+            });
+        }
+
+        None
     }
 }
 

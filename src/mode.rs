@@ -5,7 +5,8 @@ pub enum Mode {
     Command,
     Visual,
     VisualRow,
-    VisualCol
+    VisualCol,
+    Search,
 }
 
 impl Mode {
@@ -17,7 +18,12 @@ impl Mode {
             Mode::Visual => "VISUAL",
             Mode::VisualRow => "VISUAL (ROW)",
             Mode::VisualCol => "VISUAL (COL)",
+            Mode::Search => "SEARCH",
         }
+    }
+
+    pub fn is_visual(&self) -> bool {
+        matches!(self, Mode::Visual | Mode::VisualRow | Mode::VisualCol)
     }
 }
 

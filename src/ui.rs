@@ -131,11 +131,20 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
                     is_cursor = is_cursor || app.view.is_selected(row_idx, col_idx, app.mode);
                 }
 
+                // Check if this cell matches the search pattern
+                let is_search_match = app.search_pattern.as_ref()
+                    .map(|p| content.to_lowercase().contains(&p.to_lowercase()))
+                    .unwrap_or(false);
+
                 let style = if is_cursor {
                     Style::default()
                         .bg(Color::Blue)
                         .fg(Color::White)
                         .add_modifier(Modifier::BOLD)
+                } else if is_search_match {
+                    Style::default()
+                        .bg(Color::Yellow)
+                        .fg(Color::Black)
                 } else if is_header_row {
                     Style::default()
                         .fg(Color::Green)
@@ -187,6 +196,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Mode::Visual => Style::default().bg(Color::Red).fg(Color::White),
         Mode::VisualRow => Style::default().bg(Color::Red).fg(Color::White),
         Mode::VisualCol => Style::default().bg(Color::Red).fg(Color::White),
+        Mode::Search => Style::default().bg(Color::Magenta).fg(Color::White),
     };
 
     let dirty_indicator = if app.dirty { "[+]" } else { "" };
@@ -228,6 +238,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 fn render_command_line(frame: &mut Frame, app: &App, area: Rect) {
     let content = match app.mode {
         Mode::Command => format!(":{}", app.command_buffer),
+        Mode::Search => format!("/{}", app.search_buffer),
         _ => {
             if let Some(msg) = &app.message {
                 msg.clone()
