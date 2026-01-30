@@ -1,21 +1,101 @@
-use std::path::{PathBuf, Path};
+use std::path::PathBuf;
 use std::fs::File;
-use std::io::{self, BufReader, BufWriter};
+use std::io::{self, BufReader, BufWriter, Read, Write};
 
 use crate::table::Table;
 
+/// Detected file format
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FileFormat {
+    Csv,
+    Tsv,
+}
+
+impl FileFormat {
+    /// Detect format from file extension
+    fn from_extension(path: &PathBuf) -> Option<Self> {
+        let ext = path.extension()?.to_str()?.to_lowercase();
+        match ext.as_str() {
+            "csv" => Some(FileFormat::Csv),
+            "tsv" => Some(FileFormat::Tsv),
+            _ => None
+        }
+    }
+
+    /// Get the delimiter for CSV-like formats
+    fn delimiter(&self) -> Option<u8> {
+        match self {
+            FileFormat::Csv => Some(b','),
+            FileFormat::Tsv => Some(b'\t'),
+            _ => None,
+        }
+    }
+}
+
+/// Result of loading a file, including any warnings
+pub struct LoadResult {
+    pub table: Table,
+    pub warnings: Vec<String>,
+}
+
 pub struct FileIO {
-    pub file_path: Option<PathBuf>
+    pub file_path: Option<PathBuf>,
+    format: Option<FileFormat>,
 }
 
 impl FileIO {
     pub fn new(file_path: Option<PathBuf>) -> io::Result<Self> {
-        Ok(Self {file_path} )
+        let format = file_path.as_ref().and_then(FileFormat::from_extension);
+        Ok(Self { file_path, format })
     }
 
-    pub fn read_csv(&mut self) -> io::Result<Table> {
-        let delim = self.get_delim();
+    pub fn file_name(&self) -> String {
+        self.file_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default()
+    }
+
+    pub fn format(&self) -> Option<FileFormat> {
+        self.format
+    }
+
+    /// Load table from file, returning warnings about any modifications
+    pub fn load_table(&self) -> io::Result<LoadResult> {
+        if self.file_path.is_none() {
+            return Ok(LoadResult {
+                table: Table::new(vec![vec![String::new()]]),
+                warnings: Vec::new(),
+            });
+        }
+
+        match self.format {
+            Some(FileFormat::Csv) | Some(FileFormat::Tsv) => self.read_csv(),
+            None => {
+                // Default to CSV for unknown extensions
+                self.read_csv()
+            }
+        }
+    }
+
+    /// Write table to file
+    pub fn write(&self, table: &Table) -> io::Result<()> {
+        if self.file_path.is_none() {
+            return Err(io::Error::new(io::ErrorKind::NotFound, "No file path specified"));
+        }
+
+        match self.format {
+            Some(FileFormat::Csv) | Some(FileFormat::Tsv) => self.write_csv(table),
+            None => self.write_csv(table),
+        }
+    }
+
+    // === CSV/TSV ===
+
+    fn read_csv(&self) -> io::Result<LoadResult> {
         let path = self.file_path.as_ref().ok_or(io::ErrorKind::NotFound)?;
+        let delim = self.format.and_then(|f| f.delimiter()).unwrap_or(b',');
+
         let file = File::open(path)?;
         let reader = BufReader::new(file);
         let mut csv_reader = csv::ReaderBuilder::new()
@@ -26,30 +106,58 @@ impl FileIO {
             .from_reader(reader);
 
         let mut cells: Vec<Vec<String>> = Vec::new();
+        let mut row_lengths: Vec<usize> = Vec::new();
 
         for result in csv_reader.records() {
             let record = result.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             let row: Vec<String> = record.iter().map(|s| s.to_string()).collect();
+            row_lengths.push(row.len());
             cells.push(row);
         }
 
         if cells.is_empty() {
             cells.push(vec![String::new()]);
+            row_lengths.push(1);
         }
 
-        // find the maximum length and pad
-        let max_len = cells.iter().map(|x| x.len()).max().unwrap_or(0);
+        let mut warnings = Vec::new();
+        let max_len = row_lengths.iter().copied().max().unwrap_or(0);
+        let min_len = row_lengths.iter().copied().min().unwrap_or(0);
 
-        for row in cells.iter_mut() {
-            row.resize(max_len, String::new());
+        // Check if padding is needed
+        if min_len != max_len {
+            let short_rows: Vec<usize> = row_lengths
+                .iter()
+                .enumerate()
+                .filter(|(_, &len)| len < max_len)
+                .map(|(i, _)| i + 1) // 1-indexed for user display
+                .collect();
+
+            let row_desc = if short_rows.len() <= 5 {
+                short_rows.iter().map(|r| r.to_string()).collect::<Vec<_>>().join(", ")
+            } else {
+                format!("{} rows", short_rows.len())
+            };
+
+            warnings.push(format!(
+                "Padded {} with empty cells (max width: {} columns)",
+                row_desc, max_len
+            ));
+
+            for row in cells.iter_mut() {
+                row.resize(max_len, String::new());
+            }
         }
 
-        Ok(Table::new(cells))
+        Ok(LoadResult {
+            table: Table::new(cells),
+            warnings,
+        })
     }
 
-    pub fn save_csv(&mut self, table: &mut Table) -> io::Result<()> {
-        let delim = self.get_delim();
+    fn write_csv(&self, table: &Table) -> io::Result<()> {
         let path = self.file_path.as_ref().ok_or(io::ErrorKind::NotFound)?;
+        let delim = self.format.and_then(|f| f.delimiter()).unwrap_or(b',');
 
         let file = File::create(path)?;
         let writer = BufWriter::new(file);
@@ -69,39 +177,34 @@ impl FileIO {
 
         Ok(())
     }
+}
 
-    pub fn load_table(&mut self) -> io::Result<Table> {
-        if let None = self.file_path {
-            return Ok(Table::new(vec![vec![String::new()]]));
-        }
-        
-        return self.read_csv()
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_format_detection() {
+        assert_eq!(FileFormat::from_extension(&PathBuf::from("test.csv")), Some(FileFormat::Csv));
+        assert_eq!(FileFormat::from_extension(&PathBuf::from("test.tsv")), Some(FileFormat::Tsv));
+        assert_eq!(FileFormat::from_extension(&PathBuf::from("test.txt")), None);
     }
 
-    pub fn file_name(&mut self) -> String {
-        if let Some(ref path) = self.file_path {
-            return path.display().to_string();
-        }
+    #[test]
+    fn test_csv_padding_warning() {
+        let mut file = NamedTempFile::with_suffix(".csv").unwrap();
+        writeln!(file, "a,b,c").unwrap();
+        writeln!(file, "1,2").unwrap();  // Short row
+        writeln!(file, "3,4,5").unwrap();
 
-        String::from("")
-    }
+        let file_io = FileIO::new(Some(file.path().to_path_buf())).unwrap();
+        let result = file_io.load_table().unwrap();
 
-    pub fn get_delim(&mut self) -> u8 {
-         let ext = self.file_path
-            .as_ref()
-            .and_then(|p| p.extension())
-            .and_then(|e| e.to_str());
-        
-         if ext == Some("tsv") {
-             return b'\t';
-         }
-         b','
-    }
-
-    pub fn write(&mut self, table: &mut Table) -> io::Result<()> {
-        if let None = self.file_path {
-            return Err(io::Error::new(io::ErrorKind::NotFound, "file does not exist"));
-        }
-        return self.save_csv(table)
+        assert_eq!(result.table.col_count(), 3);
+        assert!(!result.warnings.is_empty());
+        assert!(result.warnings[0].contains("Padded"));
     }
 }

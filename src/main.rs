@@ -36,7 +36,7 @@ fn main() -> io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut file_io = FileIO::new(file_path)?;
-    let mut table = file_io.load_table()?;
+    let mut table = file_io.load_table()?.table;
 
     let mut app = App::new(table, file_io);
     let result = app.run(&mut terminal);
