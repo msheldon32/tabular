@@ -41,12 +41,15 @@ pub struct LoadResult {
 pub struct FileIO {
     pub file_path: Option<PathBuf>,
     format: Option<FileFormat>,
+    max_dim: (usize, usize)
 }
 
 impl FileIO {
     pub fn new(file_path: Option<PathBuf>) -> io::Result<Self> {
         let format = file_path.as_ref().and_then(FileFormat::from_extension);
-        Ok(Self { file_path, format })
+
+        let max_dim = (1000000,1000000);
+        Ok(Self { file_path, format, max_dim })
     }
 
     pub fn file_name(&self) -> String {
@@ -116,10 +119,13 @@ impl FileIO {
         let mut cells: Vec<Vec<String>> = Vec::new();
         let mut row_lengths: Vec<usize> = Vec::new();
 
-        for result in csv_reader.records() {
+        for (row_no, result) in csv_reader.records().enumerate() {
             let record = result.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             let row: Vec<String> = record.iter().map(|s| s.to_string()).collect();
             row_lengths.push(row.len());
+            if row_no > self.max_dim.0 || row.len() > self.max_dim.1 {
+                return Err(io::Error::from(io::ErrorKind::FileTooLarge));
+            }
             cells.push(row);
         }
 
