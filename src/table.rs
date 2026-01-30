@@ -197,6 +197,29 @@ pub enum SortDirection {
     Descending,
 }
 
+/// Compare two cell values for sorting
+fn compare_cells(cell_a: &str, cell_b: &str, sort_type: SortType, direction: SortDirection) -> std::cmp::Ordering {
+    let cmp = match sort_type {
+        SortType::Numeric => {
+            let num_a = cell_a.parse::<f64>().unwrap_or(f64::NAN);
+            let num_b = cell_b.parse::<f64>().unwrap_or(f64::NAN);
+            // Handle NaN: push non-parseable values to the end
+            match (num_a.is_nan(), num_b.is_nan()) {
+                (true, true) => cell_a.cmp(cell_b), // Both NaN, sort as text
+                (true, false) => std::cmp::Ordering::Greater, // NaN goes last
+                (false, true) => std::cmp::Ordering::Less,
+                (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
+            }
+        }
+        SortType::Text => cell_a.to_lowercase().cmp(&cell_b.to_lowercase()),
+    };
+
+    match direction {
+        SortDirection::Ascending => cmp,
+        SortDirection::Descending => cmp.reverse(),
+    }
+}
+
 impl Table {
     /// Probe a column to determine if it's numeric or text
     /// Skips empty cells; if majority of non-empty cells are numeric, returns Numeric
@@ -266,26 +289,7 @@ impl Table {
         indices.sort_by(|&a, &b| {
             let cell_a = self.get_cell(a, sort_col).map(|s| s.trim()).unwrap_or("");
             let cell_b = self.get_cell(b, sort_col).map(|s| s.trim()).unwrap_or("");
-
-            let cmp = match sort_type {
-                SortType::Numeric => {
-                    let num_a = cell_a.parse::<f64>().unwrap_or(f64::NAN);
-                    let num_b = cell_b.parse::<f64>().unwrap_or(f64::NAN);
-                    // Handle NaN: push non-parseable values to the end
-                    match (num_a.is_nan(), num_b.is_nan()) {
-                        (true, true) => cell_a.cmp(cell_b), // Both NaN, sort as text
-                        (true, false) => std::cmp::Ordering::Greater, // NaN goes last
-                        (false, true) => std::cmp::Ordering::Less,
-                        (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
-                    }
-                }
-                SortType::Text => cell_a.to_lowercase().cmp(&cell_b.to_lowercase()),
-            };
-
-            match direction {
-                SortDirection::Ascending => cmp,
-                SortDirection::Descending => cmp.reverse(),
-            }
+            compare_cells(cell_a, cell_b, sort_type, direction)
         });
 
         // If we skipped header, prepend 0
@@ -313,25 +317,7 @@ impl Table {
         indices.sort_by(|&a, &b| {
             let cell_a = self.get_cell(sort_row, a).map(|s| s.trim()).unwrap_or("");
             let cell_b = self.get_cell(sort_row, b).map(|s| s.trim()).unwrap_or("");
-
-            let cmp = match sort_type {
-                SortType::Numeric => {
-                    let num_a = cell_a.parse::<f64>().unwrap_or(f64::NAN);
-                    let num_b = cell_b.parse::<f64>().unwrap_or(f64::NAN);
-                    match (num_a.is_nan(), num_b.is_nan()) {
-                        (true, true) => cell_a.cmp(cell_b),
-                        (true, false) => std::cmp::Ordering::Greater,
-                        (false, true) => std::cmp::Ordering::Less,
-                        (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
-                    }
-                }
-                SortType::Text => cell_a.to_lowercase().cmp(&cell_b.to_lowercase()),
-            };
-
-            match direction {
-                SortDirection::Ascending => cmp,
-                SortDirection::Descending => cmp.reverse(),
-            }
+            compare_cells(cell_a, cell_b, sort_type, direction)
         });
 
         if skip_first_col {
@@ -451,6 +437,16 @@ impl TableView {
     pub fn set_support(&mut self) {
         self.support_row = self.cursor_row;
         self.support_col = self.cursor_col;
+    }
+
+    /// Get the bounds of the current selection (start_row, end_row, start_col, end_col)
+    pub fn get_selection_bounds(&self) -> (usize, usize, usize, usize) {
+        (
+            cmp::min(self.cursor_row, self.support_row),
+            cmp::max(self.cursor_row, self.support_row),
+            cmp::min(self.cursor_col, self.support_col),
+            cmp::max(self.cursor_col, self.support_col),
+        )
     }
 
     pub fn expand_column(&mut self, length: usize) {
@@ -623,11 +619,7 @@ impl TableView {
     }
 
     pub fn yank_span(&self, table: &Table) -> Option<Vec<Vec<String>>> {
-        let start_row = cmp::min(self.cursor_row, self.support_row);
-        let end_row = cmp::max(self.cursor_row, self.support_row);
-        let start_col = cmp::min(self.cursor_col, self.support_col);
-        let end_col = cmp::max(self.cursor_col, self.support_col);
-
+        let (start_row, end_row, start_col, end_col) = self.get_selection_bounds();
         table.get_span(start_row, end_row, start_col, end_col)
     }
 
@@ -636,11 +628,7 @@ impl TableView {
     }
 
     pub fn clear_span(&mut self, table: &mut Table) {
-        let start_row = cmp::min(self.cursor_row, self.support_row);
-        let end_row = cmp::max(self.cursor_row, self.support_row);
-        let start_col = cmp::min(self.cursor_col, self.support_col);
-        let end_col = cmp::max(self.cursor_col, self.support_col);
-
+        let (start_row, end_row, start_col, end_col) = self.get_selection_bounds();
         for row_idx in start_row..=end_row {
             for col_idx in start_col..=end_col {
               table.cells[row_idx][col_idx] = String::new();
@@ -649,9 +637,7 @@ impl TableView {
     }
 
     pub fn clear_row_span(&mut self, table: &mut Table) {
-        let start_row = cmp::min(self.cursor_row, self.support_row);
-        let end_row = cmp::max(self.cursor_row, self.support_row);
-
+        let (start_row, end_row, _, _) = self.get_selection_bounds();
         for row_idx in start_row..=end_row {
             for col_idx in 0..table.cells[0].len() {
               table.cells[row_idx][col_idx] = String::new();
@@ -660,9 +646,7 @@ impl TableView {
     }
 
     pub fn clear_col_span(&mut self, table: &mut Table) {
-        let start_col = cmp::min(self.cursor_col, self.support_col);
-        let end_col = cmp::max(self.cursor_col, self.support_col);
-
+        let (_, _, start_col, end_col) = self.get_selection_bounds();
         for row_idx in 0..table.cells.len() {
             for col_idx in start_col..=end_col {
               table.cells[row_idx][col_idx] = String::new();
@@ -671,12 +655,11 @@ impl TableView {
     }
 
     pub fn drag_down(&mut self, table: &mut Table, whole_row: bool) {
-        let start_row = cmp::min(self.cursor_row, self.support_row);
-        let end_row = cmp::max(self.cursor_row, self.support_row);
+        let (start_row, end_row, sel_start_col, sel_end_col) = self.get_selection_bounds();
         let (start_col, end_col) = if whole_row {
             (0, table.cells[0].len() - 1)
         } else {
-            (cmp::min(self.cursor_col, self.support_col), cmp::max(self.cursor_col, self.support_col))
+            (sel_start_col, sel_end_col)
         };
 
         for row_idx in start_row+1..=end_row {
@@ -687,12 +670,11 @@ impl TableView {
     }
 
     pub fn drag_up(&mut self, table: &mut Table, whole_row: bool) {
-        let start_row = cmp::min(self.cursor_row, self.support_row);
-        let end_row = cmp::max(self.cursor_row, self.support_row);
+        let (start_row, end_row, sel_start_col, sel_end_col) = self.get_selection_bounds();
         let (start_col, end_col) = if whole_row {
             (0, table.cells[0].len() - 1)
         } else {
-            (cmp::min(self.cursor_col, self.support_col), cmp::max(self.cursor_col, self.support_col))
+            (sel_start_col, sel_end_col)
         };
 
         for row_idx in start_row..end_row {
@@ -704,14 +686,12 @@ impl TableView {
     }
 
     pub fn drag_right(&mut self, table: &mut Table, whole_col: bool) {
+        let (sel_start_row, sel_end_row, start_col, end_col) = self.get_selection_bounds();
         let (start_row, end_row) = if whole_col {
             (0, table.cells.len() - 1)
         } else {
-            (cmp::min(self.cursor_row, self.support_row), cmp::max(self.cursor_row, self.support_row))
+            (sel_start_row, sel_end_row)
         };
-
-        let start_col = cmp::min(self.cursor_col, self.support_col);
-        let end_col = cmp::max(self.cursor_col, self.support_col);
 
         for row_idx in start_row..=end_row {
             for col_idx in start_col+1..=end_col {
@@ -721,14 +701,12 @@ impl TableView {
     }
 
     pub fn drag_left(&mut self, table: &mut Table, whole_col: bool) {
+        let (sel_start_row, sel_end_row, start_col, end_col) = self.get_selection_bounds();
         let (start_row, end_row) = if whole_col {
             (0, table.cells.len() - 1)
         } else {
-            (cmp::min(self.cursor_row, self.support_row), cmp::max(self.cursor_row, self.support_row))
+            (sel_start_row, sel_end_row)
         };
-
-        let start_col = cmp::min(self.cursor_col, self.support_col);
-        let end_col = cmp::max(self.cursor_col, self.support_col);
 
         for row_idx in start_row..=end_row {
             for col_idx in start_col..end_col {

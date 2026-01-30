@@ -117,7 +117,7 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
                 }
 
                 // Check if this cell matches the search pattern
-                let is_search_match = app.search_pattern.as_ref()
+                let is_search_match = app.search_pattern()
                     .map(|p| content.to_lowercase().contains(&p.to_lowercase()))
                     .unwrap_or(false);
 
@@ -132,16 +132,15 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
                 };
 
                 let display_content = if is_cursor && app.mode == Mode::Insert {
-                    let mut buf = app.edit_buffer.clone();
-                    if app.edit_cursor == buf.len() {
+                    let mut buf = app.edit_buffer().to_string();
+                    let cursor = app.edit_cursor();
+                    if cursor == buf.len() {
                         buf.push(' ');
                     }
-                    //buf.to_string()
-                    //
                     let spans = vec![
-                        Span::raw(buf[..app.edit_cursor].to_string()),
-                        Span::styled(buf[app.edit_cursor..app.edit_cursor+1].to_string(), Style::default().add_modifier(Modifier::UNDERLINED)),
-                        Span::raw(buf[app.edit_cursor+1..].to_string())
+                        Span::raw(buf[..cursor].to_string()),
+                        Span::styled(buf[cursor..cursor+1].to_string(), Style::default().add_modifier(Modifier::UNDERLINED)),
+                        Span::raw(buf[cursor+1..].to_string())
                     ];
                     Line::from(spans)
                 } else {
@@ -227,8 +226,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_command_line(frame: &mut Frame, app: &App, area: Rect) {
     let content = match app.mode {
-        Mode::Command => format!(":{}", app.command_buffer),
-        Mode::Search => format!("/{}", app.search_buffer),
+        Mode::Command => format!(":{}", app.command_buffer()),
+        Mode::Search => format!("/{}", app.search_buffer()),
         _ => {
             if let Some(msg) = &app.message {
                 msg.clone()

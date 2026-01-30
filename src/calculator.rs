@@ -5,6 +5,37 @@ use rand::Rng;
 use crate::table::Table;
 use crate::util::{CellRef, parse_cell_ref, parse_range, parse_row_range, parse_col_range, CalcError};
 
+/// Format a numeric value for display, removing unnecessary trailing zeros
+fn format_number(value: f64) -> String {
+    if value.fract() == 0.0 && value.abs() < 1e15 {
+        format!("{}", value as i64)
+    } else if value.is_nan() {
+        "NaN".to_string()
+    } else if value.is_infinite() {
+        if value.is_sign_positive() { "Inf" } else { "-Inf" }.to_string()
+    } else {
+        format!("{:.10}", value).trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
+/// Convert column index to letters (0 -> A, 1 -> B, 26 -> AA, etc.)
+fn col_to_letters(mut col: usize) -> String {
+    let mut result = String::new();
+    loop {
+        result.insert(0, (b'A' + (col % 26) as u8) as char);
+        if col < 26 {
+            break;
+        }
+        col = col / 26 - 1;
+    }
+    result
+}
+
+/// Convert a cell reference to a human-readable name like "A1", "B2", etc.
+fn cell_ref_to_name(cell: &CellRef) -> String {
+    format!("{}{}", col_to_letters(cell.col), cell.row + 1)
+}
+
 /// Find a function call in the expression, returning (start, end, arguments)
 /// This properly handles nested parentheses.
 fn find_function_call(expr: &str, func_name: &str) -> Option<(usize, usize, Vec<String>)> {
@@ -133,33 +164,10 @@ impl<'a> Calculator<'a> {
             let value = self.evaluate_formula(formula, &results)?;
             results.insert(cell_ref.clone(), value);
 
-            // Format nicely: remove trailing zeros for integers
-            let formatted = if value.fract() == 0.0 && value.abs() < 1e15 {
-                format!("{}", value as i64)
-            } else if value.is_nan() {
-                "NaN".to_string()
-            } else if value.is_infinite() {
-                if value.is_sign_positive() { "Inf" } else { "-Inf" }.to_string()
-            } else {
-                format!("{:.10}", value).trim_end_matches('0').trim_end_matches('.').to_string()
-            };
-            updates.push((cell_ref.row, cell_ref.col, formatted));
+            updates.push((cell_ref.row, cell_ref.col, format_number(value)));
         }
 
         Ok(updates)
-    }
-
-    /// Convert column index to letters for error messages
-    fn col_to_letters(&self, mut col: usize) -> String {
-        let mut result = String::new();
-        loop {
-            result.insert(0, (b'A' + (col % 26) as u8) as char);
-            if col < 26 {
-                break;
-            }
-            col = col / 26 - 1;
-        }
-        result
     }
 
     /// Extract all cell references from a formula
@@ -238,8 +246,7 @@ impl<'a> Calculator<'a> {
         order: &mut Vec<CellRef>,
     ) -> Result<(), CalcError> {
         if in_stack.contains(cell) {
-            let cell_name = format!("{}{}", self.col_to_letters(cell.col), cell.row + 1);
-            return Err(CalcError::CircularReference(cell_name));
+            return Err(CalcError::CircularReference(cell_ref_to_name(cell)));
         }
 
         if visited.contains(cell) {
@@ -273,10 +280,7 @@ impl<'a> Calculator<'a> {
 
         // Get from table
         let cell_content = self.table.get_cell(cell.row, cell.col)
-            .ok_or_else(|| {
-                let name = format!("{}{}", self.col_to_letters(cell.col), cell.row + 1);
-                CalcError::InvalidReference(name)
-            })?;
+            .ok_or_else(|| CalcError::InvalidReference(cell_ref_to_name(cell)))?;
 
         // Empty cell = 0
         if cell_content.trim().is_empty() {
@@ -285,10 +289,7 @@ impl<'a> Calculator<'a> {
 
         // Try to parse as number
         cell_content.trim().parse::<f64>()
-            .map_err(|_| {
-                let name = format!("{}{}", self.col_to_letters(cell.col), cell.row + 1);
-                CalcError::EvalError(format!("{} is not a number", name))
-            })
+            .map_err(|_| CalcError::EvalError(format!("{} is not a number", cell_ref_to_name(cell))))
     }
 
     /// Get values for a range
@@ -325,6 +326,17 @@ impl<'a> Calculator<'a> {
         }
     }
 
+    /// Evaluate a string argument to f64, expanding functions and cell refs
+    fn evaluate_arg(&self, arg: &str, results: &HashMap<CellRef, f64>) -> Result<f64, CalcError> {
+        let expanded = self.expand_functions(arg, results)?;
+        let expr = self.substitute_cell_refs(&expanded, results)?;
+        evalexpr::eval(&expr)
+            .map_err(|e| CalcError::EvalError(e.to_string()))?
+            .as_float()
+            .or_else(|_| evalexpr::eval(&expr).unwrap().as_int().map(|i| i as f64))
+            .map_err(|_| CalcError::EvalError("Invalid argument".to_string()))
+    }
+
     /// Helper to apply a single-argument function
     fn apply_func_single(&self, result: &mut String, func_name: &str, func: fn(f64) -> f64, results: &HashMap<CellRef, f64>) -> Result<(), CalcError> {
         while let Some((start, end, args)) = find_function_call(result, func_name) {
@@ -332,22 +344,9 @@ impl<'a> Calculator<'a> {
                 return Err(CalcError::EvalError(format!("{} requires 1 argument", func_name)));
             }
 
-            // Recursively expand any nested functions in the argument
-            let arg_expanded = self.expand_functions(&args[0], results)?;
-            let arg_expr = self.substitute_cell_refs(&arg_expanded, results)?;
-            let arg_val = evalexpr::eval(&arg_expr)
-                .map_err(|e| CalcError::EvalError(e.to_string()))?
-                .as_float()
-                .or_else(|_| evalexpr::eval(&arg_expr).unwrap().as_int().map(|i| i as f64))
-                .map_err(|_| CalcError::EvalError("Invalid argument".to_string()))?;
-
+            let arg_val = self.evaluate_arg(&args[0], results)?;
             let output = func(arg_val);
-            *result = format!(
-                "{}{}{}",
-                &result[..start],
-                output,
-                &result[end..]
-            );
+            *result = format!("{}{}{}", &result[..start], output, &result[end..]);
         }
         Ok(())
     }
@@ -359,31 +358,10 @@ impl<'a> Calculator<'a> {
                 return Err(CalcError::EvalError(format!("{} requires 2 arguments", func_name)));
             }
 
-            // Recursively expand any nested functions in arguments
-            let arg1_expanded = self.expand_functions(&args[0], results)?;
-            let arg2_expanded = self.expand_functions(&args[1], results)?;
-
-            let arg1_expr = self.substitute_cell_refs(&arg1_expanded, results)?;
-            let arg2_expr = self.substitute_cell_refs(&arg2_expanded, results)?;
-
-            let arg1 = evalexpr::eval(&arg1_expr)
-                .map_err(|e| CalcError::EvalError(e.to_string()))?
-                .as_float()
-                .or_else(|_| evalexpr::eval(&arg1_expr).unwrap().as_int().map(|i| i as f64))
-                .map_err(|_| CalcError::EvalError("Invalid argument".to_string()))?;
-            let arg2 = evalexpr::eval(&arg2_expr)
-                .map_err(|e| CalcError::EvalError(e.to_string()))?
-                .as_float()
-                .or_else(|_| evalexpr::eval(&arg2_expr).unwrap().as_int().map(|i| i as f64))
-                .map_err(|_| CalcError::EvalError("Invalid argument".to_string()))?;
-
+            let arg1 = self.evaluate_arg(&args[0], results)?;
+            let arg2 = self.evaluate_arg(&args[1], results)?;
             let output = func(arg1, arg2);
-            *result = format!(
-                "{}{}{}",
-                &result[..start],
-                output,
-                &result[end..]
-            );
+            *result = format!("{}{}{}", &result[..start], output, &result[end..]);
         }
         Ok(())
     }
@@ -610,17 +588,8 @@ impl<'a> Calculator<'a> {
             if args.len() != 2 {
                 return Err(CalcError::EvalError("PERCENTILE requires 2 arguments".to_string()));
             }
-            let range = &args[0];
-            let k_str = &args[1];
-
-            let vals = self.get_range_values(range, results)?;
-            let k_expanded = self.expand_functions(k_str, results)?;
-            let k_expr = self.substitute_cell_refs(&k_expanded, results)?;
-            let k = evalexpr::eval(&k_expr)
-                .map_err(|e| CalcError::EvalError(e.to_string()))?
-                .as_float()
-                .or_else(|_| evalexpr::eval(&k_expr).unwrap().as_int().map(|i| i as f64))
-                .map_err(|_| CalcError::EvalError("Invalid percentile".to_string()))?;
+            let vals = self.get_range_values(&args[0], results)?;
+            let k = self.evaluate_arg(&args[1], results)?;
 
             let pct = if vals.is_empty() || k < 0.0 || k > 1.0 {
                 f64::NAN
@@ -645,16 +614,8 @@ impl<'a> Calculator<'a> {
             if args.len() != 2 {
                 return Err(CalcError::EvalError("QUARTILE requires 2 arguments".to_string()));
             }
-            let range = &args[0];
-            let q_str = &args[1];
-
-            let vals = self.get_range_values(range, results)?;
-            let q_expanded = self.expand_functions(q_str, results)?;
-            let q_expr = self.substitute_cell_refs(&q_expanded, results)?;
-            let q = evalexpr::eval(&q_expr)
-                .map_err(|e| CalcError::EvalError(e.to_string()))?
-                .as_int()
-                .map_err(|_| CalcError::EvalError("Invalid quartile".to_string()))?;
+            let vals = self.get_range_values(&args[0], results)?;
+            let q = self.evaluate_arg(&args[1], results)? as i64;
 
             let pct = if vals.is_empty() || q < 0 || q > 4 {
                 f64::NAN

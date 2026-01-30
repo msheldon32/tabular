@@ -2,13 +2,14 @@ mod app;
 mod calculator;
 mod clipboard;
 mod command;
+mod fileio;
+mod input;
 mod mode;
+mod style;
 mod table;
 mod transaction;
 mod ui;
 mod util;
-mod fileio;
-mod style;
 
 use std::io;
 use std::path::PathBuf;

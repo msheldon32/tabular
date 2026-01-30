@@ -1,6 +1,4 @@
-use std::cmp;
 use std::io;
-use std::path::{PathBuf, Path};
 use std::time::Duration;
 
 use crossterm::event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers};
@@ -9,6 +7,10 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use crate::calculator::Calculator;
 use crate::clipboard::Clipboard;
 use crate::command::Command;
+use crate::input::{
+    is_escape, CommandHandler, InsertHandler, KeyResult, NavigationHandler,
+    SearchHandler, VisualHandler, VisualType,
+};
 use crate::mode::Mode;
 use crate::table::{SortDirection, Table, TableView};
 use crate::transaction::{History, Transaction};
@@ -23,21 +25,17 @@ pub struct App {
     pub history: History,
     pub style: Style,
     pub mode: Mode,
-    pub command_buffer: String,
-    pub edit_buffer: String,
-    pub edit_cursor: usize,
     pub file_io: FileIO,
     pub dirty: bool,
     pub has_selection: bool,
     pub message: Option<String>,
     pub should_quit: bool,
-    pub pending_key: Option<char>,
     pub header_mode: bool,
-    // Search state
-    pub search_pattern: Option<String>,
-    pub search_matches: Vec<(usize, usize)>,  // (row, col) of matching cells
-    pub search_index: usize,                   // Current match index
-    pub search_buffer: String,                 // Buffer for typing search pattern
+    // Mode handlers
+    nav_handler: NavigationHandler,
+    search_handler: SearchHandler,
+    insert_handler: InsertHandler,
+    command_handler: CommandHandler,
 }
 
 impl App {
@@ -52,21 +50,38 @@ impl App {
             history: History::new(),
             style: Style::new(),
             mode: Mode::Normal,
-            command_buffer: String::new(),
-            edit_buffer: String::new(),
-            edit_cursor: 0,
-            file_io: file_io,
+            file_io,
             dirty: false,
             has_selection: false,
             message: None,
             should_quit: false,
-            pending_key: None,
             header_mode: true,
-            search_pattern: None,
-            search_matches: Vec::new(),
-            search_index: 0,
-            search_buffer: String::new(),
+            nav_handler: NavigationHandler::new(),
+            search_handler: SearchHandler::new(),
+            insert_handler: InsertHandler::new(),
+            command_handler: CommandHandler::new(),
         }
+    }
+
+    // Accessor methods for UI
+    pub fn search_pattern(&self) -> Option<&String> {
+        self.search_handler.pattern.as_ref()
+    }
+
+    pub fn edit_buffer(&self) -> &str {
+        &self.insert_handler.buffer
+    }
+
+    pub fn edit_cursor(&self) -> usize {
+        self.insert_handler.cursor
+    }
+
+    pub fn command_buffer(&self) -> &str {
+        &self.command_handler.buffer
+    }
+
+    pub fn search_buffer(&self) -> &str {
+        &self.search_handler.buffer
     }
 
     pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
@@ -106,92 +121,6 @@ impl App {
         self.view.update_col_widths(&self.table);
     }
 
-    /// Check for escape key (Esc or Ctrl+[)
-    fn is_escape(key: KeyEvent) -> bool {
-        key.code == KeyCode::Esc
-            || (key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL))
-    }
-
-    // === Span helpers ===
-
-    fn selection_bounds(&self) -> (usize, usize, usize, usize) {
-        let start_row = cmp::min(self.view.cursor_row, self.view.support_row);
-        let end_row = cmp::max(self.view.cursor_row, self.view.support_row);
-        let start_col = cmp::min(self.view.cursor_col, self.view.support_col);
-        let end_col = cmp::max(self.view.cursor_col, self.view.support_col);
-        (start_row, end_row, start_col, end_col)
-    }
-
-    fn create_clear_span_txn(&self, start_row: usize, end_row: usize, start_col: usize, end_col: usize) -> Transaction {
-        let old_data = self.table.get_span(start_row, end_row, start_col, end_col)
-            .unwrap_or_default();
-        let new_data = vec![vec![String::new(); end_col - start_col + 1]; end_row - start_row + 1];
-        Transaction::SetSpan {
-            row: start_row,
-            col: start_col,
-            old_data,
-            new_data,
-        }
-    }
-
-    fn create_drag_down_txn(&self, whole_row: bool) -> Transaction {
-        let (start_row, end_row, mut start_col, mut end_col) = self.selection_bounds();
-        if whole_row {
-            start_col = 0;
-            end_col = self.table.col_count() - 1;
-        }
-
-        let old_data = self.table.get_span(start_row, end_row, start_col, end_col)
-            .unwrap_or_default();
-
-        let mut new_data = old_data.clone();
-        for row_idx in 1..new_data.len() {
-            for col_idx in 0..new_data[row_idx].len() {
-                new_data[row_idx][col_idx] = crate::util::translate_references(
-                    &new_data[0][col_idx],
-                    row_idx as isize,
-                    0,
-                );
-            }
-        }
-
-        Transaction::SetSpan {
-            row: start_row,
-            col: start_col,
-            old_data,
-            new_data,
-        }
-    }
-
-    fn create_drag_right_txn(&self, whole_col: bool) -> Transaction {
-        let (mut start_row, mut end_row, start_col, end_col) = self.selection_bounds();
-        if whole_col {
-            start_row = 0;
-            end_row = self.table.row_count() - 1;
-        }
-
-        let old_data = self.table.get_span(start_row, end_row, start_col, end_col)
-            .unwrap_or_default();
-
-        let mut new_data = old_data.clone();
-        for row_idx in 0..new_data.len() {
-            for col_idx in 1..new_data[row_idx].len() {
-                new_data[row_idx][col_idx] = crate::util::translate_references(
-                    &new_data[row_idx][0],
-                    0,
-                    col_idx as isize,
-                );
-            }
-        }
-
-        Transaction::SetSpan {
-            row: start_row,
-            col: start_col,
-            old_data,
-            new_data,
-        }
-    }
-
     // === Key handling ===
 
     fn handle_key(&mut self, key: KeyEvent) {
@@ -199,152 +128,29 @@ impl App {
             Mode::Normal => self.handle_normal_mode(key),
             Mode::Insert => self.handle_insert_mode(key),
             Mode::Command => self.handle_command_mode(key),
-            Mode::Visual => self.handle_visual_mode(key),
-            Mode::VisualRow => self.handle_visual_row_mode(key),
-            Mode::VisualCol => self.handle_visual_col_mode(key),
+            Mode::Visual => self.handle_visual_mode(key, VisualType::Cell),
+            Mode::VisualRow => self.handle_visual_mode(key, VisualType::Row),
+            Mode::VisualCol => self.handle_visual_mode(key, VisualType::Col),
             Mode::Search => self.handle_search_mode(key),
         }
     }
 
-    fn handle_navigation(&mut self, key: KeyEvent) {
-        if let Some(pending) = self.pending_key.take() {
-            if pending == 'g' && key.code == KeyCode::Char('g') {
-                self.view.move_to_top();
-                return;
-            }
-        }
-
-        match key.code {
-            KeyCode::Char('h') | KeyCode::Left => self.view.move_left(),
-            KeyCode::Char('j') | KeyCode::Down => self.view.move_down(&self.table),
-            KeyCode::Char('k') | KeyCode::Up => self.view.move_up(),
-            KeyCode::Char('l') | KeyCode::Right => self.view.move_right(&self.table),
-            KeyCode::Char('g') => self.pending_key = Some('g'),
-            KeyCode::Char('G') => self.view.move_to_bottom(&self.table),
-            KeyCode::Char('0') | KeyCode::Char('^') => self.view.move_to_first_col(),
-            KeyCode::Char('$') => self.view.move_to_last_col(&self.table),
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.view.half_page_down(&self.table);
-            }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.view.half_page_up();
-            }
-            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.view.page_down(&self.table);
-            }
-            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.view.page_up();
-            }
-            _ => {}
-        }
-    }
-
-    fn handle_visual_mode(&mut self, key: KeyEvent) {
-        if Self::is_escape(key) {
-            self.finish_edit();
-            self.has_selection = false;
-            return;
-        }
-
-        self.handle_navigation(key);
-
-        match key.code {
-            KeyCode::Char('y') => {
-                if let Some(span) = self.view.yank_span(&self.table) {
-                    self.clipboard.yank_span(span);
-                }
-                self.finish_edit();
-            }
-            KeyCode::Char('x') => {
-                let (sr, er, sc, ec) = self.selection_bounds();
-                let txn = self.create_clear_span_txn(sr, er, sc, ec);
-                self.execute_and_finish(txn);
-            }
-            KeyCode::Char(':') => {
-                self.mode = Mode::Command;
-                self.command_buffer.clear();
-            }
-            KeyCode::Char('q') => {
-                let txn = self.create_drag_down_txn(false);
-                self.execute_and_finish(txn);
-            }
-            KeyCode::Char('Q') => {
-                let txn = self.create_drag_right_txn(false);
-                self.execute_and_finish(txn);
-            }
-            _ => {}
-        }
-    }
-
-    fn handle_visual_row_mode(&mut self, key: KeyEvent) {
-        if Self::is_escape(key) {
-            self.finish_edit();
-            self.has_selection = false;
-            return;
-        }
-
-        self.handle_navigation(key);
-
-        match key.code {
-            KeyCode::Char('y') => {
-                if let Some(row) = self.view.yank_row(&self.table) {
-                    self.clipboard.yank_row(row);
-                }
-                self.finish_edit();
-            }
-            KeyCode::Char('x') => {
-                let (sr, er, _, _) = self.selection_bounds();
-                let txn = self.create_clear_span_txn(sr, er, 0, self.table.col_count() - 1);
-                self.execute_and_finish(txn);
-            }
-            KeyCode::Char(':') => {
-                self.mode = Mode::Command;
-                self.command_buffer.clear();
-            }
-            KeyCode::Char('q') => {
-                let txn = self.create_drag_down_txn(true);
-                self.execute_and_finish(txn);
-            }
-            _ => {}
-        }
-    }
-
-    fn handle_visual_col_mode(&mut self, key: KeyEvent) {
-        if Self::is_escape(key) {
-            self.finish_edit();
-            self.has_selection = false;
-            return;
-        }
-
-        self.handle_navigation(key);
-
-        match key.code {
-            KeyCode::Char('y') => {
-                if let Some(col) = self.view.yank_col(&self.table) {
-                    self.clipboard.yank_col(col);
-                }
-                self.finish_edit();
-            }
-            KeyCode::Char('x') => {
-                let (_, _, sc, ec) = self.selection_bounds();
-                let txn = self.create_clear_span_txn(0, self.table.row_count() - 1, sc, ec);
-                self.execute_and_finish(txn);
-            }
-            KeyCode::Char(':') => {
-                self.mode = Mode::Command;
-                self.command_buffer.clear();
-            }
-            KeyCode::Char('Q') => {
-                let txn = self.create_drag_right_txn(true);
-                self.execute_and_finish(txn);
-            }
-            _ => {}
-        }
+    fn handle_visual_mode(&mut self, key: KeyEvent, visual_type: VisualType) {
+        let handler = VisualHandler::new(visual_type);
+        let result = handler.handle_key(
+            key,
+            &mut self.view,
+            &self.table,
+            &mut self.clipboard,
+            &mut self.nav_handler,
+        );
+        self.process_key_result(result);
     }
 
     fn handle_normal_mode(&mut self, key: KeyEvent) {
-        // Handle pending key sequences
-        if let Some(pending) = self.pending_key.take() {
+        // Handle pending key sequences (d/y combinations)
+        if let Some(pending) = self.nav_handler.pending_key() {
+            self.nav_handler.set_pending_key(None);
             match (pending, key.code) {
                 ('d', KeyCode::Char('r')) => {
                     if let Some(row_data) = self.table.get_row(self.view.cursor_row) {
@@ -396,13 +202,14 @@ impl App {
             }
         }
 
-        self.handle_navigation(key);
+        // Handle navigation
+        self.nav_handler.handle(key, &mut self.view, &self.table);
 
         match key.code {
             KeyCode::Char('i') => {
                 self.mode = Mode::Insert;
-                self.edit_buffer = self.view.current_cell(&self.table).clone();
-                self.edit_cursor = self.edit_buffer.len();
+                let current = self.view.current_cell(&self.table).clone();
+                self.insert_handler.start_edit(current);
             }
             KeyCode::Char('V') => {
                 self.mode = Mode::VisualRow;
@@ -421,7 +228,7 @@ impl App {
             }
             KeyCode::Char(':') => {
                 self.mode = Mode::Command;
-                self.command_buffer.clear();
+                self.command_handler.start();
             }
             KeyCode::Char('q') => {
                 if self.dirty {
@@ -446,8 +253,8 @@ impl App {
                 self.view.scroll_to_cursor();
                 self.message = Some("Row added".to_string());
             }
-            KeyCode::Char('d') => self.pending_key = Some('d'),
-            KeyCode::Char('y') => self.pending_key = Some('y'),
+            KeyCode::Char('d') => self.nav_handler.set_pending_key(Some('d')),
+            KeyCode::Char('y') => self.nav_handler.set_pending_key(Some('y')),
             KeyCode::Char('p') => {
                 let (message, txn_opt) = self.clipboard.paste_as_transaction(
                     self.view.cursor_row,
@@ -500,7 +307,6 @@ impl App {
                     self.view.clamp_cursor(&self.table);
                     self.view.update_col_widths(&self.table);
                     self.message = Some("Undo".to_string());
-                    // Note: dirty state management for undo is complex; keeping it simple
                 }
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -513,209 +319,109 @@ impl App {
             }
             KeyCode::Char('/') => {
                 self.mode = Mode::Search;
-                self.search_buffer.clear();
+                self.search_handler.start_search();
             }
             KeyCode::Char('n') => {
-                self.goto_next_match();
+                if let Some(msg) = self.search_handler.goto_next(&mut self.view) {
+                    self.message = Some(msg);
+                }
             }
             KeyCode::Char('N') => {
-                self.goto_prev_match();
+                if let Some(msg) = self.search_handler.goto_prev(&mut self.view) {
+                    self.message = Some(msg);
+                }
             }
             _ => {}
         }
     }
 
     fn handle_search_mode(&mut self, key: KeyEvent) {
-        if Self::is_escape(key) {
-            self.mode = Mode::Normal;
-            self.search_buffer.clear();
-            return;
-        }
-
-        match key.code {
-            KeyCode::Enter => {
-                if !self.search_buffer.is_empty() {
-                    self.search_pattern = Some(self.search_buffer.clone());
-                    self.perform_search();
-                    self.goto_next_match();
+        let result = self.search_handler.handle_key(key);
+        match result {
+            KeyResult::Finish => {
+                if self.search_handler.pattern.is_some() {
+                    if let Some(msg) = self.search_handler.perform_search(&self.table) {
+                        self.message = Some(msg);
+                    }
+                    if let Some(msg) = self.search_handler.goto_next(&mut self.view) {
+                        self.message = Some(msg);
+                    }
                 }
                 self.mode = Mode::Normal;
             }
-            KeyCode::Backspace => {
-                self.search_buffer.pop();
-            }
-            KeyCode::Char(c) => {
-                self.search_buffer.push(c);
-            }
+            KeyResult::Continue => {}
             _ => {}
         }
     }
 
-    fn perform_search(&mut self) {
-        self.search_matches.clear();
-        self.search_index = 0;
-
-        if let Some(ref pattern) = self.search_pattern {
-            let pattern_lower = pattern.to_lowercase();
-
-            for row in 0..self.table.row_count() {
-                for col in 0..self.table.col_count() {
-                    if let Some(cell) = self.table.get_cell(row, col) {
-                        if cell.to_lowercase().contains(&pattern_lower) {
-                            self.search_matches.push((row, col));
-                        }
-                    }
-                }
-            }
-
-            if self.search_matches.is_empty() {
-                self.message = Some(format!("Pattern not found: {}", pattern));
-            } else {
-                self.message = Some(format!("{} match(es) found", self.search_matches.len()));
-            }
-        }
-    }
-
-    fn goto_next_match(&mut self) {
-        if self.search_matches.is_empty() {
-            if self.search_pattern.is_some() {
-                self.message = Some("No matches".to_string());
-            }
-            return;
-        }
-
-        // Find the next match after current cursor position
-        let current_pos = (self.view.cursor_row, self.view.cursor_col);
-        let mut next_index = None;
-
-        for (i, &(row, col)) in self.search_matches.iter().enumerate() {
-            if (row, col) > current_pos {
-                next_index = Some(i);
-                break;
-            }
-        }
-
-        // Wrap around if no match found after cursor
-        let index = next_index.unwrap_or(0);
-        self.search_index = index;
-
-        let (row, col) = self.search_matches[index];
-        self.view.cursor_row = row;
-        self.view.cursor_col = col;
-        self.view.scroll_to_cursor();
-
-        self.message = Some(format!(
-            "[{}/{}] matches",
-            index + 1,
-            self.search_matches.len()
-        ));
-    }
-
-    fn goto_prev_match(&mut self) {
-        if self.search_matches.is_empty() {
-            if self.search_pattern.is_some() {
-                self.message = Some("No matches".to_string());
-            }
-            return;
-        }
-
-        // Find the previous match before current cursor position
-        let current_pos = (self.view.cursor_row, self.view.cursor_col);
-        let mut prev_index = None;
-
-        for (i, &(row, col)) in self.search_matches.iter().enumerate().rev() {
-            if (row, col) < current_pos {
-                prev_index = Some(i);
-                break;
-            }
-        }
-
-        // Wrap around if no match found before cursor
-        let index = prev_index.unwrap_or(self.search_matches.len() - 1);
-        self.search_index = index;
-
-        let (row, col) = self.search_matches[index];
-        self.view.cursor_row = row;
-        self.view.cursor_col = col;
-        self.view.scroll_to_cursor();
-
-        self.message = Some(format!(
-            "[{}/{}] matches",
-            index + 1,
-            self.search_matches.len()
-        ));
-    }
-
     fn handle_insert_mode(&mut self, key: KeyEvent) {
-        if Self::is_escape(key) {
+        if is_escape(key) || key.code == KeyCode::Enter {
             let old_value = self.view.current_cell(&self.table).clone();
             let txn = Transaction::SetCell {
                 row: self.view.cursor_row,
                 col: self.view.cursor_col,
                 old_value,
-                new_value: self.edit_buffer.clone(),
+                new_value: self.insert_handler.buffer.clone(),
             };
             self.execute_and_finish(txn);
             return;
         }
 
-        match key.code {
-            KeyCode::Backspace => { 
-                //self.edit_buffer.pop(); 
-                if self.edit_cursor > 0 {
-                    self.edit_cursor -= 1;
-                    self.edit_buffer.remove(self.edit_cursor);
-                }
-            }
-            KeyCode::Char(c) => { 
-                self.edit_buffer.insert(self.edit_cursor, c);
-                self.edit_cursor += 1;
-            }
-            KeyCode::Left => { 
-                if self.edit_cursor > 0 {
-                    self.edit_cursor  -= 1;
-                }
-            }
-            KeyCode::Right => { 
-                self.edit_cursor = cmp::min(self.edit_cursor+1, self.edit_buffer.len());
-            }
-            KeyCode::Enter => {
-                let old_value = self.view.current_cell(&self.table).clone();
-                let txn = Transaction::SetCell {
-                    row: self.view.cursor_row,
-                    col: self.view.cursor_col,
-                    old_value,
-                    new_value: self.edit_buffer.clone(),
-                };
-                self.execute_and_finish(txn);
-            }
-            _ => {}
-        }
-
-        self.view.expand_column(self.edit_buffer.len());
+        self.insert_handler.handle_key(key, &self.view);
+        self.view.expand_column(self.insert_handler.buffer.len());
     }
 
     fn handle_command_mode(&mut self, key: KeyEvent) {
-        if Self::is_escape(key) {
+        if is_escape(key) {
             self.mode = Mode::Normal;
             self.has_selection = false;
-            self.command_buffer.clear();
+            self.command_handler.buffer.clear();
             return;
         }
 
-        match key.code {
-            KeyCode::Enter => {
-                if let Some(cmd) = Command::parse(&self.command_buffer) {
-                    self.execute_command(cmd);
-                }
-                self.command_buffer.clear();
-                if self.mode == Mode::Command {
-                    self.mode = Mode::Normal;
+        if let Some(cmd_str) = self.command_handler.handle_key(key) {
+            if let Some(cmd) = Command::parse(&cmd_str) {
+                self.execute_command(cmd);
+            }
+            if self.mode == Mode::Command {
+                self.mode = Mode::Normal;
+            }
+        }
+    }
+
+    fn process_key_result(&mut self, result: KeyResult) {
+        match result {
+            KeyResult::Continue => {}
+            KeyResult::Finish => {
+                self.finish_edit();
+                self.has_selection = false;
+            }
+            KeyResult::SwitchMode(mode) => {
+                self.mode = mode;
+                if mode == Mode::Command {
+                    self.command_handler.start();
                 }
             }
-            KeyCode::Backspace => { self.command_buffer.pop(); }
-            KeyCode::Char(c) => { self.command_buffer.push(c); }
-            _ => {}
+            KeyResult::Execute(txn) => {
+                self.execute(txn);
+            }
+            KeyResult::ExecuteAndFinish(txn) => {
+                self.execute_and_finish(txn);
+                self.has_selection = false;
+            }
+            KeyResult::Message(msg) => {
+                self.message = Some(msg);
+            }
+            KeyResult::Quit => {
+                if self.dirty {
+                    self.message = Some("Unsaved changes! Use :q! to force quit".to_string());
+                } else {
+                    self.should_quit = true;
+                }
+            }
+            KeyResult::ForceQuit => {
+                self.should_quit = true;
+            }
         }
     }
 
