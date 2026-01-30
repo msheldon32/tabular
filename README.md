@@ -71,6 +71,7 @@ tabular <file.csv>
 | `V` | Enter visual row mode (select rows) |
 | `Ctrl+v` | Enter visual column mode (select columns) |
 | `yy` | Yank current selection |
+| `dd` | Delete current selection |
 
 #### Other
 | Key | Action |
