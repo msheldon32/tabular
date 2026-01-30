@@ -211,8 +211,8 @@ impl Theme {
                 .with_bg(ThemeColor::Named(DarkGray)),
             cell_match: ElementStyle::fg(ThemeColor::Named(Black))
                 .with_bg(ThemeColor::Named(Yellow)),
-            header_col: ElementStyle::fg(ThemeColor::Named(LightCyan)).with_bold(),
-            header_row: ElementStyle::fg(ThemeColor::Named(LightGreen)).with_bold(),
+            header_col: ElementStyle::fg(ThemeColor::Named(LightGreen)).with_bold(),
+            header_row: ElementStyle::fg(ThemeColor::Named(LightCyan)).with_bold(),
             row_number: ElementStyle::fg(ThemeColor::Named(Gray)),
             row_number_cursor: ElementStyle::fg(ThemeColor::Named(LightYellow)).with_bold(),
             status_bar: ElementStyle::fg(ThemeColor::Named(White))
