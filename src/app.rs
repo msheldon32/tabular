@@ -85,6 +85,16 @@ impl App {
     }
 
     fn handle_navigation(&mut self, key: KeyEvent) {
+        if let Some(pending) = self.pending_key.take() {
+            match (pending, key.code) {
+                ('g', KeyCode::Char('g')) => {
+                    self.view.move_to_top();
+                }
+                _ => {
+                    // Invalid sequence, ignore
+                }
+            }
+        }
         match key.code {
             // Navigation
             KeyCode::Char('h') | KeyCode::Left => self.view.move_left(),
@@ -246,6 +256,7 @@ impl App {
                         self.clipboard.yank_row(row);
                         self.dirty = true;
                         self.message = Some("Row deleted".to_string());
+                        return;
                     }
                 }
                 ('d', KeyCode::Char('c')) => {
@@ -253,28 +264,27 @@ impl App {
                         self.clipboard.yank_col(col);
                         self.dirty = true;
                         self.message = Some("Column deleted".to_string());
+                        return;
                     }
                 }
                 ('y', KeyCode::Char('r')) => {
                     if let Some(row) = self.view.yank_row(&self.table) {
                         self.clipboard.yank_row(row);
                         self.message = Some("Row yanked".to_string());
+                        return;
                     }
                 }
                 ('y', KeyCode::Char('c')) => {
                     if let Some(col) = self.view.yank_col(&self.table) {
                         self.clipboard.yank_col(col);
                         self.message = Some("Column yanked".to_string());
+                        return;
                     }
-                }
-                ('g', KeyCode::Char('g')) => {
-                    self.view.move_to_top();
                 }
                 _ => {
                     // Invalid sequence, ignore
                 }
             }
-            return;
         }
 
         self.handle_navigation(key);
