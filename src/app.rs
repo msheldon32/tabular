@@ -77,6 +77,132 @@ impl App {
             Mode::Normal => self.handle_normal_mode(key),
             Mode::Insert => self.handle_insert_mode(key),
             Mode::Command => self.handle_command_mode(key),
+            Mode::Visual => self.handle_visual_mode(key)
+        }
+    }
+
+    fn handle_navigation(&mut self, key: KeyEvent) {
+        match key.code {
+            // Navigation
+            KeyCode::Char('h') | KeyCode::Left => self.view.move_left(),
+            KeyCode::Char('j') | KeyCode::Down => self.view.move_down(&self.table),
+            KeyCode::Char('k') | KeyCode::Up => self.view.move_up(),
+            KeyCode::Char('l') | KeyCode::Right => self.view.move_right(&self.table),
+
+            // Jump navigation
+            KeyCode::Char('g') => {
+                self.pending_key = Some('g');
+            }
+            KeyCode::Char('G') => {
+                self.view.move_to_bottom(&self.table);
+            }
+            KeyCode::Char('0') => {
+                self.view.move_to_first_col();
+            }
+            KeyCode::Char('$') => {
+                self.view.move_to_last_col(&self.table);
+            }
+
+            // Page navigation
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.view.half_page_down(&self.table);
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.view.half_page_up();
+            }
+            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.view.page_down(&self.table);
+            }
+            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.view.page_up();
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_visual_mode(&mut self, key: KeyEvent) {
+        let is_escape = key.code == KeyCode::Esc
+            || (key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL));
+
+        if is_escape {
+            self.mode = Mode::Normal;
+            self.view.update_col_widths(&self.table);
+            return;
+        }
+
+        // Handle pending key sequences (dr, dc, yr, yc, gg)
+        if let Some(pending) = self.pending_key.take() {
+            match (pending, key.code) {
+                ('d', KeyCode::Char('r')) => {
+                    if let Some(row) = self.view.delete_row(&mut self.table) {
+                        self.yanked_row = Some(row);
+                        self.yanked_col = None;
+                        self.dirty = true;
+                        self.message = Some("Row deleted".to_string());
+                    }
+                }
+                ('d', KeyCode::Char('c')) => {
+                    if let Some(col) = self.view.delete_col(&mut self.table) {
+                        self.yanked_row = None;
+                        self.yanked_col = Some(col);
+                        self.dirty = true;
+                        self.message = Some("Column deleted".to_string());
+                    }
+                }
+                ('y', KeyCode::Char('r')) => {
+                    if let Some(row) = self.view.yank_row(&self.table) {
+                        self.yanked_row = Some(row);
+                        self.yanked_col = None;
+                        self.message = Some("Row yanked".to_string());
+                    }
+                }
+                ('y', KeyCode::Char('c')) => {
+                    if let Some(col) = self.view.yank_col(&self.table) {
+                        self.yanked_col = Some(col);
+                        self.yanked_row = None;
+                        self.message = Some("Column yanked".to_string());
+                    }
+                }
+                ('g', KeyCode::Char('g')) => {
+                    self.view.move_to_top();
+                }
+                _ => {
+                    // Invalid sequence, ignore
+                }
+            }
+            return;
+        }
+
+        self.handle_navigation(key);
+
+        match key.code {
+            KeyCode::Char('d') => {
+                self.pending_key = Some('d');
+            }
+            KeyCode::Char('y') => {
+                self.pending_key = Some('y');
+            }
+            KeyCode::Char('p') => {
+                if let Some(row) = self.yanked_row.clone() {
+                    self.view.paste_row_below(&mut self.table, row);
+                    self.dirty = true;
+                    self.message = Some("Row pasted".to_string());
+                } else if let Some(col) = self.yanked_col.clone() {
+                    self.view.paste_col_after(&mut self.table, col);
+                    self.dirty = true;
+                    self.message = Some("Column pasted".to_string());
+                } else {
+                    self.message = Some("Nothing to paste".to_string());
+                }
+            }
+
+            // Cell operations
+            KeyCode::Char('x') => {
+                *self.view.current_cell_mut(&mut self.table) = String::new();
+                self.dirty = true;
+            }
+
+            _ => {}
         }
     }
 
@@ -124,45 +250,19 @@ impl App {
             return;
         }
 
+        self.handle_navigation(key);
+
         match key.code {
-            // Navigation
-            KeyCode::Char('h') | KeyCode::Left => self.view.move_left(),
-            KeyCode::Char('j') | KeyCode::Down => self.view.move_down(&self.table),
-            KeyCode::Char('k') | KeyCode::Up => self.view.move_up(),
-            KeyCode::Char('l') | KeyCode::Right => self.view.move_right(&self.table),
-
-            // Jump navigation
-            KeyCode::Char('g') => {
-                self.pending_key = Some('g');
-            }
-            KeyCode::Char('G') => {
-                self.view.move_to_bottom(&self.table);
-            }
-            KeyCode::Char('0') => {
-                self.view.move_to_first_col();
-            }
-            KeyCode::Char('$') => {
-                self.view.move_to_last_col(&self.table);
-            }
-
-            // Page navigation
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.view.half_page_down(&self.table);
-            }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.view.half_page_up();
-            }
-            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.view.page_down(&self.table);
-            }
-            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.view.page_up();
-            }
-
             // Insert mode
             KeyCode::Char('i') => {
                 self.mode = Mode::Insert;
                 self.edit_buffer = self.view.current_cell(&self.table).clone();
+            }
+
+            // Visual mode
+            KeyCode::Char('v') => {
+                self.mode = Mode::Visual;
+                self.view.set_support();
             }
 
             // Command mode
@@ -245,6 +345,7 @@ impl App {
             *self.view.current_cell_mut(&mut self.table) = self.edit_buffer.clone();
             self.dirty = true;
             self.mode = Mode::Normal;
+            self.view.update_col_widths(&self.table);
             return;
         }
 
@@ -259,9 +360,12 @@ impl App {
                 *self.view.current_cell_mut(&mut self.table) = self.edit_buffer.clone();
                 self.dirty = true;
                 self.mode = Mode::Normal;
+                self.view.update_col_widths(&self.table);
             }
             _ => {}
         }
+
+        self.view.expand_column(self.edit_buffer.len());
     }
 
     fn handle_command_mode(&mut self, key: KeyEvent) {

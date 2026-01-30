@@ -2,6 +2,8 @@ use std::fs::File;
 use std::io::{self, BufReader, BufWriter};
 use std::path::Path;
 
+use std::cmp;
+
 /// Pure data structure for the table
 #[derive(Debug, Clone)]
 pub struct Table {
@@ -163,6 +165,10 @@ pub struct TableView {
     pub cursor_row: usize,
     pub cursor_col: usize,
 
+    // Support position (for visual mode)
+    pub support_row: usize,
+    pub support_col: usize,
+
     // Viewport offset (top-left visible cell)
     pub viewport_row: usize,
     pub viewport_col: usize,
@@ -184,6 +190,8 @@ impl TableView {
             viewport_col: 0,
             visible_rows: 20,
             visible_cols: 10,
+            support_row: 0,
+            support_col: 0,
             col_widths: Vec::new(),
         }
     }
@@ -202,6 +210,24 @@ impl TableView {
                     .max(3)
             })
             .collect();
+    }
+
+    pub fn is_selected(&mut self, row_idx: usize, col_idx: usize) -> bool {
+        let mut row_valid = cmp::min(self.cursor_row, self.support_row) <= row_idx;
+        row_valid = row_valid && row_idx <= cmp::max(self.cursor_row, self.support_row);
+        let mut col_valid = cmp::min(self.cursor_col, self.support_col) <= col_idx;
+        col_valid = col_valid && col_idx <= cmp::max(self.cursor_col, self.support_col);
+
+        return row_valid && col_valid;
+    }
+
+    pub fn set_support(&mut self) {
+        self.support_row = self.cursor_row;
+        self.support_col = self.cursor_col;
+    }
+
+    pub fn expand_column(&mut self, length: usize) {
+        self.col_widths[self.cursor_col] = cmp::max(self.col_widths[self.cursor_col], length);
     }
 
     /// Ensure cursor is within table bounds
