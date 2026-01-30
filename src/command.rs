@@ -36,6 +36,8 @@ pub enum Command {
     Replace(ReplaceCommand),
     NavigateRow(usize),
     NavigateCell(CellRef),
+    Clip,           // Copy yank to system clipboard
+    SysPaste,       // Yank from system clipboard
     Unknown(String),
 }
 
@@ -78,6 +80,8 @@ impl Command {
             "sortrd" | "sortr!" => Some(Command::SortRowDesc),
             "grid" => Some(Command::Grid),
             "theme" | "themes" => Some(Command::ThemeList),
+            "clip" | "cp" => Some(Command::Clip),
+            "sp" | "syspaste" => Some(Command::SysPaste),
             _ => Some(Command::Unknown(trimmed.to_string())),
         }
     }

@@ -14,3 +14,4 @@ rand = "0.8"
 tempfile = "3.24.0"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+arboard = "3"

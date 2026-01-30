@@ -148,6 +148,8 @@ In **visual row mode** (`V`), `q` fills entire rows. In **visual column mode** (
 | `:grid` | Toggle grid lines |
 | `:theme [name]` | Set color theme (dark, light, solarized-dark) |
 | `:themes` | List available themes |
+| `:clip` | Copy yanked data to system clipboard |
+| `:sp` | Yank from system clipboard (then `p` to paste) |
 | `:[NUMBER]` | Jump to row NUMBER |
 | `:[CELL]` | Jump to CELL (e.g., `:A1`, `:B5`) |
 

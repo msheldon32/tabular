@@ -128,6 +128,145 @@ impl Clipboard {
         self.yanked_span = Some(cols);
         self.paste_anchor = PasteAnchor::ColStart;
     }
+
+    /// Copy current yank to system clipboard as TSV
+    pub fn to_system(&self) -> Result<String, String> {
+        let data = if let Some(ref row) = self.yanked_row {
+            vec![row.clone()]
+        } else if let Some(ref col) = self.yanked_col {
+            col.iter().map(|c| vec![c.clone()]).collect()
+        } else if let Some(ref span) = self.yanked_span {
+            span.clone()
+        } else {
+            return Err("Nothing to copy".to_string());
+        };
+
+        // Convert to TSV (tab-separated values)
+        let tsv: String = data
+            .iter()
+            .map(|row| row.join("\t"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        copy_to_system_clipboard(&tsv)?;
+
+        let rows = data.len();
+        let cols = data.first().map(|r| r.len()).unwrap_or(0);
+        Ok(format!("Copied {}x{} to system clipboard", rows, cols))
+    }
+
+    /// Paste from system clipboard (parses as TSV)
+    pub fn from_system(&mut self) -> Result<String, String> {
+        let text = paste_from_system_clipboard()?;
+
+        if text.is_empty() {
+            return Err("System clipboard is empty".to_string());
+        }
+
+        // Parse TSV (also handles single values)
+        let span: Vec<Vec<String>> = text
+            .lines()
+            .map(|line| line.split('\t').map(|s| s.to_string()).collect())
+            .collect();
+
+        let rows = span.len();
+        let cols = span.first().map(|r| r.len()).unwrap_or(0);
+
+        self.yanked_row = None;
+        self.yanked_col = None;
+        self.yanked_span = Some(span);
+        self.paste_anchor = PasteAnchor::Cursor;
+
+        Ok(format!("Yanked {}x{} from system clipboard", rows, cols))
+    }
+}
+
+/// Copy text to system clipboard using platform-appropriate method
+fn copy_to_system_clipboard(text: &str) -> Result<(), String> {
+    // Try command-line tools first on Linux (more reliable with terminal apps)
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::{Command, Stdio};
+        use std::io::Write;
+
+        // Try wl-copy (Wayland) first, then xclip (X11)
+        let commands = [
+            ("wl-copy", vec![]),
+            ("xclip", vec!["-selection", "clipboard"]),
+            ("xsel", vec!["--clipboard", "--input"]),
+        ];
+
+        for (cmd, args) in commands {
+            if let Ok(mut child) = Command::new(cmd)
+                .args(&args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                if let Some(mut stdin) = child.stdin.take() {
+                    if stdin.write_all(text.as_bytes()).is_ok() {
+                        drop(stdin);
+                        if child.wait().map(|s| s.success()).unwrap_or(false) {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+
+        return Err("No clipboard tool found (install xclip or wl-copy)".to_string());
+    }
+
+    // Use arboard on other platforms (macOS, Windows)
+    #[cfg(not(target_os = "linux"))]
+    {
+        let mut clipboard = arboard::Clipboard::new()
+            .map_err(|e| format!("Clipboard error: {}", e))?;
+        clipboard
+            .set_text(text)
+            .map_err(|e| format!("Clipboard error: {}", e))?;
+        Ok(())
+    }
+}
+
+/// Paste text from system clipboard using platform-appropriate method
+fn paste_from_system_clipboard() -> Result<String, String> {
+    // Try command-line tools first on Linux
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+
+        let commands = [
+            ("wl-paste", vec!["--no-newline"]),
+            ("xclip", vec!["-selection", "clipboard", "-o"]),
+            ("xsel", vec!["--clipboard", "--output"]),
+        ];
+
+        for (cmd, args) in commands {
+            if let Ok(output) = Command::new(cmd)
+                .args(&args)
+                .output()
+            {
+                if output.status.success() {
+                    return String::from_utf8(output.stdout)
+                        .map_err(|_| "Clipboard contains invalid UTF-8".to_string());
+                }
+            }
+        }
+
+        return Err("No clipboard tool found (install xclip or wl-copy)".to_string());
+    }
+
+    // Use arboard on other platforms
+    #[cfg(not(target_os = "linux"))]
+    {
+        let mut clipboard = arboard::Clipboard::new()
+            .map_err(|e| format!("Clipboard error: {}", e))?;
+        clipboard
+            .get_text()
+            .map_err(|e| format!("Clipboard error: {}", e))
+    }
 }
 
 #[cfg(test)]

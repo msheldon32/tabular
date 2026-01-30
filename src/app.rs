@@ -641,6 +641,18 @@ impl App {
                     Theme::builtin_names().join(", ")
                 ));
             }
+            Command::Clip => {
+                match self.clipboard.to_system() {
+                    Ok(msg) => self.message = Some(msg),
+                    Err(e) => self.message = Some(e),
+                }
+            }
+            Command::SysPaste => {
+                match self.clipboard.from_system() {
+                    Ok(msg) => self.message = Some(msg),
+                    Err(e) => self.message = Some(e),
+                }
+            }
             Command::Unknown(s) => self.message = Some(format!("Unknown command: {}", s)),
         }
         
