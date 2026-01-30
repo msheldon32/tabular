@@ -14,6 +14,17 @@ pub enum CalcError {
     EvalError(String),
 }
 
+fn is_ascii_alpha(b: u8) -> bool {
+    (b'A'..=b'Z').contains(&b) || (b'a'..=b'z').contains(&b)
+}
+
+fn is_ascii_digit(b: u8) -> bool {
+    (b'0'..=b'9').contains(&b)
+}
+
+fn is_ascii_alnum(b: u8) -> bool {
+    is_ascii_alpha(b) || is_ascii_digit(b)
+}
 
 /// Parse column letters to 0-indexed column number (A=0, B=1, ..., Z=25, AA=26, etc.)
 pub fn col_from_letters(letters: &str) -> usize {
@@ -24,6 +35,85 @@ pub fn col_from_letters(letters: &str) -> usize {
     result - 1
 }
 
+pub fn letters_from_col(mut col: usize) -> String {
+    col += 1;
+    let mut buf = Vec::new();
+    while col > 0 {
+        col -= 1;
+        let rem = (col % 26) as u8;
+        buf.push((b'A' + rem) as char);
+        col /= 26;
+    }
+    buf.into_iter().rev().collect()
+}
+
+
+pub fn translate_references(s: &str, row_diff: isize, col_diff: isize) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+
+    let mut i = 0;
+    while i < bytes.len() {
+        // Look for a potential column start: ASCII letter
+        if is_ascii_alpha(bytes[i]) {
+            let start = i;
+
+            // 1) consume letters (column)
+            let mut j = i;
+            while j < bytes.len() && is_ascii_alpha(bytes[j]) {
+                j += 1;
+            }
+            let col_part = &s[start..j];
+
+            // 2) consume digits (row)
+            let mut k = j;
+            while k < bytes.len() && is_ascii_digit(bytes[k]) {
+                k += 1;
+            }
+
+            // Must have at least one digit for a reference (e.g., "AA24")
+            if k > j {
+                let row_part = &s[j..k];
+
+                // Boundary checks: don't match inside alphanumeric tokens
+                let prev_ok = start == 0 || !is_ascii_alnum(bytes[start - 1]);
+                let next_ok = k == bytes.len() || !is_ascii_alnum(bytes[k]);
+
+                if prev_ok && next_ok {
+                    // Parse & translate
+                    if let (col, Some(row)) =
+                        (col_from_letters(col_part), row_part.parse::<usize>().ok())
+                    {
+                        // Apply signed offsets, clamping to 0
+                        let new_col = (col as isize + col_diff).max(0) as usize;
+                        let new_row = (row as isize + row_diff).max(1) as usize; // rows are 1-based
+
+                        // Preserve input column case (all-lower => lower; else upper)
+                        let lower = col_part.bytes().all(|b| (b'a'..=b'z').contains(&b));
+                        let mut col_str = letters_from_col(new_col);
+                        if lower {
+                            col_str.make_ascii_lowercase();
+                        }
+
+                        out.push_str(&col_str);
+                        out.push_str(&new_row.to_string());
+                        i = k;
+                        continue;
+                    }
+                }
+            }
+
+            // Not a valid ref -> emit current char and continue
+            out.push(bytes[i] as char);
+            i += 1;
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+
+    out
+}
 
 /// Parse a cell reference like "A1" or "AA123"
 pub fn parse_cell_ref(s: &str) -> Option<CellRef> {

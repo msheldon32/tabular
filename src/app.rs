@@ -11,7 +11,6 @@ use crate::mode::Mode;
 use crate::table::{Table, TableView};
 use crate::ui;
 use crate::clipboard::Clipboard;
-use crate::util::{CellRef, parse_cell_ref, parse_range};
 
 pub struct App {
     pub table: Table,
@@ -169,6 +168,26 @@ impl App {
                 return;
             }
 
+            // Dragging down (from top row)
+            KeyCode::Char('q') => {
+                self.view.drag_down(&mut self.table, false);
+                self.dirty = true;
+
+                self.mode = Mode::Normal;
+                self.view.update_col_widths(&mut self.table);
+                return;
+            }
+
+            // Dragging right (from left column)
+            KeyCode::Char('Q') => {
+                self.view.drag_right(&mut self.table, false);
+                self.dirty = true;
+
+                self.mode = Mode::Normal;
+                self.view.update_col_widths(&mut self.table);
+                return;
+            }
+
             _ => {}
         }
     }
@@ -205,7 +224,7 @@ impl App {
                 return;
             }
 
-            // dragging
+            // dragging down (from top row)
             KeyCode::Char('q') => {
                 self.view.drag_down(&mut self.table, true);
                 self.dirty = true;
@@ -251,8 +270,8 @@ impl App {
                 return;
             }
 
-            // dragging
-            KeyCode::Char('q') => {
+            // dragging right (from left column)
+            KeyCode::Char('Q') => {
                 self.view.drag_right(&mut self.table, true);
                 self.dirty = true;
 

@@ -4,6 +4,7 @@ use std::path::Path;
 use std::cmp;
 
 use crate::mode::Mode;
+use crate::util::translate_references;
 
 /// Pure data structure for the table
 #[derive(Debug, Clone)]
@@ -497,34 +498,67 @@ impl TableView {
     pub fn drag_down(&mut self, table: &mut Table, whole_row: bool) {
         let start_row = cmp::min(self.cursor_row, self.support_row);
         let end_row = cmp::max(self.cursor_row, self.support_row);
-        let mut start_col = 0;
-        let mut end_col = table.cells[0].len()-1;
-        if !whole_row {
-            let start_col = cmp::min(self.cursor_col, self.support_col);
-            let end_col = cmp::max(self.cursor_col, self.support_col);
-        }
-        
+        let (start_col, end_col) = if whole_row {
+            (0, table.cells[0].len() - 1)
+        } else {
+            (cmp::min(self.cursor_col, self.support_col), cmp::max(self.cursor_col, self.support_col))
+        };
+
         for row_idx in start_row+1..=end_row {
             for col_idx in start_col..=end_col {
-                table.cells[row_idx][col_idx] = table.cells[start_row][col_idx].clone();
+                table.cells[row_idx][col_idx] = translate_references(table.cells[start_row][col_idx].as_str(), (row_idx - start_row) as isize, 0isize);
+            }
+        }
+    }
+
+    pub fn drag_up(&mut self, table: &mut Table, whole_row: bool) {
+        let start_row = cmp::min(self.cursor_row, self.support_row);
+        let end_row = cmp::max(self.cursor_row, self.support_row);
+        let (start_col, end_col) = if whole_row {
+            (0, table.cells[0].len() - 1)
+        } else {
+            (cmp::min(self.cursor_col, self.support_col), cmp::max(self.cursor_col, self.support_col))
+        };
+
+        for row_idx in start_row..end_row {
+            let offset = row_idx as isize - end_row as isize;
+            for col_idx in start_col..=end_col {
+                table.cells[row_idx][col_idx] = translate_references(table.cells[end_row][col_idx].as_str(), offset, 0isize);
             }
         }
     }
 
     pub fn drag_right(&mut self, table: &mut Table, whole_col: bool) {
-        let mut start_row = 0;
-        let mut end_row = table.cells.len()-1;
-        if !whole_col {
-            start_row = cmp::min(self.cursor_row, self.support_row);
-            end_row = cmp::max(self.cursor_row, self.support_row);
-        }
+        let (start_row, end_row) = if whole_col {
+            (0, table.cells.len() - 1)
+        } else {
+            (cmp::min(self.cursor_row, self.support_row), cmp::max(self.cursor_row, self.support_row))
+        };
 
         let start_col = cmp::min(self.cursor_col, self.support_col);
         let end_col = cmp::max(self.cursor_col, self.support_col);
-        
+
         for row_idx in start_row..=end_row {
             for col_idx in start_col+1..=end_col {
-                table.cells[row_idx][col_idx] = table.cells[row_idx][start_col].clone();
+                table.cells[row_idx][col_idx] = translate_references(table.cells[row_idx][start_col].as_str(), 0isize, (col_idx - start_col) as isize);
+            }
+        }
+    }
+
+    pub fn drag_left(&mut self, table: &mut Table, whole_col: bool) {
+        let (start_row, end_row) = if whole_col {
+            (0, table.cells.len() - 1)
+        } else {
+            (cmp::min(self.cursor_row, self.support_row), cmp::max(self.cursor_row, self.support_row))
+        };
+
+        let start_col = cmp::min(self.cursor_col, self.support_col);
+        let end_col = cmp::max(self.cursor_col, self.support_col);
+
+        for row_idx in start_row..=end_row {
+            for col_idx in start_col..end_col {
+                let offset = col_idx as isize - end_col as isize;
+                table.cells[row_idx][col_idx] = translate_references(table.cells[row_idx][end_col].as_str(), 0isize, offset);
             }
         }
     }
