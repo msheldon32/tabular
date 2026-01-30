@@ -754,7 +754,7 @@ impl App {
                 ));
             }
             Command::Calc => {
-                let calc = Calculator::new(&self.table);
+                let calc = Calculator::new(&self.table, self.header_mode);
                 match calc.evaluate_all() {
                     Ok(updates) => {
                         if updates.is_empty() {

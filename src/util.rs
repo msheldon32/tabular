@@ -1,4 +1,5 @@
 use regex::Regex;
+use std::num::ParseIntError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CellRef {
@@ -12,6 +13,10 @@ pub enum CalcError {
     InvalidReference(String),
     ParseError(String),
     EvalError(String),
+}
+
+impl From<ParseIntError> for CalcError {
+    fn from(e: ParseIntError) -> Self { CalcError::ParseError(e.to_string()) }
 }
 
 fn is_ascii_alpha(b: u8) -> bool {
@@ -134,7 +139,14 @@ pub fn parse_cell_ref(s: &str) -> Option<CellRef> {
 }
 
 /// Parse a range like "A1:A10" and return all cell refs
-pub fn parse_range(s: &str) -> Result<Vec<CellRef>, CalcError> {
+pub fn parse_range(s: &str, row_count: usize, col_count: usize, skip_header: bool) -> Result<Vec<CellRef>, CalcError> {
+    // delegation
+    let row_range_re = Regex::new(r"\d+:\d+").unwrap();
+    let col_range_re = Regex::new(r"[A-Z]+:[A-Z]+").unwrap();
+
+    if (row_range_re.is_match(&s)) { return parse_row_range(s, col_count); }
+    if (col_range_re.is_match(&s)) { return parse_col_range(s, row_count, skip_header); }
+
     let parts: Vec<&str> = s.split(':').collect();
     if parts.len() != 2 {
         return Err(CalcError::ParseError(format!("Invalid range: {}", s)));
@@ -150,6 +162,62 @@ pub fn parse_range(s: &str) -> Result<Vec<CellRef>, CalcError> {
     let row_end = start.row.max(end.row);
     let col_start = start.col.min(end.col);
     let col_end = start.col.max(end.col);
+
+    for row in row_start..=row_end {
+        for col in col_start..=col_end {
+            refs.push(CellRef { row, col });
+        }
+    }
+
+    Ok(refs)
+}
+
+/// Parse a range of rows such as "1:10"
+pub fn parse_row_range(s: &str, col_count: usize) -> Result<Vec<CellRef>, CalcError> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 2 {
+        return Err(CalcError::ParseError(format!("Invalid range: {}", s)));
+    }
+
+    let row_start: usize = parts[0].parse()?;
+    let row_end: usize = parts[1].parse()?;
+    if row_start*row_end == 0 {
+        return Err(CalcError::InvalidReference(s.to_string()));
+    }
+
+    let mut refs = Vec::new();
+    let col_start = 0;
+    let col_end = col_count-1;
+
+    for row in row_start..=row_end {
+        for col in col_start..=col_end {
+            refs.push(CellRef { row, col });
+        }
+    }
+
+    Ok(refs)
+}
+
+/// Parse a range of columns such as "A:D"
+pub fn parse_col_range(s: &str, row_count: usize, skip_header: bool) -> Result<Vec<CellRef>, CalcError> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 2 {
+        return Err(CalcError::ParseError(format!("Invalid range: {}", s)));
+    }
+
+    let col_start: usize = col_from_letters(parts[0]);
+    let col_end: usize = col_from_letters(parts[1]);
+    if col_start*col_end == 0 {
+        return Err(CalcError::InvalidReference(s.to_string()));
+    }
+
+    let mut refs = Vec::new();
+    let row_start = if (skip_header) {
+        1
+    } else {
+        0
+    };
+    let row_end = row_count-1;
 
     for row in row_start..=row_end {
         for col in col_start..=col_end {

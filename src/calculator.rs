@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use regex::Regex;
 
 use crate::table::Table;
-use crate::util::{CellRef, parse_cell_ref, parse_range, CalcError};
+use crate::util::{CellRef, parse_cell_ref, parse_range, parse_row_range, parse_col_range, CalcError};
 
 impl std::fmt::Display for CalcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -17,11 +17,12 @@ impl std::fmt::Display for CalcError {
 
 pub struct Calculator<'a> {
     table: &'a Table,
+    skip_header: bool, // whether the header should be skipped in column aggregations
 }
 
 impl<'a> Calculator<'a> {
-    pub fn new(table: &'a Table) -> Self {
-        Self { table }
+    pub fn new(table: &'a Table, skip_header: bool) -> Self {
+        Self { table: table, skip_header: skip_header }
     }
 
     /// Evaluate all formula cells and return updates as (row, col, value)
@@ -46,7 +47,7 @@ impl<'a> Calculator<'a> {
         // Build dependency graph
         let mut dependencies: HashMap<CellRef, HashSet<CellRef>> = HashMap::new();
         for (cell_ref, formula) in &formulas {
-            let refs = self.extract_cell_refs(formula)?;
+            let refs = self.extract_cell_refs(formula, self.table.row_count(), self.table.col_count())?;
             dependencies.insert(cell_ref.clone(), refs);
         }
 
@@ -92,14 +93,30 @@ impl<'a> Calculator<'a> {
     }
 
     /// Extract all cell references from a formula
-    fn extract_cell_refs(&self, formula: &str) -> Result<HashSet<CellRef>, CalcError> {
+    fn extract_cell_refs(&self, formula: &str, row_count: usize, col_count: usize) -> Result<HashSet<CellRef>, CalcError> {
         let mut refs = HashSet::new();
         let upper = formula.to_uppercase();
 
         // Find ranges first (e.g., A1:B10)
         let range_re = Regex::new(r"[A-Z]+\d+:[A-Z]+\d+").unwrap();
         for cap in range_re.find_iter(&upper) {
-            for cell_ref in parse_range(cap.as_str())? {
+            for cell_ref in parse_range(cap.as_str(), row_count, col_count, self.skip_header)? {
+                refs.insert(cell_ref);
+            }
+        }
+
+        // Row ranges
+        let row_range_re = Regex::new(r"\d+:\d+").unwrap();
+        for cap in row_range_re.find_iter(&upper) {
+            for cell_ref in parse_row_range(cap.as_str(), col_count)? {
+                refs.insert(cell_ref);
+            }
+        }
+
+        // Col ranges
+        let col_range_re = Regex::new(r"[A-Z]+:[A-Z]+").unwrap();
+        for cap in col_range_re.find_iter(&upper) {
+            for cell_ref in parse_col_range(cap.as_str(), row_count, self.skip_header)? {
                 refs.insert(cell_ref);
             }
         }
@@ -206,7 +223,7 @@ impl<'a> Calculator<'a> {
 
     /// Get values for a range
     fn get_range_values(&self, range: &str, results: &HashMap<CellRef, f64>) -> Result<Vec<f64>, CalcError> {
-        let refs = parse_range(range)?;
+        let refs = parse_range(range, self.table.row_count(), self.table.col_count(), self.skip_header)?;
         let mut values = Vec::new();
         for cell_ref in refs {
             values.push(self.get_cell_value(&cell_ref, results)?);
