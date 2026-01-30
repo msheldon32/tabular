@@ -90,6 +90,8 @@ tabular <file.csv>
 | `:delcol` | Delete current column |
 | `:header` | Toggle header mode |
 | `:calc` | Evaluate all formulas |
+| `:[NUMBER]` | Jump to row [NUMBER] |
+| `:[CELL]` | Jump to [CELL] |
 
 ## Formulas
 

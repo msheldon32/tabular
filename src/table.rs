@@ -493,6 +493,41 @@ impl TableView {
             }
         }
     }
+
+    pub fn drag_down(&mut self, table: &mut Table, whole_row: bool) {
+        let start_row = cmp::min(self.cursor_row, self.support_row);
+        let end_row = cmp::max(self.cursor_row, self.support_row);
+        let mut start_col = 0;
+        let mut end_col = table.cells[0].len()-1;
+        if !whole_row {
+            let start_col = cmp::min(self.cursor_col, self.support_col);
+            let end_col = cmp::max(self.cursor_col, self.support_col);
+        }
+        
+        for row_idx in start_row+1..=end_row {
+            for col_idx in start_col..=end_col {
+                table.cells[row_idx][col_idx] = table.cells[start_row][col_idx].clone();
+            }
+        }
+    }
+
+    pub fn drag_right(&mut self, table: &mut Table, whole_col: bool) {
+        let mut start_row = 0;
+        let mut end_row = table.cells.len()-1;
+        if !whole_col {
+            start_row = cmp::min(self.cursor_row, self.support_row);
+            end_row = cmp::max(self.cursor_row, self.support_row);
+        }
+
+        let start_col = cmp::min(self.cursor_col, self.support_col);
+        let end_col = cmp::max(self.cursor_col, self.support_col);
+        
+        for row_idx in start_row..=end_row {
+            for col_idx in start_col+1..=end_col {
+                table.cells[row_idx][col_idx] = table.cells[row_idx][start_col].clone();
+            }
+        }
+    }
 }
 
 impl Default for TableView {

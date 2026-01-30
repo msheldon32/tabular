@@ -160,7 +160,6 @@ impl App {
                 return;
             }
 
-            // Cell operations
             KeyCode::Char('x') => {
                 self.view.clear_span(&mut self.table);
                 self.dirty = true;
@@ -197,9 +196,18 @@ impl App {
                 return;
             }
 
-            // Cell operations
             KeyCode::Char('x') => {
                 self.view.clear_row_span(&mut self.table);
+                self.dirty = true;
+
+                self.mode = Mode::Normal;
+                self.view.update_col_widths(&mut self.table);
+                return;
+            }
+
+            // dragging
+            KeyCode::Char('q') => {
+                self.view.drag_down(&mut self.table, true);
                 self.dirty = true;
 
                 self.mode = Mode::Normal;
@@ -234,9 +242,18 @@ impl App {
                 return;
             }
 
-            // Cell operations
             KeyCode::Char('x') => {
                 self.view.clear_col_span(&mut self.table);
+                self.dirty = true;
+
+                self.mode = Mode::Normal;
+                self.view.update_col_widths(&mut self.table);
+                return;
+            }
+
+            // dragging
+            KeyCode::Char('q') => {
+                self.view.drag_right(&mut self.table, true);
                 self.dirty = true;
 
                 self.mode = Mode::Normal;
