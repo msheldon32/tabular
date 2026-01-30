@@ -27,12 +27,18 @@ tabular <file.csv>
 | `l` / `→` | Move right |
 | `gg` | Jump to first row |
 | `G` | Jump to last row |
+| `[N]G` | Jump to row N (e.g., `10G` jumps to row 10) |
 | `0` / `^` | Jump to first column |
 | `$` | Jump to last column |
 | `Ctrl+d` | Half page down |
 | `Ctrl+u` | Half page up |
 | `Ctrl+f` | Full page down |
 | `Ctrl+b` | Full page up |
+
+**Count prefix**: Most navigation keys accept a count prefix. For example:
+- `5j` moves down 5 rows
+- `10l` moves right 10 columns
+- `3k` moves up 3 rows
 
 #### Editing
 | Key | Action |
@@ -51,6 +57,12 @@ tabular <file.csv>
 | `p` | Paste yanked content |
 | `u` | Undo |
 | `Ctrl+r` | Redo |
+
+**Count prefix for bulk operations**:
+- `5dr` deletes 5 rows starting from cursor
+- `3dc` deletes 3 columns starting from cursor
+- `5yr` yanks 5 rows (paste will insert all 5)
+- `3yc` yanks 3 columns
 
 #### Visual Modes
 | Key | Action |
@@ -116,6 +128,9 @@ In **visual row mode** (`V`), `q` fills entire rows. In **visual column mode** (
 | `:sortd` | Sort rows by current column (descending) |
 | `:sortr` | Sort columns by current row (ascending) |
 | `:sortrd` | Sort columns by current row (descending) |
+| `:grid` | Toggle grid lines |
+| `:theme [name]` | Set color theme (dark, light, solarized-dark) |
+| `:themes` | List available themes |
 | `:[NUMBER]` | Jump to row NUMBER |
 | `:[CELL]` | Jump to CELL (e.g., `:A1`, `:B5`) |
 
@@ -183,6 +198,18 @@ Cells starting with `=` are treated as formulas. Run `:calc` to evaluate all for
 - **Column letters**: Excel-style letters at the top (A, B, C... Z, AA, AB...)
 - **Header mode**: First row is highlighted as a header (on by default, toggle with `:header`)
 - **Scrolling**: Large tables scroll automatically as you navigate. Title bar shows visible range when scrolled.
+
+## Themes
+
+Tabular supports color themes. Switch themes with `:theme [name]`:
+
+| Theme | Description |
+|-------|-------------|
+| `dark` | Default dark theme |
+| `light` | Light theme for light terminals |
+| `solarized-dark` | Solarized dark color scheme |
+
+Custom themes can be defined in TOML files. See [docs/styles.md](docs/styles.md) for details.
 
 ## Status Bar
 

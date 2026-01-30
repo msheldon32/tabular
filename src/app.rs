@@ -173,10 +173,6 @@ impl App {
             SequenceAction::MoveToTop => {
                 self.view.move_to_top();
             }
-            SequenceAction::GotoRow => {
-                // count is 1-indexed, convert to 0-indexed
-                self.view.goto_row(count.saturating_sub(1), &self.table);
-            }
             SequenceAction::MoveDown => {
                 self.view.move_down_n(count, &self.table);
             }
@@ -280,6 +276,27 @@ impl App {
                 }
                 let msg = if actual_count == 1 { "Column yanked".to_string() } else { format!("{} columns yanked", actual_count) };
                 self.message = Some(msg);
+            }
+            SequenceAction::Yank => {
+                // In normal mode, yy yanks current row (like yr)
+                if let Some(row) = self.table.get_row(self.view.cursor_row) {
+                    self.clipboard.yank_rows(vec![row]);
+                    self.message = Some("Row yanked".to_string());
+                }
+            }
+            SequenceAction::Delete => {
+                // In normal mode, dd deletes current row (like dr)
+                if let Some(row_data) = self.table.get_row(self.view.cursor_row) {
+                    self.clipboard.yank_rows(vec![row_data.clone()]);
+                    let txn = Transaction::DeleteRow {
+                        idx: self.view.cursor_row,
+                        data: row_data,
+                    };
+                    self.execute(txn);
+                    self.view.clamp_cursor(&self.table);
+                    self.view.update_col_widths(&self.table);
+                    self.message = Some("Row deleted".to_string());
+                }
             }
         }
     }

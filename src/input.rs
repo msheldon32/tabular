@@ -37,11 +37,12 @@ pub fn is_escape(key: KeyEvent) -> bool {
 #[derive(Clone, Debug, PartialEq)]
 pub enum SequenceAction {
     MoveToTop,   // gg
-    GotoRow,     // [count]G - go to specific row
     DeleteRow,   // dr
     DeleteCol,   // dc
     YankRow,     // yr
     YankCol,     // yc
+    Yank,        // yy (visual mode)
+    Delete,      // dd (visual mode)
     // Motion actions (can have count)
     MoveDown,    // j
     MoveUp,      // k
@@ -141,11 +142,12 @@ impl KeyBuffer {
     fn match_sequence(&self) -> Option<SequenceAction> {
         match self.keys.as_slice() {
             ['g', 'g'] => Some(SequenceAction::MoveToTop),
-            ['G'] => Some(SequenceAction::GotoRow),
             ['d', 'r'] => Some(SequenceAction::DeleteRow),
             ['d', 'c'] => Some(SequenceAction::DeleteCol),
+            ['d', 'd'] => Some(SequenceAction::Delete),
             ['y', 'r'] => Some(SequenceAction::YankRow),
             ['y', 'c'] => Some(SequenceAction::YankCol),
+            ['y', 'y'] => Some(SequenceAction::Yank),
             ['j'] => Some(SequenceAction::MoveDown),
             ['k'] => Some(SequenceAction::MoveUp),
             ['h'] => Some(SequenceAction::MoveLeft),
@@ -420,12 +422,13 @@ impl VisualHandler {
             KeyBufferResult::Action(action, count) => {
                 match action {
                     SequenceAction::MoveToTop => view.move_to_top(),
-                    SequenceAction::GotoRow => view.goto_row(count.saturating_sub(1), table),
                     SequenceAction::MoveDown => view.move_down_n(count, table),
                     SequenceAction::MoveUp => view.move_up_n(count),
                     SequenceAction::MoveLeft => view.move_left_n(count),
                     SequenceAction::MoveRight => view.move_right_n(count, table),
-                    _ => {} // Other sequences (dr, dc, yr, yc) not used in visual mode
+                    SequenceAction::Yank => return self.handle_yank(view, table, clipboard),
+                    SequenceAction::Delete => return self.handle_delete(view, table),
+                    _ => {} // dr, dc, yr, yc not used in visual mode
                 }
                 KeyResult::Continue
             }
@@ -437,7 +440,6 @@ impl VisualHandler {
                 nav.handle(key, view, table);
 
                 match key.code {
-                    KeyCode::Char('y') => self.handle_yank(view, table, clipboard),
                     KeyCode::Char('x') => self.handle_delete(view, table),
                     KeyCode::Char(':') => KeyResult::SwitchMode(crate::mode::Mode::Command),
                     KeyCode::Char('q') => self.handle_drag_down(view, table),
@@ -449,20 +451,34 @@ impl VisualHandler {
     }
 
     fn handle_yank(&self, view: &mut TableView, table: &Table, clipboard: &mut Clipboard) -> KeyResult {
+        let (start_row, end_row, start_col, end_col) = view.get_selection_bounds();
+
         match self.visual_type {
             VisualType::Cell => {
-                if let Some(span) = view.yank_span(table) {
+                if let Some(span) = table.get_span(start_row, end_row, start_col, end_col) {
                     clipboard.yank_span(span);
                 }
             }
             VisualType::Row => {
-                if let Some(row) = view.yank_row(table) {
-                    clipboard.yank_row(row);
+                // Yank all selected rows
+                let rows: Vec<Vec<String>> = (start_row..=end_row)
+                    .filter_map(|r| table.get_row(r))
+                    .collect();
+                if !rows.is_empty() {
+                    clipboard.yank_rows(rows);
                 }
             }
             VisualType::Col => {
-                if let Some(col) = view.yank_col(table) {
-                    clipboard.yank_col(col);
+                // Yank all selected columns
+                let cols: Vec<Vec<String>> = (0..table.row_count())
+                    .map(|r| {
+                        (start_col..=end_col)
+                            .map(|c| table.get_cell(r, c).cloned().unwrap_or_default())
+                            .collect()
+                    })
+                    .collect();
+                if !cols.is_empty() {
+                    clipboard.yank_cols(cols);
                 }
             }
         }
@@ -470,24 +486,55 @@ impl VisualHandler {
     }
 
     fn handle_delete(&self, view: &TableView, table: &Table) -> KeyResult {
-        let (sr, er, sc, ec) = view.get_selection_bounds();
-        let (start_row, end_row, start_col, end_col) = match self.visual_type {
-            VisualType::Cell => (sr, er, sc, ec),
-            VisualType::Row => (sr, er, 0, table.col_count() - 1),
-            VisualType::Col => (0, table.row_count() - 1, sc, ec),
-        };
+        let (start_row, end_row, start_col, end_col) = view.get_selection_bounds();
 
-        let old_data = table.get_span(start_row, end_row, start_col, end_col)
-            .unwrap_or_default();
-        let new_data = vec![vec![String::new(); end_col - start_col + 1]; end_row - start_row + 1];
-
-        let txn = Transaction::SetSpan {
-            row: start_row,
-            col: start_col,
-            old_data,
-            new_data,
-        };
-        KeyResult::ExecuteAndFinish(txn)
+        match self.visual_type {
+            VisualType::Cell => {
+                // Clear cell contents
+                let old_data = table.get_span(start_row, end_row, start_col, end_col)
+                    .unwrap_or_default();
+                let new_data = vec![vec![String::new(); end_col - start_col + 1]; end_row - start_row + 1];
+                let txn = Transaction::SetSpan {
+                    row: start_row,
+                    col: start_col,
+                    old_data,
+                    new_data,
+                };
+                KeyResult::ExecuteAndFinish(txn)
+            }
+            VisualType::Row => {
+                // Delete entire rows
+                let txns: Vec<Transaction> = (start_row..=end_row)
+                    .filter_map(|r| {
+                        table.get_row(r).map(|data| Transaction::DeleteRow {
+                            idx: start_row, // Always delete at start_row since indices shift
+                            data,
+                        })
+                    })
+                    .collect();
+                if txns.is_empty() {
+                    KeyResult::Finish
+                } else {
+                    KeyResult::ExecuteAndFinish(Transaction::Batch(txns))
+                }
+            }
+            VisualType::Col => {
+                // Delete entire columns
+                let txns: Vec<Transaction> = (start_col..=end_col)
+                    .filter_map(|c| {
+                        table.get_col(c).map(|data| Transaction::DeleteCol {
+                            idx: start_col, // Always delete at start_col since indices shift
+                            data,
+                        })
+                    })
+                    .collect();
+                if txns.is_empty() {
+                    KeyResult::Finish
+                } else {
+                    KeyResult::ExecuteAndFinish(Transaction::Batch(txns))
+                }
+            }
+        }
     }
 
     fn handle_drag_down(&self, view: &TableView, table: &Table) -> KeyResult {
