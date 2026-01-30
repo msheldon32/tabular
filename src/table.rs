@@ -1,8 +1,9 @@
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter};
 use std::path::Path;
-
 use std::cmp;
+
+use crate::mode::Mode;
 
 /// Pure data structure for the table
 #[derive(Debug, Clone)]
@@ -138,15 +139,58 @@ impl Table {
         }
     }
 
+    pub fn get_span(&self, start_row: usize, end_row: usize, start_col: usize, end_col: usize) -> Option<Vec<Vec<String>>> {
+        let mut out_vec = Vec::new();
+
+        for row_iter in start_row..=end_row {
+            let mut row = Vec::new();
+            for col_iter in start_col..=end_col {
+                row.push(self.cells[row_iter][col_iter].clone());
+            }
+            out_vec.push(row);
+        }
+
+        Some(out_vec)
+    }
+
     pub fn insert_row_with_data(&mut self, idx: usize, mut row: Vec<String>) {
         row.resize(self.col_count(), String::new());
         self.cells.insert(idx, row);
+    }
+
+    pub fn fill_row_with_data(&mut self, idx: usize, row: Vec<String>) {
+        if row.len() != self.col_count() {
+            return;
+        }
+        self.cells[idx] = row;
     }
 
     pub fn insert_col_with_data(&mut self, idx: usize, col: Vec<String>) {
         for (row, value) in self.cells.iter_mut().zip(col.iter()) {
             if idx <= row.len() {
                 row.insert(idx, value.clone());
+            }
+        }
+    }
+
+    pub fn fill_col_with_data(&mut self, idx: usize, col: Vec<String>) {
+        for (row, value) in self.cells.iter_mut().zip(col.iter()) {
+            if idx < row.len() {
+                row[idx] = value.clone();
+            }
+        }
+    }
+
+    pub fn fill_span_with_data(&mut self, row_idx: usize, col_idx: usize, span: Vec<Vec<String>>) {
+        for (dx, row) in span.iter().enumerate() {
+            if row_idx + dx >= self.cells.len() {
+                self.insert_row_at(row_idx+dx);
+            }
+            for (dy, val) in row.iter().enumerate() {
+                if col_idx+dy >= self.cells[row_idx+dx].len() {
+                    self.insert_col_at(col_idx+dy);
+                }
+                self.cells[row_idx+dx][col_idx+dy] = val.clone();
             }
         }
     }
@@ -212,11 +256,18 @@ impl TableView {
             .collect();
     }
 
-    pub fn is_selected(&mut self, row_idx: usize, col_idx: usize) -> bool {
-        let mut row_valid = cmp::min(self.cursor_row, self.support_row) <= row_idx;
-        row_valid = row_valid && row_idx <= cmp::max(self.cursor_row, self.support_row);
-        let mut col_valid = cmp::min(self.cursor_col, self.support_col) <= col_idx;
-        col_valid = col_valid && col_idx <= cmp::max(self.cursor_col, self.support_col);
+    pub fn is_selected(&mut self, row_idx: usize, col_idx: usize, mode: Mode) -> bool {
+        let mut row_valid = true;
+        let mut col_valid = true;
+        if mode != Mode::VisualCol {
+            row_valid = cmp::min(self.cursor_row, self.support_row) <= row_idx;
+            row_valid = row_valid && row_idx <= cmp::max(self.cursor_row, self.support_row);
+        }
+
+        if mode != Mode::VisualRow {
+            col_valid = cmp::min(self.cursor_col, self.support_col) <= col_idx;
+            col_valid = col_valid && col_idx <= cmp::max(self.cursor_col, self.support_col);
+        }
 
         return row_valid && col_valid;
     }
@@ -368,10 +419,8 @@ impl TableView {
         table.get_row(self.cursor_row)
     }
 
-    pub fn paste_row_below(&mut self, table: &mut Table, row: Vec<String>) {
-        table.insert_row_with_data(self.cursor_row + 1, row);
-        self.cursor_row += 1;
-        self.scroll_to_cursor();
+    pub fn paste_row(&mut self, table: &mut Table, row: Vec<String>) {
+        table.fill_row_with_data(self.cursor_row, row);
     }
 
     // Column operations that update cursor
@@ -392,9 +441,57 @@ impl TableView {
         table.get_col(self.cursor_col)
     }
 
-    pub fn paste_col_after(&mut self, table: &mut Table, col: Vec<String>) {
-        table.insert_col_with_data(self.cursor_col + 1, col);
+    pub fn paste_col(&mut self, table: &mut Table, col: Vec<String>) {
+        table.fill_col_with_data(self.cursor_col, col);
         self.update_col_widths(table);
+    }
+
+    pub fn yank_span(&mut self, table: &mut Table) -> Option<Vec<Vec<String>>> {
+        let start_row = cmp::min(self.cursor_row, self.support_row);
+        let end_row = cmp::max(self.cursor_row, self.support_row);
+        let start_col = cmp::min(self.cursor_col, self.support_col);
+        let end_col = cmp::max(self.cursor_col, self.support_col);
+
+        table.get_span(start_row, end_row, start_col, end_col)
+    }
+
+    pub fn paste_span(&mut self, table: &mut Table, span: Vec<Vec<String>>) {
+        table.fill_span_with_data(self.cursor_row, self.cursor_col, span);
+    }
+
+    pub fn clear_span(&mut self, table: &mut Table) {
+        let start_row = cmp::min(self.cursor_row, self.support_row);
+        let end_row = cmp::max(self.cursor_row, self.support_row);
+        let start_col = cmp::min(self.cursor_col, self.support_col);
+        let end_col = cmp::max(self.cursor_col, self.support_col);
+
+        for row_idx in start_row..=end_row {
+            for col_idx in start_col..=end_col {
+              table.cells[row_idx][col_idx] = String::new();
+            }
+        }
+    }
+
+    pub fn clear_row_span(&mut self, table: &mut Table) {
+        let start_row = cmp::min(self.cursor_row, self.support_row);
+        let end_row = cmp::max(self.cursor_row, self.support_row);
+
+        for row_idx in start_row..=end_row {
+            for col_idx in 0..table.cells[0].len() {
+              table.cells[row_idx][col_idx] = String::new();
+            }
+        }
+    }
+
+    pub fn clear_col_span(&mut self, table: &mut Table) {
+        let start_col = cmp::min(self.cursor_col, self.support_col);
+        let end_col = cmp::max(self.cursor_col, self.support_col);
+
+        for row_idx in 0..table.cells.len() {
+            for col_idx in start_col..=end_col {
+              table.cells[row_idx][col_idx] = String::new();
+            }
+        }
     }
 }
 

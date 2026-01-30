@@ -127,8 +127,8 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
 
                 let mut is_cursor = row_idx == app.view.cursor_row && col_idx == app.view.cursor_col;
 
-                if app.mode == Mode::Visual {
-                    is_cursor = is_cursor || app.view.is_selected(row_idx, col_idx);
+                if matches!(app.mode, Mode::Visual | Mode::VisualCol | Mode::VisualRow) {
+                    is_cursor = is_cursor || app.view.is_selected(row_idx, col_idx, app.mode);
                 }
 
                 let style = if is_cursor {
@@ -184,7 +184,9 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Mode::Normal => Style::default().bg(Color::Blue).fg(Color::White),
         Mode::Insert => Style::default().bg(Color::Green).fg(Color::Black),
         Mode::Command => Style::default().bg(Color::Yellow).fg(Color::Black),
-        Mode::Visual => Style::default().bg(Color::Red).fg(Color::Black),
+        Mode::Visual => Style::default().bg(Color::Red).fg(Color::White),
+        Mode::VisualRow => Style::default().bg(Color::Red).fg(Color::White),
+        Mode::VisualCol => Style::default().bg(Color::Red).fg(Color::White),
     };
 
     let dirty_indicator = if app.dirty { "[+]" } else { "" };

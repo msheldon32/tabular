@@ -3,7 +3,9 @@ pub enum Mode {
     Normal,
     Insert,
     Command,
-    Visual
+    Visual,
+    VisualRow,
+    VisualCol
 }
 
 impl Mode {
@@ -13,6 +15,8 @@ impl Mode {
             Mode::Insert => "INSERT",
             Mode::Command => "COMMAND",
             Mode::Visual => "VISUAL",
+            Mode::VisualRow => "VISUAL (ROW)",
+            Mode::VisualCol => "VISUAL (COL)",
         }
     }
 }

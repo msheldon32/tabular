@@ -4,6 +4,7 @@ mod command;
 mod mode;
 mod table;
 mod ui;
+mod clipboard;
 
 use std::io;
 use std::path::PathBuf;

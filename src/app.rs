@@ -10,10 +10,12 @@ use crate::command::Command;
 use crate::mode::Mode;
 use crate::table::{Table, TableView};
 use crate::ui;
+use crate::clipboard::Clipboard;
 
 pub struct App {
     pub table: Table,
     pub view: TableView,
+    pub clipboard: Clipboard,
     pub mode: Mode,
     pub command_buffer: String,
     pub edit_buffer: String,
@@ -21,8 +23,6 @@ pub struct App {
     pub dirty: bool,
     pub message: Option<String>,
     pub should_quit: bool,
-    pub yanked_row: Option<Vec<String>>,
-    pub yanked_col: Option<Vec<String>>,
     pub pending_key: Option<char>,
     pub header_mode: bool,
 }
@@ -38,9 +38,12 @@ impl App {
         let mut view = TableView::new();
         view.update_col_widths(&table);
 
+        let clipboard = Clipboard::new();
+
         Ok(Self {
             table,
             view,
+            clipboard,
             mode: Mode::Normal,
             command_buffer: String::new(),
             edit_buffer: String::new(),
@@ -48,8 +51,6 @@ impl App {
             dirty: false,
             message: None,
             should_quit: false,
-            yanked_row: None,
-            yanked_col: None,
             pending_key: None,
             header_mode: true,
         })
@@ -77,6 +78,8 @@ impl App {
             Mode::Normal => self.handle_normal_mode(key),
             Mode::Insert => self.handle_insert_mode(key),
             Mode::Command => self.handle_command_mode(key),
+            Mode::VisualRow => self.handle_visual_row_mode(key),
+            Mode::VisualCol => self.handle_visual_col_mode(key),
             Mode::Visual => self.handle_visual_mode(key)
         }
     }
@@ -130,76 +133,101 @@ impl App {
             return;
         }
 
-        // Handle pending key sequences (dr, dc, yr, yc, gg)
-        if let Some(pending) = self.pending_key.take() {
-            match (pending, key.code) {
-                ('d', KeyCode::Char('r')) => {
-                    if let Some(row) = self.view.delete_row(&mut self.table) {
-                        self.yanked_row = Some(row);
-                        self.yanked_col = None;
-                        self.dirty = true;
-                        self.message = Some("Row deleted".to_string());
-                    }
+        self.handle_navigation(key);
+
+        match key.code {
+            KeyCode::Char('y') => {
+                if let Some(span) = self.view.yank_span(&mut self.table) {
+                    self.clipboard.yank_span(span)
                 }
-                ('d', KeyCode::Char('c')) => {
-                    if let Some(col) = self.view.delete_col(&mut self.table) {
-                        self.yanked_row = None;
-                        self.yanked_col = Some(col);
-                        self.dirty = true;
-                        self.message = Some("Column deleted".to_string());
-                    }
-                }
-                ('y', KeyCode::Char('r')) => {
-                    if let Some(row) = self.view.yank_row(&self.table) {
-                        self.yanked_row = Some(row);
-                        self.yanked_col = None;
-                        self.message = Some("Row yanked".to_string());
-                    }
-                }
-                ('y', KeyCode::Char('c')) => {
-                    if let Some(col) = self.view.yank_col(&self.table) {
-                        self.yanked_col = Some(col);
-                        self.yanked_row = None;
-                        self.message = Some("Column yanked".to_string());
-                    }
-                }
-                ('g', KeyCode::Char('g')) => {
-                    self.view.move_to_top();
-                }
-                _ => {
-                    // Invalid sequence, ignore
-                }
+
+                self.mode = Mode::Normal;
+                self.view.update_col_widths(&mut self.table);
+                return;
             }
+
+            // Cell operations
+            KeyCode::Char('x') => {
+                self.view.clear_span(&mut self.table);
+                self.dirty = true;
+
+                self.mode = Mode::Normal;
+                self.view.update_col_widths(&mut self.table);
+                return;
+            }
+
+            _ => {}
+        }
+    }
+
+    fn handle_visual_row_mode(&mut self, key: KeyEvent) {
+        let is_escape = key.code == KeyCode::Esc
+            || (key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL));
+
+        if is_escape {
+            self.mode = Mode::Normal;
+            self.view.update_col_widths(&self.table);
             return;
         }
 
         self.handle_navigation(key);
 
         match key.code {
-            KeyCode::Char('d') => {
-                self.pending_key = Some('d');
-            }
             KeyCode::Char('y') => {
-                self.pending_key = Some('y');
-            }
-            KeyCode::Char('p') => {
-                if let Some(row) = self.yanked_row.clone() {
-                    self.view.paste_row_below(&mut self.table, row);
-                    self.dirty = true;
-                    self.message = Some("Row pasted".to_string());
-                } else if let Some(col) = self.yanked_col.clone() {
-                    self.view.paste_col_after(&mut self.table, col);
-                    self.dirty = true;
-                    self.message = Some("Column pasted".to_string());
-                } else {
-                    self.message = Some("Nothing to paste".to_string());
+                if let Some(span) = self.view.yank_row(&mut self.table) {
+                    self.clipboard.yank_row(span)
                 }
+
+                self.mode = Mode::Normal;
+                self.view.update_col_widths(&mut self.table);
+                return;
             }
 
             // Cell operations
             KeyCode::Char('x') => {
-                *self.view.current_cell_mut(&mut self.table) = String::new();
+                self.view.clear_row_span(&mut self.table);
                 self.dirty = true;
+
+                self.mode = Mode::Normal;
+                self.view.update_col_widths(&mut self.table);
+                return;
+            }
+
+            _ => {}
+        }
+    }
+
+    fn handle_visual_col_mode(&mut self, key: KeyEvent) {
+        let is_escape = key.code == KeyCode::Esc
+            || (key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL));
+
+        if is_escape {
+            self.mode = Mode::Normal;
+            self.view.update_col_widths(&self.table);
+            return;
+        }
+
+        self.handle_navigation(key);
+
+        match key.code {
+            KeyCode::Char('y') => {
+                if let Some(span) = self.view.yank_col(&mut self.table) {
+                    self.clipboard.yank_col(span)
+                }
+
+                self.mode = Mode::Normal;
+                self.view.update_col_widths(&mut self.table);
+                return;
+            }
+
+            // Cell operations
+            KeyCode::Char('x') => {
+                self.view.clear_col_span(&mut self.table);
+                self.dirty = true;
+
+                self.mode = Mode::Normal;
+                self.view.update_col_widths(&mut self.table);
+                return;
             }
 
             _ => {}
@@ -212,31 +240,27 @@ impl App {
             match (pending, key.code) {
                 ('d', KeyCode::Char('r')) => {
                     if let Some(row) = self.view.delete_row(&mut self.table) {
-                        self.yanked_row = Some(row);
-                        self.yanked_col = None;
+                        self.clipboard.yank_row(row);
                         self.dirty = true;
                         self.message = Some("Row deleted".to_string());
                     }
                 }
                 ('d', KeyCode::Char('c')) => {
                     if let Some(col) = self.view.delete_col(&mut self.table) {
-                        self.yanked_row = None;
-                        self.yanked_col = Some(col);
+                        self.clipboard.yank_col(col);
                         self.dirty = true;
                         self.message = Some("Column deleted".to_string());
                     }
                 }
                 ('y', KeyCode::Char('r')) => {
                     if let Some(row) = self.view.yank_row(&self.table) {
-                        self.yanked_row = Some(row);
-                        self.yanked_col = None;
+                        self.clipboard.yank_row(row);
                         self.message = Some("Row yanked".to_string());
                     }
                 }
                 ('y', KeyCode::Char('c')) => {
                     if let Some(col) = self.view.yank_col(&self.table) {
-                        self.yanked_col = Some(col);
-                        self.yanked_row = None;
+                        self.clipboard.yank_col(col);
                         self.message = Some("Column yanked".to_string());
                     }
                 }
@@ -259,11 +283,26 @@ impl App {
                 self.edit_buffer = self.view.current_cell(&self.table).clone();
             }
 
-            // Visual mode
+            // Visual row mode
+            KeyCode::Char('V') => {
+                self.mode = Mode::VisualRow;
+                self.view.set_support();
+            }
+
+            // Visual column mode
+            KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.mode = Mode::VisualCol;
+                self.view.set_support();
+
+                return;
+            }
+
+            // Vanilla Visual mode
             KeyCode::Char('v') => {
                 self.mode = Mode::Visual;
                 self.view.set_support();
             }
+
 
             // Command mode
             KeyCode::Char(':') => {
@@ -301,17 +340,12 @@ impl App {
                 self.pending_key = Some('y');
             }
             KeyCode::Char('p') => {
-                if let Some(row) = self.yanked_row.clone() {
-                    self.view.paste_row_below(&mut self.table, row);
+                let (message, succeeded) = self.clipboard.paste(&mut self.view, &mut self.table);
+
+                if succeeded {
                     self.dirty = true;
-                    self.message = Some("Row pasted".to_string());
-                } else if let Some(col) = self.yanked_col.clone() {
-                    self.view.paste_col_after(&mut self.table, col);
-                    self.dirty = true;
-                    self.message = Some("Column pasted".to_string());
-                } else {
-                    self.message = Some("Nothing to paste".to_string());
                 }
+                self.message = Some(message);
             }
 
             // Column operations
