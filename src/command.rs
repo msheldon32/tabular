@@ -31,6 +31,8 @@ pub enum Command {
     SortRow,        // Sort columns by current row, ascending
     SortRowDesc,    // Sort columns by current row, descending
     Grid,
+    Theme(String),  // Set theme by name
+    ThemeList,      // List available themes
     Replace(ReplaceCommand),
     NavigateRow(usize),
     NavigateCell(CellRef),
@@ -56,6 +58,11 @@ impl Command {
             return Some(Command::NavigateCell(parse_cell_ref(input)?));
         }
 
+        // Check for theme command with argument
+        if let Some(theme_name) = trimmed.strip_prefix("theme ") {
+            return Some(Command::Theme(theme_name.trim().to_string()));
+        }
+
         match trimmed {
             "w" => Some(Command::Write),
             "q" => Some(Command::Quit),
@@ -70,6 +77,7 @@ impl Command {
             "sortr" => Some(Command::SortRow),
             "sortrd" | "sortr!" => Some(Command::SortRowDesc),
             "grid" => Some(Command::Grid),
+            "theme" | "themes" => Some(Command::ThemeList),
             _ => Some(Command::Unknown(trimmed.to_string())),
         }
     }

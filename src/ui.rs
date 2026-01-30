@@ -1,6 +1,6 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table as RatatuiTable},
     Frame,
@@ -69,7 +69,7 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Build header row with column letters
-    let header_style = app.style.header_style;
+    let header_style = app.style.header_col();
 
     let mut header_cells: Vec<Cell> = Vec::with_capacity(visible_cols + 1);
     header_cells.push(Cell::from("").style(header_style)); // Empty corner cell
@@ -77,14 +77,13 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
     for col in app.view.viewport_col..end_col {
         let letter = letters_from_col(col);
         let style = if col == app.view.cursor_col {
-            header_style.bg(Color::DarkGray)
+            app.style.row_number_cursor()
         } else {
             header_style
         };
         header_cells.push(Cell::from(letter).style(style));
     }
-    let header_row = Row::new(header_cells)
-        .bottom_margin(app.style.bottom_margin());
+    let header_row = Row::new(header_cells);
 
     // Calculate visible row range
     let end_row = (app.view.viewport_row + app.view.visible_rows).min(row_count);
@@ -98,9 +97,9 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
 
             // Row number cell
             let row_num_style = if row_idx == app.view.cursor_row {
-                app.style.highlight_number_cell_style
+                app.style.row_number_cursor()
             } else {
-                app.style.number_cell_style
+                app.style.row_number()
             };
             cells.push(Cell::from(format!("{}", row_idx + 1)).style(row_num_style));
 
@@ -110,11 +109,9 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
                     .map(|s| s.as_str())
                     .unwrap_or("");
 
-                let mut is_cursor = row_idx == app.view.cursor_row && col_idx == app.view.cursor_col;
-
-                if matches!(app.mode, Mode::Visual | Mode::VisualCol | Mode::VisualRow) {
-                    is_cursor = is_cursor || app.view.is_selected(row_idx, col_idx, app.mode);
-                }
+                let is_cursor = row_idx == app.view.cursor_row && col_idx == app.view.cursor_col;
+                let is_selected = matches!(app.mode, Mode::Visual | Mode::VisualCol | Mode::VisualRow)
+                    && app.view.is_selected(row_idx, col_idx, app.mode);
 
                 // Check if this cell matches the search pattern
                 let is_search_match = app.search_pattern()
@@ -122,13 +119,15 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
                     .unwrap_or(false);
 
                 let style = if is_cursor {
-                    app.style.cursor_cell_style
+                    app.style.cell_cursor()
+                } else if is_selected {
+                    app.style.cell_selection()
                 } else if is_search_match {
-                    app.style.match_cell_style
+                    app.style.cell_match()
                 } else if is_header_row {
-                    app.style.header_row_style
+                    app.style.header_row()
                 } else {
-                    app.style.default_cell_style
+                    app.style.cell()
                 };
 
                 let display_content = if is_cursor && app.mode == Mode::Insert {
@@ -150,7 +149,7 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
                 cells.push(Cell::from(display_content).style(style));
             }
 
-            Row::new(cells).bottom_margin(app.style.bottom_margin())
+            Row::new(cells)
         })
         .collect();
 
@@ -177,15 +176,7 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let mode_style = match app.mode {
-        Mode::Normal => Style::default().bg(Color::Blue).fg(Color::White),
-        Mode::Insert => Style::default().bg(Color::Green).fg(Color::Black),
-        Mode::Command => Style::default().bg(Color::Yellow).fg(Color::Black),
-        Mode::Visual => Style::default().bg(Color::Red).fg(Color::White),
-        Mode::VisualRow => Style::default().bg(Color::Red).fg(Color::White),
-        Mode::VisualCol => Style::default().bg(Color::Red).fg(Color::White),
-        Mode::Search => Style::default().bg(Color::Magenta).fg(Color::White),
-    };
+    let mode_style = app.style.status_mode(&app.mode);
 
     let dirty_indicator = if app.dirty { "[+]" } else { "" };
 
@@ -205,12 +196,12 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let status = Line::from(vec![
         Span::styled(
             format!(" {} ", app.mode.display_name()),
-            mode_style.add_modifier(Modifier::BOLD),
+            mode_style,
         ),
         Span::raw(" "),
         Span::raw(file_name),
         Span::raw(" "),
-        Span::styled(dirty_indicator, Style::default().fg(Color::Red)),
+        Span::styled(dirty_indicator, app.style.message_error()),
         Span::raw(" ".repeat(
             area.width
                 .saturating_sub(30)
@@ -219,25 +210,35 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Span::raw(position),
     ]);
 
-    let status_bar = Paragraph::new(status).style(Style::default().bg(Color::DarkGray));
+    let status_bar = Paragraph::new(status).style(app.style.status_bar());
 
     frame.render_widget(status_bar, area);
 }
 
 fn render_command_line(frame: &mut Frame, app: &App, area: Rect) {
-    let content = match app.mode {
-        Mode::Command => format!(":{}", app.command_buffer()),
-        Mode::Search => format!("/{}", app.search_buffer()),
+    let (content, style) = match app.mode {
+        Mode::Command => {
+            let line = Line::from(vec![
+                Span::styled(":", app.style.command_prompt()),
+                Span::styled(app.command_buffer(), app.style.command_line()),
+            ]);
+            (line, app.style.command_line())
+        }
+        Mode::Search => {
+            let line = Line::from(vec![
+                Span::styled("/", app.style.command_prompt()),
+                Span::styled(app.search_buffer(), app.style.command_line()),
+            ]);
+            (line, app.style.command_line())
+        }
         _ => {
-            if let Some(msg) = &app.message {
-                msg.clone()
-            } else {
-                String::new()
-            }
+            let msg = app.message.as_deref().unwrap_or("");
+            let line = Line::from(msg);
+            (line, app.style.message_info())
         }
     };
 
-    let command_line = Paragraph::new(content);
+    let command_line = Paragraph::new(content).style(style);
     frame.render_widget(command_line, area);
 }
 

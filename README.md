@@ -58,6 +58,7 @@ tabular <file.csv>
 | `v` | Enter visual mode (select cells) |
 | `V` | Enter visual row mode (select rows) |
 | `Ctrl+v` | Enter visual column mode (select columns) |
+| `yy` | Yank current selection |
 
 #### Other
 | Key | Action |

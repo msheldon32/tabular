@@ -1,15 +1,32 @@
 use crate::table::Table;
 use crate::transaction::Transaction;
 
+/// Where yanked data should be anchored when pasting
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum PasteAnchor {
+    /// Paste at cursor position (for visual selections)
+    Cursor,
+    /// Paste starting at column 0 (for row yanks)
+    RowStart,
+    /// Paste starting at row 0 (for column yanks)
+    ColStart,
+}
+
 pub struct Clipboard {
     pub yanked_row: Option<Vec<String>>,
     pub yanked_col: Option<Vec<String>>,
     pub yanked_span: Option<Vec<Vec<String>>>,
+    pub paste_anchor: PasteAnchor,
 }
 
 impl Clipboard {
     pub fn new() -> Self {
-        Self { yanked_row: None, yanked_col: None, yanked_span: None }
+        Self {
+            yanked_row: None,
+            yanked_col: None,
+            yanked_span: None,
+            paste_anchor: PasteAnchor::Cursor,
+        }
     }
 
     pub fn paste_as_transaction(
@@ -48,19 +65,27 @@ impl Clipboard {
         if let Some(ref span_data) = self.yanked_span {
             let rows = span_data.len();
             let cols = span_data.first().map(|r| r.len()).unwrap_or(0);
+
+            // Determine paste position based on anchor
+            let (paste_row, paste_col, msg) = match self.paste_anchor {
+                PasteAnchor::RowStart => (cursor_row, 0, format!("{} row(s) pasted", rows)),
+                PasteAnchor::ColStart => (0, cursor_col, format!("{} column(s) pasted", cols)),
+                PasteAnchor::Cursor => (cursor_row, cursor_col, "Span pasted".to_string()),
+            };
+
             let old_data = table.get_span(
-                cursor_row,
-                cursor_row + rows - 1,
-                cursor_col,
-                cursor_col + cols - 1,
+                paste_row,
+                paste_row + rows - 1,
+                paste_col,
+                paste_col + cols - 1,
             ).unwrap_or_default();
             let txn = Transaction::SetSpan {
-                row: cursor_row,
-                col: cursor_col,
+                row: paste_row,
+                col: paste_col,
                 old_data,
                 new_data: span_data.clone(),
             };
-            return ("Span pasted".to_string(), Some(txn));
+            return (msg, Some(txn));
         }
 
         ("Nothing to paste".to_string(), None)
@@ -70,18 +95,38 @@ impl Clipboard {
         self.yanked_row = Some(row);
         self.yanked_col = None;
         self.yanked_span = None;
+        self.paste_anchor = PasteAnchor::RowStart;
     }
 
     pub fn yank_col(&mut self, col: Vec<String>) {
         self.yanked_col = Some(col);
         self.yanked_row = None;
         self.yanked_span = None;
+        self.paste_anchor = PasteAnchor::ColStart;
     }
 
     pub fn yank_span(&mut self, span: Vec<Vec<String>>) {
         self.yanked_col = None;
         self.yanked_row = None;
         self.yanked_span = Some(span);
+        // Default to cursor anchor for visual selections
+        self.paste_anchor = PasteAnchor::Cursor;
+    }
+
+    /// Yank multiple rows (paste will start at column 0)
+    pub fn yank_rows(&mut self, rows: Vec<Vec<String>>) {
+        self.yanked_col = None;
+        self.yanked_row = None;
+        self.yanked_span = Some(rows);
+        self.paste_anchor = PasteAnchor::RowStart;
+    }
+
+    /// Yank multiple columns (paste will start at row 0)
+    pub fn yank_cols(&mut self, cols: Vec<Vec<String>>) {
+        self.yanked_col = None;
+        self.yanked_row = None;
+        self.yanked_span = Some(cols);
+        self.paste_anchor = PasteAnchor::ColStart;
     }
 }
 

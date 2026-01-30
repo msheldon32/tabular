@@ -190,48 +190,96 @@ impl App {
                 self.view.move_right_n(count, &self.table);
             }
             SequenceAction::DeleteRow => {
-                for _ in 0..count {
-                    if let Some(row_data) = self.table.get_row(self.view.cursor_row) {
+                let start_row = self.view.cursor_row;
+                let end_row = (start_row + count).min(self.table.row_count());
+                let actual_count = end_row - start_row;
+
+                // Yank the rows first
+                let rows: Vec<Vec<String>> = (start_row..end_row)
+                    .filter_map(|r| self.table.get_row(r))
+                    .collect();
+                if !rows.is_empty() {
+                    self.clipboard.yank_rows(rows);
+                }
+
+                // Delete rows (always delete at start_row since indices shift)
+                for _ in 0..actual_count {
+                    if let Some(row_data) = self.table.get_row(start_row) {
                         let txn = Transaction::DeleteRow {
-                            idx: self.view.cursor_row,
-                            data: row_data.clone(),
+                            idx: start_row,
+                            data: row_data,
                         };
                         self.execute(txn);
-                        self.clipboard.yank_row(row_data);
-                        self.view.clamp_cursor(&self.table);
                     }
                 }
+                self.view.clamp_cursor(&self.table);
                 self.view.update_col_widths(&self.table);
-                let msg = if count == 1 { "Row deleted".to_string() } else { format!("{} rows deleted", count) };
+                let msg = if actual_count == 1 { "Row deleted".to_string() } else { format!("{} rows deleted", actual_count) };
                 self.message = Some(msg);
             }
             SequenceAction::DeleteCol => {
-                for _ in 0..count {
-                    if let Some(col_data) = self.table.get_col(self.view.cursor_col) {
+                let start_col = self.view.cursor_col;
+                let end_col = (start_col + count).min(self.table.col_count());
+                let actual_count = end_col - start_col;
+
+                // Yank the columns first
+                let cols: Vec<Vec<String>> = (0..self.table.row_count())
+                    .map(|r| {
+                        (start_col..end_col)
+                            .map(|c| self.table.get_cell(r, c).cloned().unwrap_or_default())
+                            .collect()
+                    })
+                    .collect();
+                if !cols.is_empty() {
+                    self.clipboard.yank_cols(cols);
+                }
+
+                // Delete columns (always delete at start_col since indices shift)
+                for _ in 0..actual_count {
+                    if let Some(col_data) = self.table.get_col(start_col) {
                         let txn = Transaction::DeleteCol {
-                            idx: self.view.cursor_col,
-                            data: col_data.clone(),
+                            idx: start_col,
+                            data: col_data,
                         };
                         self.execute(txn);
-                        self.clipboard.yank_col(col_data);
-                        self.view.clamp_cursor(&self.table);
                     }
                 }
+                self.view.clamp_cursor(&self.table);
                 self.view.update_col_widths(&self.table);
-                let msg = if count == 1 { "Column deleted".to_string() } else { format!("{} columns deleted", count) };
+                let msg = if actual_count == 1 { "Column deleted".to_string() } else { format!("{} columns deleted", actual_count) };
                 self.message = Some(msg);
             }
             SequenceAction::YankRow => {
-                if let Some(row) = self.table.get_row(self.view.cursor_row) {
-                    self.clipboard.yank_row(row);
-                    self.message = Some("Row yanked".to_string());
+                let start_row = self.view.cursor_row;
+                let end_row = (start_row + count).min(self.table.row_count());
+                let actual_count = end_row - start_row;
+
+                let rows: Vec<Vec<String>> = (start_row..end_row)
+                    .filter_map(|r| self.table.get_row(r))
+                    .collect();
+                if !rows.is_empty() {
+                    self.clipboard.yank_rows(rows);
                 }
+                let msg = if actual_count == 1 { "Row yanked".to_string() } else { format!("{} rows yanked", actual_count) };
+                self.message = Some(msg);
             }
             SequenceAction::YankCol => {
-                if let Some(col) = self.table.get_col(self.view.cursor_col) {
-                    self.clipboard.yank_col(col);
-                    self.message = Some("Column yanked".to_string());
+                let start_col = self.view.cursor_col;
+                let end_col = (start_col + count).min(self.table.col_count());
+                let actual_count = end_col - start_col;
+
+                let cols: Vec<Vec<String>> = (0..self.table.row_count())
+                    .map(|r| {
+                        (start_col..end_col)
+                            .map(|c| self.table.get_cell(r, c).cloned().unwrap_or_default())
+                            .collect()
+                    })
+                    .collect();
+                if !cols.is_empty() {
+                    self.clipboard.yank_cols(cols);
                 }
+                let msg = if actual_count == 1 { "Column yanked".to_string() } else { format!("{} columns yanked", actual_count) };
+                self.message = Some(msg);
             }
         }
     }
@@ -549,6 +597,26 @@ impl App {
             Command::SortRowDesc => self.sort_by_row(SortDirection::Descending),
             Command::Replace(ref replace_cmd) => {
                 self.execute_replace(replace_cmd.clone());
+            }
+            Command::Theme(name) => {
+                use crate::style::Theme;
+                if let Some(theme) = Theme::by_name(&name) {
+                    self.style.set_theme(theme);
+                    self.message = Some(format!("Theme set to '{}'", name));
+                } else {
+                    self.message = Some(format!(
+                        "Unknown theme '{}'. Available: {}",
+                        name,
+                        Theme::builtin_names().join(", ")
+                    ));
+                }
+            }
+            Command::ThemeList => {
+                use crate::style::Theme;
+                self.message = Some(format!(
+                    "Available themes: {}",
+                    Theme::builtin_names().join(", ")
+                ));
             }
             Command::Unknown(s) => self.message = Some(format!("Unknown command: {}", s)),
         }
