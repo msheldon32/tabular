@@ -38,6 +38,9 @@ tabular <file.csv>
 | Key | Action |
 |-----|--------|
 | `i` | Enter insert mode |
+| `v` | Enter visual mode |
+| `V` | Enter visual (row) mode |
+| `Ctrl+v` | Enter visual (column) mode |
 | `x` | Clear current cell |
 | `o` | Insert row below |
 | `O` | Insert row above |
@@ -66,6 +69,14 @@ tabular <file.csv>
 | Any character | Insert character |
 
 **Tip:** Use `Ctrl+[` instead of `Escape` for faster mode switching (avoids terminal escape sequence delay).
+
+
+### Visual Mode
+| Key | Action |
+|-----|--------|
+| `y` | Yank (copy) current selection |
+| `x` | Clear current selection |
+
 
 ### Command Mode
 
