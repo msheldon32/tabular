@@ -8,6 +8,7 @@ mod transaction;
 mod ui;
 mod util;
 mod fileio;
+mod style;
 
 use std::io;
 use std::path::PathBuf;

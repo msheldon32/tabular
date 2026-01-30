@@ -14,12 +14,14 @@ use crate::table::{SortDirection, Table, TableView};
 use crate::transaction::{History, Transaction};
 use crate::ui;
 use crate::fileio::FileIO;
+use crate::style::Style;
 
 pub struct App {
     pub table: Table,
     pub view: TableView,
     pub clipboard: Clipboard,
     pub history: History,
+    pub style: Style,
     pub mode: Mode,
     pub command_buffer: String,
     pub edit_buffer: String,
@@ -47,6 +49,7 @@ impl App {
             view,
             clipboard: Clipboard::new(),
             history: History::new(),
+            style: Style::new(),
             mode: Mode::Normal,
             command_buffer: String::new(),
             edit_buffer: String::new(),
@@ -774,6 +777,7 @@ impl App {
                     Err(e) => self.message = Some(format!("{}", e)),
                 }
             }
+            Command::Grid => self.style.toggle_grid(),
             Command::NavigateRow(row) => self.view.cursor_row = row,
             Command::NavigateCell(cell) => {
                 self.view.cursor_row = cell.row;

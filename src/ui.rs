@@ -8,19 +8,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::mode::Mode;
-
-/// Convert a column index to Excel-style letters (0 -> A, 25 -> Z, 26 -> AA, etc.)
-fn col_to_letters(mut col: usize) -> String {
-    let mut result = String::new();
-    loop {
-        result.insert(0, (b'A' + (col % 26) as u8) as char);
-        if col < 26 {
-            break;
-        }
-        col = col / 26 - 1;
-    }
-    result
-}
+use crate::util::letters_from_col;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
@@ -76,20 +64,18 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
     let end_col = (app.view.viewport_col + visible_cols).min(col_count);
     for col in app.view.viewport_col..end_col {
         let w = app.view.col_widths.get(col).copied().unwrap_or(3);
-        let header_w = col_to_letters(col).len();
+        let header_w = letters_from_col(col).len();
         col_widths.push(Constraint::Length(w.max(header_w) as u16 + 2));
     }
 
     // Build header row with column letters
-    let header_style = Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD);
+    let header_style = app.style.header_style;
 
     let mut header_cells: Vec<Cell> = Vec::with_capacity(visible_cols + 1);
     header_cells.push(Cell::from("").style(header_style)); // Empty corner cell
 
     for col in app.view.viewport_col..end_col {
-        let letter = col_to_letters(col);
+        let letter = letters_from_col(col);
         let style = if col == app.view.cursor_col {
             header_style.bg(Color::DarkGray)
         } else {
@@ -97,7 +83,8 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
         };
         header_cells.push(Cell::from(letter).style(style));
     }
-    let header_row = Row::new(header_cells);
+    let header_row = Row::new(header_cells)
+        .bottom_margin(app.style.bottom_margin());
 
     // Calculate visible row range
     let end_row = (app.view.viewport_row + app.view.visible_rows).min(row_count);
@@ -111,11 +98,9 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
 
             // Row number cell
             let row_num_style = if row_idx == app.view.cursor_row {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
+                app.style.highlight_number_cell_style
             } else {
-                Style::default().fg(Color::DarkGray)
+                app.style.number_cell_style
             };
             cells.push(Cell::from(format!("{}", row_idx + 1)).style(row_num_style));
 
@@ -137,20 +122,13 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
                     .unwrap_or(false);
 
                 let style = if is_cursor {
-                    Style::default()
-                        .bg(Color::Blue)
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD)
+                    app.style.cursor_cell_style
                 } else if is_search_match {
-                    Style::default()
-                        .bg(Color::Yellow)
-                        .fg(Color::Black)
+                    app.style.match_cell_style
                 } else if is_header_row {
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD)
+                    app.style.header_row_style
                 } else {
-                    Style::default()
+                    app.style.default_cell_style
                 };
 
                 let display_content = if is_cursor && app.mode == Mode::Insert {
@@ -162,7 +140,7 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
                 cells.push(Cell::from(display_content).style(style));
             }
 
-            Row::new(cells)
+            Row::new(cells).bottom_margin(app.style.bottom_margin())
         })
         .collect();
 
@@ -173,9 +151,9 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
             app.view.viewport_row + 1,
             end_row,
             row_count,
-            col_to_letters(app.view.viewport_col),
-            col_to_letters(end_col.saturating_sub(1)),
-            col_to_letters(col_count.saturating_sub(1))
+            letters_from_col(app.view.viewport_col),
+            letters_from_col(end_col.saturating_sub(1)),
+            letters_from_col(col_count.saturating_sub(1))
         )
     } else {
         format!("Table [{} rows, {} cols]", row_count, col_count)
@@ -210,7 +188,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let position = format!(
         "{}{} ",
-        col_to_letters(app.view.cursor_col),
+        letters_from_col(app.view.cursor_col),
         app.view.cursor_row + 1
     );
 
@@ -258,15 +236,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_col_to_letters() {
-        assert_eq!(col_to_letters(0), "A");
-        assert_eq!(col_to_letters(1), "B");
-        assert_eq!(col_to_letters(25), "Z");
-        assert_eq!(col_to_letters(26), "AA");
-        assert_eq!(col_to_letters(27), "AB");
-        assert_eq!(col_to_letters(51), "AZ");
-        assert_eq!(col_to_letters(52), "BA");
-        assert_eq!(col_to_letters(701), "ZZ");
-        assert_eq!(col_to_letters(702), "AAA");
+    fn test_letters_from_col() {
+        assert_eq!(letters_from_col(0), "A");
+        assert_eq!(letters_from_col(1), "B");
+        assert_eq!(letters_from_col(25), "Z");
+        assert_eq!(letters_from_col(26), "AA");
+        assert_eq!(letters_from_col(27), "AB");
+        assert_eq!(letters_from_col(51), "AZ");
+        assert_eq!(letters_from_col(52), "BA");
+        assert_eq!(letters_from_col(701), "ZZ");
+        assert_eq!(letters_from_col(702), "AAA");
     }
 }

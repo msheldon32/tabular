@@ -30,6 +30,7 @@ pub enum Command {
     SortDesc,       // Sort rows by current column, descending
     SortRow,        // Sort columns by current row, ascending
     SortRowDesc,    // Sort columns by current row, descending
+    Grid,
     Replace(ReplaceCommand),
     NavigateRow(usize),
     NavigateCell(CellRef),
@@ -68,6 +69,7 @@ impl Command {
             "sortd" | "sort!" => Some(Command::SortDesc),
             "sortr" => Some(Command::SortRow),
             "sortrd" | "sortr!" => Some(Command::SortRowDesc),
+            "grid" => Some(Command::Grid),
             _ => Some(Command::Unknown(trimmed.to_string())),
         }
     }
