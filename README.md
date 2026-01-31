@@ -57,6 +57,7 @@ tabular <file.csv>
 | `p` | Paste yanked content |
 | `u` | Undo |
 | `Ctrl+r` | Redo |
+| `"x` | Select register x for next yank/paste |
 
 **Count prefix for bulk operations**:
 - `5dr` deletes 5 rows starting from cursor
@@ -180,6 +181,40 @@ All editing operations can be undone and redone:
 - `Ctrl+r` - Redo last undone change
 
 The undo history tracks cell edits, row/column insertions and deletions, drag fills, and more.
+
+## Registers
+
+Tabular uses a vim-style register system for yank and paste operations. Registers are storage locations that hold copied/deleted content.
+
+### Available Registers
+
+| Register | Description |
+|----------|-------------|
+| `""` | Unnamed register (default) - used when no register specified |
+| `"a` - `"z` | Named registers - for storing multiple clips |
+| `"0` | Yank register - holds last yanked content (not affected by deletes) |
+| `"_` | Black hole register - discards content (delete without affecting clipboard) |
+| `"+` | System clipboard register |
+
+### Usage
+
+To use a register, type `"` followed by the register name before a yank or paste command:
+
+| Example | Action |
+|---------|--------|
+| `"ayy` | Yank current row into register `a` |
+| `"ap` | Paste from register `a` |
+| `"_dd` | Delete row without affecting any register |
+| `"+yy` | Yank row to system clipboard |
+| `"+p` | Paste from system clipboard |
+| `"0p` | Paste last yanked content (even after deletes) |
+
+### Behavior
+
+- **Yank operations** (`y`, `yy`, `yr`, `yc`) update both the specified register and the yank register (`"0`)
+- **Delete operations** (`d`, `dd`, `dr`, `dc`, `x`) update the unnamed register but not the yank register
+- **Black hole register** (`"_`) discards content entirely - useful for deleting without overwriting your clipboard
+- **Named registers** (`"a`-`"z`) persist until overwritten, allowing you to store multiple pieces of content
 
 ## Formulas
 
