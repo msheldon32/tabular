@@ -7,7 +7,7 @@ use crate::mode::Mode;
 use crate::util::translate_references;
 
 /// Number of rows per chunk for memory-efficient storage
-const CHUNK_SIZE: usize = 1024;
+pub const CHUNK_SIZE: usize = 1024;
 
 /// Pure data structure for the table with chunked row storage
 #[derive(Debug, Clone)]
@@ -121,6 +121,33 @@ impl Table {
         };
         table.recompute_col_widths();
         table
+    }
+
+    /// Create a table from pre-chunked data (avoids intermediate allocation)
+    pub fn from_chunks(chunks: Vec<Vec<Vec<String>>>, col_count: usize) -> Self {
+        let total_rows: usize = chunks.iter().map(|c| c.len()).sum();
+        let mut table = Self {
+            chunks,
+            total_rows,
+            col_count,
+            col_widths: Vec::new(),
+            col_widths_dirty: true,
+        };
+        table.recompute_col_widths();
+        table
+    }
+
+    /// Create a table from pre-chunked data, deferring column width computation
+    /// until first render. Use this for faster file loading.
+    pub fn from_chunks_lazy(chunks: Vec<Vec<Vec<String>>>, col_count: usize) -> Self {
+        let total_rows: usize = chunks.iter().map(|c| c.len()).sum();
+        Self {
+            chunks,
+            total_rows,
+            col_count,
+            col_widths: Vec::new(),
+            col_widths_dirty: true,
+        }
     }
 
     /// Get cached column widths, recomputing if dirty
