@@ -511,10 +511,9 @@ impl VisualHandler {
                 }
             }
             VisualType::Row => {
-                // Yank all selected rows
-                let rows: Vec<Vec<String>> = (start_row..=end_row)
-                    .filter_map(|r| table.get_row_cloned(r))
-                    .collect();
+                // Yank all selected rows using bulk get
+                let count = end_row - start_row + 1;
+                let rows = table.get_rows_cloned(start_row, count);
                 if !rows.is_empty() {
                     clipboard.yank_rows(rows);
                 }
@@ -554,19 +553,16 @@ impl VisualHandler {
                 KeyResult::ExecuteAndFinish(txn)
             }
             VisualType::Row => {
-                // Delete entire rows
-                let txns: Vec<Transaction> = (start_row..=end_row)
-                    .filter_map(|r| {
-                        table.get_row_cloned(r).map(|data| Transaction::DeleteRow {
-                            idx: start_row, // Always delete at start_row since indices shift
-                            data,
-                        })
-                    })
-                    .collect();
-                if txns.is_empty() {
+                // Delete entire rows using bulk operation
+                let count = end_row - start_row + 1;
+                let rows = table.get_rows_cloned(start_row, count);
+                if rows.is_empty() {
                     KeyResult::Finish
                 } else {
-                    KeyResult::ExecuteAndFinish(Transaction::Batch(txns))
+                    KeyResult::ExecuteAndFinish(Transaction::DeleteRowsBulk {
+                        idx: start_row,
+                        data: rows,
+                    })
                 }
             }
             VisualType::Col => {

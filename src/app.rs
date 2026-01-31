@@ -187,26 +187,23 @@ impl App {
             }
             SequenceAction::DeleteRow => {
                 let start_row = self.view.cursor_row;
-                let end_row = (start_row + count).min(self.table.row_count());
-                let actual_count = end_row - start_row;
+                let actual_count = count.min(self.table.row_count().saturating_sub(start_row));
 
-                // Yank the rows first
-                let rows: Vec<Vec<String>> = (start_row..end_row)
-                    .filter_map(|r| self.table.get_row_cloned(r))
-                    .collect();
-                if !rows.is_empty() {
-                    self.clipboard.yank_rows(rows);
+                if actual_count == 0 {
+                    return;
                 }
 
-                // Delete rows (always delete at start_row since indices shift)
-                for _ in 0..actual_count {
-                    if let Some(row_data) = self.table.get_row_cloned(start_row) {
-                        let txn = Transaction::DeleteRow {
-                            idx: start_row,
-                            data: row_data,
-                        };
-                        self.execute(txn);
-                    }
+                // Yank the rows first using bulk get
+                let rows = self.table.get_rows_cloned(start_row, actual_count);
+                if !rows.is_empty() {
+                    self.clipboard.yank_rows(rows.clone());
+
+                    // Delete rows using bulk operation
+                    let txn = Transaction::DeleteRowsBulk {
+                        idx: start_row,
+                        data: rows,
+                    };
+                    self.execute(txn);
                 }
                 self.view.clamp_cursor(&self.table);
                 self.view.update_col_widths(&self.table);
@@ -247,12 +244,10 @@ impl App {
             }
             SequenceAction::YankRow => {
                 let start_row = self.view.cursor_row;
-                let end_row = (start_row + count).min(self.table.row_count());
-                let actual_count = end_row - start_row;
+                let actual_count = count.min(self.table.row_count().saturating_sub(start_row));
 
-                let rows: Vec<Vec<String>> = (start_row..end_row)
-                    .filter_map(|r| self.table.get_row_cloned(r))
-                    .collect();
+                // Use bulk get for efficiency
+                let rows = self.table.get_rows_cloned(start_row, actual_count);
                 if !rows.is_empty() {
                     self.clipboard.yank_rows(rows);
                 }

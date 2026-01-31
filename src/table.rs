@@ -277,32 +277,281 @@ impl Table {
     /// Rebalance chunks after a delete to maintain CHUNK_SIZE invariant
     /// All chunks except the last should have exactly CHUNK_SIZE rows
     fn rebalance_chunks_after_delete(&mut self, start_chunk: usize) {
-        let mut chunk_idx = start_chunk;
+        let mut chunk_idx = start_chunk.min(self.chunks.len().saturating_sub(1));
 
         while chunk_idx < self.chunks.len() {
             // Remove empty chunks (except keep at least one chunk total)
             if self.chunks[chunk_idx].is_empty() && self.chunks.len() > 1 {
                 self.chunks.remove(chunk_idx);
+                // Don't increment - check the same index (now pointing to next chunk)
+                // But also need to re-check previous chunk if it exists
+                if chunk_idx > 0 {
+                    chunk_idx -= 1;
+                }
                 continue;
             }
 
-            // If this isn't the last chunk and it's under-filled, pull from next
-            if chunk_idx + 1 < self.chunks.len() && self.chunks[chunk_idx].len() < CHUNK_SIZE {
+            // If this isn't the last chunk and it's under-filled, keep pulling from
+            // subsequent chunks until full or no more chunks to pull from
+            while chunk_idx + 1 < self.chunks.len() && self.chunks[chunk_idx].len() < CHUNK_SIZE {
+                // If next chunk is empty, remove it and continue trying
+                if self.chunks[chunk_idx + 1].is_empty() {
+                    self.chunks.remove(chunk_idx + 1);
+                    continue;
+                }
+
                 let needed = CHUNK_SIZE - self.chunks[chunk_idx].len();
                 let available = self.chunks[chunk_idx + 1].len().min(needed);
 
                 // Pull rows from beginning of next chunk
                 let pulled: Vec<Vec<String>> = self.chunks[chunk_idx + 1].drain(0..available).collect();
                 self.chunks[chunk_idx].extend(pulled);
+
+                // If we emptied the next chunk, remove it
+                if self.chunks[chunk_idx + 1].is_empty() {
+                    self.chunks.remove(chunk_idx + 1);
+                }
             }
 
             chunk_idx += 1;
         }
+    }
 
-        // Final pass: remove any empty chunks at the end
-        while self.chunks.len() > 1 && self.chunks.last().map(|c| c.is_empty()).unwrap_or(false) {
-            self.chunks.pop();
+    /// Delete multiple contiguous rows efficiently, handling cross-chunk boundaries
+    /// Returns the deleted rows for undo/clipboard
+    pub fn delete_rows_bulk(&mut self, start_idx: usize, count: usize) -> Vec<Vec<String>> {
+        if count == 0 || start_idx >= self.total_rows {
+            return Vec::new();
         }
+
+        // Clamp count to available rows
+        let actual_count = count.min(self.total_rows - start_idx);
+
+        // Don't delete all rows - keep at least one (cleared)
+        if actual_count >= self.total_rows {
+            let deleted = self.clone_all_rows();
+            // Clear the table to a single empty row
+            self.chunks = vec![vec![vec![String::new(); self.col_count]]];
+            self.total_rows = 1;
+            self.mark_widths_dirty();
+            return deleted;
+        }
+
+        let end_idx = start_idx + actual_count;
+        let start_chunk = Self::chunk_idx(start_idx);
+        let end_chunk = Self::chunk_idx(end_idx.saturating_sub(1));
+
+        let mut deleted = Vec::with_capacity(actual_count);
+
+        if start_chunk == end_chunk {
+            // All deletions within a single chunk
+            let row_start = Self::row_in_chunk(start_idx);
+            let row_end = row_start + actual_count;
+            deleted.extend(self.chunks[start_chunk].drain(row_start..row_end));
+        } else {
+            // Cross-chunk deletion: iterate forward to maintain correct row order
+            // drain() doesn't affect chunk indices, just empties portions of each chunk
+
+            // Handle start chunk (partial: from start_row to end of chunk)
+            let start_row_in_chunk = Self::row_in_chunk(start_idx);
+            deleted.extend(self.chunks[start_chunk].drain(start_row_in_chunk..));
+
+            // Handle middle chunks (complete removal) - forward order preserves row order
+            for chunk_idx in (start_chunk + 1)..end_chunk {
+                deleted.extend(self.chunks[chunk_idx].drain(..));
+            }
+
+            // Handle end chunk (partial: from start to end_row)
+            let end_row_in_chunk = Self::row_in_chunk(end_idx.saturating_sub(1)) + 1;
+            deleted.extend(self.chunks[end_chunk].drain(0..end_row_in_chunk));
+        }
+
+        self.total_rows -= actual_count;
+        self.rebalance_chunks_after_delete(start_chunk);
+        self.mark_widths_dirty();
+
+        deleted
+    }
+
+    /// Insert multiple empty rows at the specified index
+    pub fn insert_rows_bulk(&mut self, idx: usize, count: usize) {
+        if count == 0 {
+            return;
+        }
+        let new_rows: Vec<Vec<String>> = (0..count)
+            .map(|_| vec![String::new(); self.col_count])
+            .collect();
+        self.insert_rows_with_data_bulk(idx, new_rows);
+    }
+
+    /// Insert multiple rows with data at the specified index, handling cross-chunk boundaries
+    pub fn insert_rows_with_data_bulk(&mut self, idx: usize, mut rows: Vec<Vec<String>>) {
+        if rows.is_empty() {
+            return;
+        }
+
+        let count = rows.len();
+
+        // Ensure all rows have correct column count
+        for row in &mut rows {
+            row.resize(self.col_count, String::new());
+        }
+
+        // Update widths for new data
+        for row in &rows {
+            for (col, val) in row.iter().enumerate() {
+                self.update_col_width(col, val.len());
+            }
+        }
+
+        if self.chunks.is_empty() {
+            // Table is empty, just create new chunks from the rows
+            self.chunks = rows.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
+            self.total_rows = count;
+            return;
+        }
+
+        let insert_idx = idx.min(self.total_rows);
+        let chunk_idx = Self::chunk_idx(insert_idx);
+        let row_in_chunk = if insert_idx >= self.total_rows {
+            // Appending at end
+            self.chunks.last().map(|c| c.len()).unwrap_or(0)
+        } else {
+            Self::row_in_chunk(insert_idx)
+        };
+
+        let actual_chunk = chunk_idx.min(self.chunks.len().saturating_sub(1));
+
+        // For large inserts, it's more efficient to rebuild from this point
+        if count > CHUNK_SIZE {
+            // Collect all rows from insert point onward
+            let mut tail_rows: Vec<Vec<String>> = Vec::new();
+
+            // Get rows after insert point in the current chunk
+            if row_in_chunk < self.chunks[actual_chunk].len() {
+                tail_rows.extend(self.chunks[actual_chunk].drain(row_in_chunk..));
+            }
+
+            // Get all rows from subsequent chunks
+            for chunk in self.chunks.drain((actual_chunk + 1)..) {
+                tail_rows.extend(chunk);
+            }
+
+            // Extend current chunk with new rows, then tail
+            self.chunks[actual_chunk].extend(rows);
+            self.chunks[actual_chunk].extend(tail_rows);
+
+            // Rechunk from this point
+            if self.chunks[actual_chunk].len() > CHUNK_SIZE {
+                let overflow = self.chunks[actual_chunk].split_off(CHUNK_SIZE);
+                let new_chunks: Vec<Vec<Vec<String>>> = overflow
+                    .chunks(CHUNK_SIZE)
+                    .map(|c| c.to_vec())
+                    .collect();
+                self.chunks.extend(new_chunks);
+            }
+        } else {
+            // Small insert: insert directly and rebalance
+            let insert_pos = row_in_chunk.min(self.chunks[actual_chunk].len());
+
+            // Insert rows in reverse order at the same position
+            for row in rows.into_iter().rev() {
+                self.chunks[actual_chunk].insert(insert_pos, row);
+            }
+
+            self.rebalance_chunks_after_insert(actual_chunk);
+        }
+
+        self.total_rows += count;
+    }
+
+    /// Fill/paste multiple contiguous rows with data, expanding table if needed
+    pub fn fill_rows_with_data_bulk(&mut self, start_idx: usize, rows: Vec<Vec<String>>) {
+        if rows.is_empty() {
+            return;
+        }
+
+        let count = rows.len();
+
+        // Ensure table is large enough
+        let needed_rows = start_idx + count;
+        if needed_rows > self.total_rows {
+            self.insert_rows_bulk(self.total_rows, needed_rows - self.total_rows);
+        }
+
+        self.mark_widths_dirty();
+
+        // Fill rows, handling cross-chunk boundaries efficiently
+        let start_chunk = Self::chunk_idx(start_idx);
+        let end_chunk = Self::chunk_idx(start_idx + count - 1);
+
+        let mut row_iter = rows.into_iter();
+
+        for chunk_idx in start_chunk..=end_chunk {
+            if chunk_idx >= self.chunks.len() {
+                break;
+            }
+
+            let first_row_in_chunk = if chunk_idx == start_chunk {
+                Self::row_in_chunk(start_idx)
+            } else {
+                0
+            };
+
+            let last_row_in_chunk = if chunk_idx == end_chunk {
+                Self::row_in_chunk(start_idx + count - 1) + 1
+            } else {
+                self.chunks[chunk_idx].len()
+            };
+
+            for row_in_chunk in first_row_in_chunk..last_row_in_chunk {
+                if let Some(mut new_row) = row_iter.next() {
+                    new_row.resize(self.col_count, String::new());
+                    if row_in_chunk < self.chunks[chunk_idx].len() {
+                        self.chunks[chunk_idx][row_in_chunk] = new_row;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Get multiple contiguous rows as cloned data (for clipboard/undo)
+    pub fn get_rows_cloned(&self, start_idx: usize, count: usize) -> Vec<Vec<String>> {
+        if start_idx >= self.total_rows || count == 0 {
+            return Vec::new();
+        }
+
+        let actual_count = count.min(self.total_rows - start_idx);
+        let mut result = Vec::with_capacity(actual_count);
+
+        let start_chunk = Self::chunk_idx(start_idx);
+        let end_chunk = Self::chunk_idx(start_idx + actual_count - 1);
+
+        for chunk_idx in start_chunk..=end_chunk {
+            if chunk_idx >= self.chunks.len() {
+                break;
+            }
+
+            let first_row = if chunk_idx == start_chunk {
+                Self::row_in_chunk(start_idx)
+            } else {
+                0
+            };
+
+            let last_row = if chunk_idx == end_chunk {
+                Self::row_in_chunk(start_idx + actual_count - 1) + 1
+            } else {
+                self.chunks[chunk_idx].len()
+            };
+
+            for row_in_chunk in first_row..last_row {
+                if row_in_chunk < self.chunks[chunk_idx].len() {
+                    result.push(self.chunks[chunk_idx][row_in_chunk].clone());
+                }
+            }
+        }
+
+        result
     }
 
     pub fn insert_col_at(&mut self, idx: usize) {
@@ -1069,12 +1318,63 @@ impl TableView {
         row
     }
 
+    /// Delete multiple selected rows (for VisualRow mode), returns deleted rows
+    pub fn delete_rows_bulk(&mut self, table: &mut Table) -> Vec<Vec<String>> {
+        let (start_row, end_row, _, _) = self.get_selection_bounds();
+        let count = end_row - start_row + 1;
+        let deleted = table.delete_rows_bulk(start_row, count);
+        self.cursor_row = start_row;
+        self.support_row = start_row;
+        self.clamp_cursor(table);
+        self.scroll_to_cursor();
+        deleted
+    }
+
     pub fn yank_row(&self, table: &Table) -> Option<Vec<String>> {
         table.get_row_cloned(self.cursor_row)
     }
 
+    /// Yank multiple selected rows (for VisualRow mode)
+    pub fn yank_rows_bulk(&self, table: &Table) -> Vec<Vec<String>> {
+        let (start_row, end_row, _, _) = self.get_selection_bounds();
+        let count = end_row - start_row + 1;
+        table.get_rows_cloned(start_row, count)
+    }
+
     pub fn paste_row(&mut self, table: &mut Table, row: Vec<String>) {
         table.fill_row_with_data(self.cursor_row, row);
+    }
+
+    /// Paste multiple rows starting at cursor, overwriting existing rows
+    pub fn paste_rows_bulk(&mut self, table: &mut Table, rows: Vec<Vec<String>>) {
+        table.fill_rows_with_data_bulk(self.cursor_row, rows);
+    }
+
+    /// Insert multiple rows below current selection with data (e.g., after paste)
+    pub fn insert_rows_below_bulk(&mut self, table: &mut Table, rows: Vec<Vec<String>>) {
+        let count = rows.len();
+        let insert_at = self.cursor_row + 1;
+        table.insert_rows_with_data_bulk(insert_at, rows);
+        self.cursor_row = insert_at;
+        self.support_row = insert_at + count - 1;
+        self.scroll_to_cursor();
+    }
+
+    /// Insert multiple empty rows below cursor
+    pub fn insert_rows_below_empty(&mut self, table: &mut Table, count: usize) {
+        let insert_at = self.cursor_row + 1;
+        table.insert_rows_bulk(insert_at, count);
+        self.cursor_row = insert_at;
+        self.support_row = insert_at + count - 1;
+        self.scroll_to_cursor();
+    }
+
+    /// Insert multiple rows above current selection with data
+    pub fn insert_rows_above_bulk(&mut self, table: &mut Table, rows: Vec<Vec<String>>) {
+        let count = rows.len();
+        table.insert_rows_with_data_bulk(self.cursor_row, rows);
+        self.support_row = self.cursor_row + count - 1;
+        self.scroll_to_cursor();
     }
 
     // Column operations that update cursor
@@ -2132,6 +2432,366 @@ mod tests {
 
         // 1.05, 1.25, 1.5
         assert_eq!(indices, vec![0, 2, 3, 1]);
+    }
+
+    // === Bulk row operations ===
+
+    #[test]
+    fn test_delete_rows_bulk_single_chunk() {
+        let mut table = make_table(vec![
+            vec!["a", "1"],
+            vec!["b", "2"],
+            vec!["c", "3"],
+            vec!["d", "4"],
+            vec!["e", "5"],
+        ]);
+
+        let deleted = table.delete_rows_bulk(1, 2);
+
+        assert_eq!(deleted.len(), 2);
+        assert_eq!(deleted[0], vec!["b", "2"]);
+        assert_eq!(deleted[1], vec!["c", "3"]);
+        assert_eq!(table.row_count(), 3);
+        assert_eq!(row(&table, 0), vec!["a", "1"]);
+        assert_eq!(row(&table, 1), vec!["d", "4"]);
+        assert_eq!(row(&table, 2), vec!["e", "5"]);
+    }
+
+    #[test]
+    fn test_delete_rows_bulk_at_start() {
+        let mut table = make_table(vec![
+            vec!["a"],
+            vec!["b"],
+            vec!["c"],
+            vec!["d"],
+        ]);
+
+        let deleted = table.delete_rows_bulk(0, 2);
+
+        assert_eq!(deleted.len(), 2);
+        // Verify deleted rows are in correct order
+        assert_eq!(deleted[0], vec!["a"]);
+        assert_eq!(deleted[1], vec!["b"]);
+        assert_eq!(table.row_count(), 2);
+        assert_eq!(row(&table, 0), vec!["c"]);
+        assert_eq!(row(&table, 1), vec!["d"]);
+    }
+
+    #[test]
+    fn test_delete_rows_bulk_order_preserved() {
+        // Create a table with numbered rows to verify order
+        let mut table = make_table(vec![
+            vec!["row0"],
+            vec!["row1"],
+            vec!["row2"],
+            vec!["row3"],
+            vec!["row4"],
+            vec!["row5"],
+            vec!["row6"],
+            vec!["row7"],
+        ]);
+
+        // Delete middle rows
+        let deleted = table.delete_rows_bulk(2, 4);
+
+        assert_eq!(deleted.len(), 4);
+        // Verify deleted rows are returned in correct order
+        assert_eq!(deleted[0], vec!["row2"]);
+        assert_eq!(deleted[1], vec!["row3"]);
+        assert_eq!(deleted[2], vec!["row4"]);
+        assert_eq!(deleted[3], vec!["row5"]);
+
+        // Verify remaining rows
+        assert_eq!(table.row_count(), 4);
+        assert_eq!(row(&table, 0), vec!["row0"]);
+        assert_eq!(row(&table, 1), vec!["row1"]);
+        assert_eq!(row(&table, 2), vec!["row6"]);
+        assert_eq!(row(&table, 3), vec!["row7"]);
+    }
+
+    /// Helper to create a large table with numbered rows for cross-chunk testing
+    fn make_large_table(num_rows: usize) -> Table {
+        let rows: Vec<Vec<String>> = (0..num_rows)
+            .map(|i| vec![format!("row{}", i), format!("val{}", i)])
+            .collect();
+        Table::new(rows)
+    }
+
+    #[test]
+    fn test_delete_rows_bulk_cross_chunk_middle() {
+        // 3000 rows = 3 chunks (0-1023, 1024-2047, 2048-2999)
+        let mut table = make_large_table(3000);
+        assert_eq!(table.row_count(), 3000);
+
+        // Delete 2000 rows from the middle (rows 500-2499)
+        // This spans all 3 chunks
+        let deleted = table.delete_rows_bulk(500, 2000);
+
+        assert_eq!(deleted.len(), 2000);
+        assert_eq!(table.row_count(), 1000);
+
+        // Verify deleted rows are in correct order
+        for i in 0..2000 {
+            assert_eq!(deleted[i][0], format!("row{}", 500 + i),
+                "deleted row {} should be row{}", i, 500 + i);
+        }
+
+        // Verify remaining rows
+        for i in 0..500 {
+            assert_eq!(row(&table, i)[0], format!("row{}", i),
+                "remaining row {} should be row{}", i, i);
+        }
+        for i in 0..500 {
+            assert_eq!(row(&table, 500 + i)[0], format!("row{}", 2500 + i),
+                "remaining row {} should be row{}", 500 + i, 2500 + i);
+        }
+    }
+
+    #[test]
+    fn test_delete_rows_bulk_cross_chunk_top() {
+        // 3000 rows = 3 chunks
+        let mut table = make_large_table(3000);
+
+        // Delete 2000 rows from the top (rows 0-1999)
+        // This spans chunks 0 and 1 completely, plus part of chunk 2
+        let deleted = table.delete_rows_bulk(0, 2000);
+
+        assert_eq!(deleted.len(), 2000);
+        assert_eq!(table.row_count(), 1000);
+
+        // Verify deleted rows are in correct order
+        for i in 0..2000 {
+            assert_eq!(deleted[i][0], format!("row{}", i),
+                "deleted row {} should be row{}", i, i);
+        }
+
+        // Verify remaining rows (rows 2000-2999 should now be at 0-999)
+        for i in 0..1000 {
+            assert_eq!(row(&table, i)[0], format!("row{}", 2000 + i),
+                "remaining row {} should be row{}", i, 2000 + i);
+        }
+    }
+
+    #[test]
+    fn test_delete_rows_bulk_cross_chunk_end() {
+        // 3000 rows = 3 chunks
+        let mut table = make_large_table(3000);
+
+        // Delete 2000 rows from the end (rows 1000-2999)
+        // This spans parts of chunk 0, all of chunk 1, and all of chunk 2
+        let deleted = table.delete_rows_bulk(1000, 2000);
+
+        assert_eq!(deleted.len(), 2000);
+        assert_eq!(table.row_count(), 1000);
+
+        // Verify deleted rows are in correct order
+        for i in 0..2000 {
+            assert_eq!(deleted[i][0], format!("row{}", 1000 + i),
+                "deleted row {} should be row{}", i, 1000 + i);
+        }
+
+        // Verify remaining rows (rows 0-999 should still be there)
+        for i in 0..1000 {
+            assert_eq!(row(&table, i)[0], format!("row{}", i),
+                "remaining row {} should be row{}", i, i);
+        }
+    }
+
+    #[test]
+    fn test_delete_rows_bulk_exactly_two_chunks() {
+        // Test deletion that spans exactly 2 chunks with no middle chunks
+        let mut table = make_large_table(3000);
+
+        // Delete rows 1000-1100 (spans chunk 0 end and chunk 1 start)
+        let deleted = table.delete_rows_bulk(1000, 101);
+
+        assert_eq!(deleted.len(), 101);
+        assert_eq!(table.row_count(), 2899);
+
+        // Verify deleted rows are in correct order
+        for i in 0..101 {
+            assert_eq!(deleted[i][0], format!("row{}", 1000 + i),
+                "deleted row {} should be row{}", i, 1000 + i);
+        }
+    }
+
+    #[test]
+    fn test_delete_rows_bulk_at_end() {
+        let mut table = make_table(vec![
+            vec!["a"],
+            vec!["b"],
+            vec!["c"],
+            vec!["d"],
+        ]);
+
+        let deleted = table.delete_rows_bulk(2, 2);
+
+        assert_eq!(deleted.len(), 2);
+        assert_eq!(table.row_count(), 2);
+        assert_eq!(row(&table, 0), vec!["a"]);
+        assert_eq!(row(&table, 1), vec!["b"]);
+    }
+
+    #[test]
+    fn test_delete_rows_bulk_all_rows_clears() {
+        let mut table = make_table(vec![
+            vec!["a", "1"],
+            vec!["b", "2"],
+            vec!["c", "3"],
+        ]);
+
+        let deleted = table.delete_rows_bulk(0, 3);
+
+        assert_eq!(deleted.len(), 3);
+        assert_eq!(table.row_count(), 1);
+        assert_eq!(row(&table, 0), vec!["", ""]);
+    }
+
+    #[test]
+    fn test_delete_rows_bulk_exceeds_count() {
+        let mut table = make_table(vec![
+            vec!["a"],
+            vec!["b"],
+            vec!["c"],
+        ]);
+
+        let deleted = table.delete_rows_bulk(1, 100);
+
+        assert_eq!(deleted.len(), 2);
+        assert_eq!(table.row_count(), 1);
+        assert_eq!(row(&table, 0), vec!["a"]);
+    }
+
+    #[test]
+    fn test_insert_rows_bulk_empty() {
+        let mut table = make_table(vec![
+            vec!["a", "1"],
+            vec!["b", "2"],
+        ]);
+
+        table.insert_rows_bulk(1, 2);
+
+        assert_eq!(table.row_count(), 4);
+        assert_eq!(row(&table, 0), vec!["a", "1"]);
+        assert_eq!(row(&table, 1), vec!["", ""]);
+        assert_eq!(row(&table, 2), vec!["", ""]);
+        assert_eq!(row(&table, 3), vec!["b", "2"]);
+    }
+
+    #[test]
+    fn test_insert_rows_with_data_bulk() {
+        let mut table = make_table(vec![
+            vec!["a", "1"],
+            vec!["d", "4"],
+        ]);
+
+        table.insert_rows_with_data_bulk(1, vec![
+            vec!["b".to_string(), "2".to_string()],
+            vec!["c".to_string(), "3".to_string()],
+        ]);
+
+        assert_eq!(table.row_count(), 4);
+        assert_eq!(row(&table, 0), vec!["a", "1"]);
+        assert_eq!(row(&table, 1), vec!["b", "2"]);
+        assert_eq!(row(&table, 2), vec!["c", "3"]);
+        assert_eq!(row(&table, 3), vec!["d", "4"]);
+    }
+
+    #[test]
+    fn test_insert_rows_bulk_at_end() {
+        let mut table = make_table(vec![
+            vec!["a"],
+            vec!["b"],
+        ]);
+
+        table.insert_rows_with_data_bulk(2, vec![
+            vec!["c".to_string()],
+            vec!["d".to_string()],
+        ]);
+
+        assert_eq!(table.row_count(), 4);
+        assert_eq!(row(&table, 2), vec!["c"]);
+        assert_eq!(row(&table, 3), vec!["d"]);
+    }
+
+    #[test]
+    fn test_insert_rows_bulk_pads_short_rows() {
+        let mut table = make_table(vec![
+            vec!["a", "b", "c"],
+        ]);
+
+        table.insert_rows_with_data_bulk(1, vec![
+            vec!["x".to_string()], // Short row
+        ]);
+
+        assert_eq!(row(&table, 1), vec!["x", "", ""]);
+    }
+
+    #[test]
+    fn test_fill_rows_bulk() {
+        let mut table = make_table(vec![
+            vec!["a", "1"],
+            vec!["b", "2"],
+            vec!["c", "3"],
+        ]);
+
+        table.fill_rows_with_data_bulk(0, vec![
+            vec!["x".to_string(), "7".to_string()],
+            vec!["y".to_string(), "8".to_string()],
+        ]);
+
+        assert_eq!(row(&table, 0), vec!["x", "7"]);
+        assert_eq!(row(&table, 1), vec!["y", "8"]);
+        assert_eq!(row(&table, 2), vec!["c", "3"]);
+    }
+
+    #[test]
+    fn test_fill_rows_bulk_expands_table() {
+        let mut table = make_table(vec![
+            vec!["a", "1"],
+        ]);
+
+        table.fill_rows_with_data_bulk(0, vec![
+            vec!["x".to_string(), "7".to_string()],
+            vec!["y".to_string(), "8".to_string()],
+            vec!["z".to_string(), "9".to_string()],
+        ]);
+
+        assert_eq!(table.row_count(), 3);
+        assert_eq!(row(&table, 0), vec!["x", "7"]);
+        assert_eq!(row(&table, 1), vec!["y", "8"]);
+        assert_eq!(row(&table, 2), vec!["z", "9"]);
+    }
+
+    #[test]
+    fn test_get_rows_cloned() {
+        let table = make_table(vec![
+            vec!["a", "1"],
+            vec!["b", "2"],
+            vec!["c", "3"],
+            vec!["d", "4"],
+        ]);
+
+        let rows = table.get_rows_cloned(1, 2);
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], vec!["b", "2"]);
+        assert_eq!(rows[1], vec!["c", "3"]);
+    }
+
+    #[test]
+    fn test_get_rows_cloned_clamps_count() {
+        let table = make_table(vec![
+            vec!["a"],
+            vec!["b"],
+            vec!["c"],
+        ]);
+
+        let rows = table.get_rows_cloned(1, 100);
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], vec!["b"]);
+        assert_eq!(rows[1], vec!["c"]);
     }
 
     #[test]

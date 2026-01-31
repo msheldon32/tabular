@@ -16,6 +16,12 @@ pub enum Transaction {
     InsertRowWithData { idx: usize, data: Vec<String> },
     /// Delete a row (stores data for undo)
     DeleteRow { idx: usize, data: Vec<String> },
+    /// Insert multiple empty rows at index
+    InsertRowsBulk { idx: usize, count: usize },
+    /// Insert multiple rows with data at index
+    InsertRowsWithDataBulk { idx: usize, data: Vec<Vec<String>> },
+    /// Delete multiple contiguous rows (stores data for undo)
+    DeleteRowsBulk { idx: usize, data: Vec<Vec<String>> },
     /// Insert an empty column at index
     InsertCol { idx: usize },
     /// Insert a column with data at index
@@ -47,6 +53,15 @@ impl Transaction {
             }
             Transaction::DeleteRow { idx, .. } => {
                 table.delete_row_at(*idx);
+            }
+            Transaction::InsertRowsBulk { idx, count } => {
+                table.insert_rows_bulk(*idx, *count);
+            }
+            Transaction::InsertRowsWithDataBulk { idx, data } => {
+                table.insert_rows_with_data_bulk(*idx, data.clone());
+            }
+            Transaction::DeleteRowsBulk { idx, data } => {
+                table.delete_rows_bulk(*idx, data.len());
             }
             Transaction::InsertCol { idx } => {
                 table.insert_col_at(*idx);
@@ -95,6 +110,17 @@ impl Transaction {
             }
             Transaction::DeleteRow { idx, data } => {
                 Transaction::InsertRowWithData { idx: *idx, data: data.clone() }
+            }
+            Transaction::InsertRowsBulk { idx, count } => {
+                // To undo, we need to delete the rows (but we don't have their data)
+                // This is only correct for empty rows
+                Transaction::DeleteRowsBulk { idx: *idx, data: vec![Vec::new(); *count] }
+            }
+            Transaction::InsertRowsWithDataBulk { idx, data } => {
+                Transaction::DeleteRowsBulk { idx: *idx, data: data.clone() }
+            }
+            Transaction::DeleteRowsBulk { idx, data } => {
+                Transaction::InsertRowsWithDataBulk { idx: *idx, data: data.clone() }
             }
             Transaction::InsertCol { idx } => {
                 Transaction::DeleteCol { idx: *idx, data: Vec::new() }
