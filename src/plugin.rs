@@ -123,8 +123,18 @@ impl PluginManager {
             }
         }
 
-        // Create get_cell function with owned data
+        // Create an overlay table to hold pending writes (visible to Lua, not to actual data)
+        let overlay = self.lua.create_table()?;
+
+        // Create get_cell function that checks overlay first, then falls back to cache
+        let overlay_for_get = overlay.clone();
         let get_cell_fn = self.lua.create_function(move |_, (row, col): (usize, usize)| {
+            // First check the overlay for pending writes
+            let overlay_key = format!("{}:{}", row, col);
+            if let Ok(val) = overlay_for_get.get::<String>(overlay_key.as_str()) {
+                return Ok(val);
+            }
+            // Fall back to original cache (convert to 0-indexed)
             let key = (row.saturating_sub(1), col.saturating_sub(1));
             Ok(cell_cache.get(&key).cloned().unwrap_or_default())
         })?;
@@ -132,9 +142,15 @@ impl PluginManager {
         // Create actions table to collect results
         let actions_table = self.lua.create_table()?;
 
-        // Create set_cell function
+        // Create set_cell function that writes to overlay AND records the action
+        let overlay_for_set = overlay.clone();
         let actions_ref = actions_table.clone();
         let set_cell_fn = self.lua.create_function(move |lua, (row, col, value): (usize, usize, String)| {
+            // Store in overlay so subsequent get_cell calls see it
+            let overlay_key = format!("{}:{}", row, col);
+            overlay_for_set.set(overlay_key, value.clone())?;
+
+            // Record the action for later application
             let action = lua.create_table()?;
             action.set("type", "set_cell")?;
             action.set("row", row)?;
