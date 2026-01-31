@@ -903,7 +903,7 @@ impl Table {
             SortType::Numeric => {
                 let mut keyed: Vec<(usize, f64)> = (start_row..self.row_count())
                     .map(|row| {
-                        let s = crate::format::parse_numeric(self.get_cell(row, sort_col).unwrap_or(&String::new()).trim()).unwrap_or(f64::NAN);
+                        let s = crate::format::parse_numeric(self.get_cell(row, sort_col).map(|x| x.as_str().trim()).unwrap_or("")).unwrap_or(f64::NAN);
                         (row, s)
                         }).collect();
 
@@ -968,7 +968,7 @@ impl Table {
             SortType::Numeric => {
                 let mut keyed: Vec<(usize, f64)> = (start_col..self.col_count())
                     .map(|col| {
-                        let s = crate::format::parse_numeric(self.get_cell(sort_row, col).unwrap_or(&String::new()).trim()).unwrap_or(f64::NAN);
+                        let s = crate::format::parse_numeric(self.get_cell(sort_row, col).map(|x| x.as_str().trim()).unwrap_or("")).unwrap_or(f64::NAN);
                         (col, s)
                         }).collect();
 
