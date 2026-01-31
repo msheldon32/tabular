@@ -263,13 +263,42 @@ impl Table {
         let removed = self.chunks[chunk_idx].remove(row_in_chunk);
         self.total_rows -= 1;
 
-        // Remove empty chunks (except keep at least one)
-        if self.chunks[chunk_idx].is_empty() && self.chunks.len() > 1 {
-            self.chunks.remove(chunk_idx);
-        }
+        // Rebalance: pull rows from subsequent chunks to maintain CHUNK_SIZE invariant
+        self.rebalance_chunks_after_delete(chunk_idx);
 
         self.mark_widths_dirty();
         Some(removed)
+    }
+
+    /// Rebalance chunks after a delete to maintain CHUNK_SIZE invariant
+    /// All chunks except the last should have exactly CHUNK_SIZE rows
+    fn rebalance_chunks_after_delete(&mut self, start_chunk: usize) {
+        let mut chunk_idx = start_chunk;
+
+        while chunk_idx < self.chunks.len() {
+            // Remove empty chunks (except keep at least one chunk total)
+            if self.chunks[chunk_idx].is_empty() && self.chunks.len() > 1 {
+                self.chunks.remove(chunk_idx);
+                continue;
+            }
+
+            // If this isn't the last chunk and it's under-filled, pull from next
+            if chunk_idx + 1 < self.chunks.len() && self.chunks[chunk_idx].len() < CHUNK_SIZE {
+                let needed = CHUNK_SIZE - self.chunks[chunk_idx].len();
+                let available = self.chunks[chunk_idx + 1].len().min(needed);
+
+                // Pull rows from beginning of next chunk
+                let pulled: Vec<Vec<String>> = self.chunks[chunk_idx + 1].drain(0..available).collect();
+                self.chunks[chunk_idx].extend(pulled);
+            }
+
+            chunk_idx += 1;
+        }
+
+        // Final pass: remove any empty chunks at the end
+        while self.chunks.len() > 1 && self.chunks.last().map(|c| c.is_empty()).unwrap_or(false) {
+            self.chunks.pop();
+        }
     }
 
     pub fn insert_col_at(&mut self, idx: usize) {
