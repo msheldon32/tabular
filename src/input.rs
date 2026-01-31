@@ -55,6 +55,8 @@ pub enum SequenceAction {
     FormatCurrency,        // f$
     FormatScientific,      // fe
     FormatPercentage,      // f%
+    // Register selection
+    SelectRegister(char),  // "x
 }
 
 impl SequenceAction {
@@ -176,12 +178,16 @@ impl KeyBuffer {
             ['f', '$'] => Some(SequenceAction::FormatCurrency),
             ['f', 'e'] => Some(SequenceAction::FormatScientific),
             ['f', '%'] => Some(SequenceAction::FormatPercentage),
+            // Register selection: "x where x is a valid register
+            ['"', c] if matches!(c, 'a'..='z' | 'A'..='Z' | '0' | '_' | '+' | '"') => {
+                Some(SequenceAction::SelectRegister(*c))
+            }
             _ => None,
         }
     }
 
     fn is_valid_prefix(&self) -> bool {
-        matches!(self.keys.as_slice(), ['g'] | ['d'] | ['y'] | ['f'])
+        matches!(self.keys.as_slice(), ['g'] | ['d'] | ['y'] | ['f'] | ['"'])
     }
 }
 
@@ -513,6 +519,12 @@ impl VisualHandler {
                     }
                     SequenceAction::FormatPercentage => {
                         return self.handle_format(view, table, FormatOp::Percentage);
+                    }
+                    SequenceAction::SelectRegister(reg) => {
+                        if let Err(e) = clipboard.select_register(reg) {
+                            return KeyResult::Message(e);
+                        }
+                        // Don't return - stay in visual mode, next action uses this register
                     }
                     _ => {} // dr, dc, yr, yc not used in visual mode
                 }

@@ -5,7 +5,7 @@ use crossterm::event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::calculator::Calculator;
-use crate::clipboard::Clipboard;
+use crate::clipboard::{Clipboard, RegisterContent};
 use crate::command::{Command, ReplaceCommand};
 use crate::input::{
     is_escape, CommandHandler, InsertHandler, KeyBuffer, KeyBufferResult, KeyResult,
@@ -176,6 +176,12 @@ impl App {
 
     fn execute_sequence_action(&mut self, action: SequenceAction, count: usize) {
         match action {
+            SequenceAction::SelectRegister(reg) => {
+                if let Err(e) = self.clipboard.select_register(reg) {
+                    self.message = Some(e);
+                }
+                // Don't clear key buffer - next action will use this register
+            }
             SequenceAction::DeleteRow => {
                 let start_row = self.view.cursor_row;
                 let actual_count = count.min(self.table.row_count().saturating_sub(start_row));
@@ -184,10 +190,10 @@ impl App {
                     return;
                 }
 
-                // Yank the rows first using bulk get
+                // Store deleted rows (doesn't affect yank register)
                 let rows = self.table.get_rows_cloned(start_row, actual_count);
                 if !rows.is_empty() {
-                    self.clipboard.yank_rows(rows.clone());
+                    self.clipboard.store_deleted(RegisterContent::from_rows(rows.clone()));
 
                     // Delete rows using bulk operation
                     let txn = Transaction::DeleteRowsBulk {
@@ -197,7 +203,7 @@ impl App {
                     self.execute(txn);
                 }
                 self.view.clamp_cursor(&self.table);
-                        let msg = if actual_count == 1 { "Row deleted".to_string() } else { format!("{} rows deleted", actual_count) };
+                let msg = if actual_count == 1 { "Row deleted".to_string() } else { format!("{} rows deleted", actual_count) };
                 self.message = Some(msg);
             }
             SequenceAction::DeleteCol => {
@@ -205,7 +211,7 @@ impl App {
                 let end_col = (start_col + count).min(self.table.col_count());
                 let actual_count = end_col - start_col;
 
-                // Yank the columns first
+                // Store deleted columns (doesn't affect yank register)
                 let cols: Vec<Vec<String>> = (0..self.table.row_count())
                     .map(|r| {
                         (start_col..end_col)
@@ -214,7 +220,7 @@ impl App {
                     })
                     .collect();
                 if !cols.is_empty() {
-                    self.clipboard.yank_cols(cols);
+                    self.clipboard.store_deleted(RegisterContent::from_cols(cols));
                 }
 
                 // Delete columns (always delete at start_col since indices shift)
@@ -228,7 +234,7 @@ impl App {
                     }
                 }
                 self.view.clamp_cursor(&self.table);
-                        let msg = if actual_count == 1 { "Column deleted".to_string() } else { format!("{} columns deleted", actual_count) };
+                let msg = if actual_count == 1 { "Column deleted".to_string() } else { format!("{} columns deleted", actual_count) };
                 self.message = Some(msg);
             }
             SequenceAction::YankRow => {
@@ -271,14 +277,14 @@ impl App {
             SequenceAction::Delete => {
                 // In normal mode, dd deletes current row (like dr)
                 if let Some(row_data) = self.table.get_row_cloned(self.view.cursor_row) {
-                    self.clipboard.yank_rows(vec![row_data.clone()]);
+                    self.clipboard.store_deleted(RegisterContent::from_rows(vec![row_data.clone()]));
                     let txn = Transaction::DeleteRow {
                         idx: self.view.cursor_row,
                         data: row_data,
                     };
                     self.execute(txn);
                     self.view.clamp_cursor(&self.table);
-                                self.message = Some("Row deleted".to_string());
+                    self.message = Some("Row deleted".to_string());
                 }
             }
              SequenceAction::MoveToTop
@@ -295,8 +301,6 @@ impl App {
             | SequenceAction::FormatCurrency
             | SequenceAction::FormatScientific
             | SequenceAction::FormatPercentage => {}
-
-            _ => {}
         }
     }
 
