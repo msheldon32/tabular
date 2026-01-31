@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::fs::File;
-use std::io::{self, BufReader, BufWriter, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
 
 use crate::table::{Table, CHUNK_SIZE};
 
@@ -21,15 +21,70 @@ impl FileFormat {
             _ => None
         }
     }
+}
 
-    /// Get the delimiter for CSV-like formats
-    fn delimiter(&self) -> Option<u8> {
-        match self {
-            FileFormat::Csv => Some(b','),
-            FileFormat::Tsv => Some(b'\t'),
-            _ => None,
+/// Common delimiters to detect
+const CANDIDATE_DELIMITERS: &[u8] = &[b',', b'\t', b';', b'|'];
+
+/// Detect the most likely delimiter by analyzing the first N lines
+fn detect_delimiter(path: &PathBuf, sample_lines: usize) -> Option<u8> {
+    let file = File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
+    let mut counts: Vec<Vec<usize>> = vec![Vec::new(); CANDIDATE_DELIMITERS.len()];
+
+    for (line_idx, line_result) in reader.lines().enumerate() {
+        if line_idx >= sample_lines {
+            break;
+        }
+        let line = match line_result {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        // Count occurrences of each delimiter in this line
+        for (delim_idx, &delim) in CANDIDATE_DELIMITERS.iter().enumerate() {
+            let count = line.bytes().filter(|&b| b == delim).count();
+            counts[delim_idx].push(count);
         }
     }
+
+    // Find the delimiter with the most consistent non-zero count
+    let mut best_delim: Option<u8> = None;
+    let mut best_score: f64 = 0.0;
+
+    for (delim_idx, line_counts) in counts.iter().enumerate() {
+        if line_counts.is_empty() {
+            continue;
+        }
+
+        // Calculate consistency: we want delimiters that appear the same number of times
+        // on each line (low variance) and appear at least once (non-zero mean)
+        let sum: usize = line_counts.iter().sum();
+        let mean = sum as f64 / line_counts.len() as f64;
+
+        if mean < 1.0 {
+            // Delimiter doesn't appear consistently
+            continue;
+        }
+
+        // Calculate variance
+        let variance: f64 = line_counts.iter()
+            .map(|&c| (c as f64 - mean).powi(2))
+            .sum::<f64>() / line_counts.len() as f64;
+
+        // Score: higher mean and lower variance is better
+        // Use coefficient of variation (lower is more consistent)
+        let cv = if mean > 0.0 { variance.sqrt() / mean } else { f64::MAX };
+        let score = mean / (1.0 + cv);
+
+        if score > best_score {
+            best_score = score;
+            best_delim = Some(CANDIDATE_DELIMITERS[delim_idx]);
+        }
+    }
+
+    best_delim
 }
 
 /// Result of loading a file, including any warnings
@@ -41,15 +96,58 @@ pub struct LoadResult {
 pub struct FileIO {
     pub file_path: Option<PathBuf>,
     format: Option<FileFormat>,
+    delimiter: u8,
     max_dim: (usize, usize)
 }
 
 impl FileIO {
-    pub fn new(file_path: Option<PathBuf>) -> io::Result<Self> {
+    /// Create a new FileIO with optional delimiter override
+    /// If delimiter is None, auto-detect from file content (or fall back to extension/comma)
+    pub fn new(file_path: Option<PathBuf>, delimiter: Option<u8>) -> io::Result<Self> {
         let format = file_path.as_ref().and_then(FileFormat::from_extension);
 
-        let max_dim = (10000000,10000000);
-        Ok(Self { file_path, format, max_dim })
+        // Determine delimiter: explicit > detected > extension-based > comma default
+        let delimiter = if let Some(d) = delimiter {
+            d
+        } else if let Some(ref path) = file_path {
+            if path.exists() {
+                // Auto-detect from file content
+                detect_delimiter(path, 30).unwrap_or_else(|| {
+                    // Fall back to extension-based
+                    match format {
+                        Some(FileFormat::Tsv) => b'\t',
+                        _ => b',',
+                    }
+                })
+            } else {
+                // New file - use extension or default
+                match format {
+                    Some(FileFormat::Tsv) => b'\t',
+                    _ => b',',
+                }
+            }
+        } else {
+            b','
+        };
+
+        let max_dim = (10000000, 10000000);
+        Ok(Self { file_path, format, delimiter, max_dim })
+    }
+
+    /// Get the detected/configured delimiter
+    pub fn delimiter(&self) -> u8 {
+        self.delimiter
+    }
+
+    /// Get a human-readable name for the delimiter
+    pub fn delimiter_name(&self) -> &'static str {
+        match self.delimiter {
+            b',' => "comma",
+            b'\t' => "tab",
+            b';' => "semicolon",
+            b'|' => "pipe",
+            _ => "custom",
+        }
     }
 
     pub fn file_name(&self) -> String {
@@ -97,7 +195,7 @@ impl FileIO {
 
     fn read_csv(&self) -> io::Result<LoadResult> {
         let path = self.file_path.as_ref().ok_or(io::ErrorKind::NotFound)?;
-        let delim = self.format.and_then(|f| f.delimiter()).unwrap_or(b',');
+        let delim = self.delimiter;
 
         // Check if file exists - if not, create empty table
         if !path.exists() {
@@ -190,7 +288,7 @@ impl FileIO {
 
     fn write_csv(&self, table: &Table) -> io::Result<()> {
         let path = self.file_path.as_ref().ok_or(io::ErrorKind::NotFound)?;
-        let delim = self.format.and_then(|f| f.delimiter()).unwrap_or(b',');
+        let delim = self.delimiter;
 
         let file = File::create(path)?;
         let writer = BufWriter::new(file);
@@ -233,7 +331,7 @@ mod tests {
         writeln!(file, "1,2").unwrap();  // Short row
         writeln!(file, "3,4,5").unwrap();
 
-        let file_io = FileIO::new(Some(file.path().to_path_buf())).unwrap();
+        let file_io = FileIO::new(Some(file.path().to_path_buf()), None).unwrap();
         let result = file_io.load_table().unwrap();
 
         assert_eq!(result.table.col_count(), 3);
