@@ -1,4 +1,5 @@
 use std::io;
+use std::cmp;
 use std::time::Duration;
 
 use crossterm::event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers};
@@ -13,7 +14,8 @@ use crate::input::{
 };
 use crate::mode::Mode;
 use crate::plugin::{PluginManager, PluginAction, CommandContext};
-use crate::table::{SortDirection, Table, TableView, SortType};
+use crate::table::{SortDirection, Table, SortType};
+use crate::tableview::TableView;
 use crate::transaction::{History, Transaction};
 use crate::ui;
 use crate::fileio::FileIO;

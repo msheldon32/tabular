@@ -9,6 +9,7 @@ mod mode;
 mod plugin;
 mod style;
 mod table;
+mod tableview;
 mod transaction;
 mod ui;
 mod util;
