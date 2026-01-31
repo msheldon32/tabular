@@ -8,6 +8,7 @@ mod input;
 mod mode;
 mod operations;
 mod plugin;
+mod progress;
 mod style;
 mod table;
 mod tableview;

@@ -1,5 +1,7 @@
 use std::io;
 use std::time::Duration;
+use std::sync::mpsc::{self, Receiver};
+use std::thread::{self, JoinHandle};
 
 use crossterm::event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -20,6 +22,25 @@ use crate::transaction::{History, Transaction};
 use crate::ui;
 use crate::fileio::FileIO;
 use crate::style::Style;
+use crate::progress::Progress;
+
+/// Result from a background operation
+pub enum BackgroundResult {
+    SortComplete {
+        permutation: Vec<usize>,
+        direction: SortDirection,
+        sort_type: SortType,
+        is_column_sort: bool,
+    },
+}
+
+/// Pending operation to be executed after the next render
+/// This allows progress to be displayed before the operation runs
+pub enum PendingOp {
+    Undo,
+    Redo,
+    Calc { formula_count: usize },
+}
 
 pub struct App {
     pub table: Table,
@@ -35,6 +56,12 @@ pub struct App {
     pub should_quit: bool,
     pub header_mode: bool,
     pub precision: Option<usize>,  // Display precision for numbers (None = auto)
+    pub progress: Option<(String, Progress)>,  // Optional progress indicator (operation name, progress)
+    pending_op: Option<PendingOp>,  // Pending operation to execute after next render
+    // Background task handling
+    bg_receiver: Option<Receiver<BackgroundResult>>,
+    #[allow(dead_code)]
+    bg_handle: Option<JoinHandle<()>>,
     // Mode handlers
     key_buffer: KeyBuffer,
     nav_handler: NavigationHandler,
@@ -66,6 +93,10 @@ impl App {
             should_quit: false,
             header_mode: true,
             precision: None,
+            progress: None,
+            pending_op: None,
+            bg_receiver: None,
+            bg_handle: None,
             key_buffer: KeyBuffer::new(),
             nav_handler: NavigationHandler::new(),
             search_handler: SearchHandler::new(),
@@ -100,12 +131,80 @@ impl App {
         self.key_buffer.display()
     }
 
-    pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
+    /// Start a progress indicator for a long-running operation
+    pub fn start_progress(&mut self, operation: &str, total: usize) -> Progress {
+        let progress = Progress::new(total);
+        self.progress = Some((operation.to_string(), progress.clone()));
+        progress
+    }
 
+    /// Clear the progress indicator
+    pub fn clear_progress(&mut self) {
+        self.progress = None;
+    }
+
+    /// Execute a pending operation (called after render so progress is visible)
+    fn execute_pending_op(&mut self, op: PendingOp) {
+        match op {
+            PendingOp::Undo => {
+                if let Some(inverse) = self.history.undo() {
+                    inverse.apply(&mut self.table);
+                    self.view.clamp_cursor(&self.table);
+                    self.message = Some("Undo".to_string());
+                }
+                self.clear_progress();
+            }
+            PendingOp::Redo => {
+                if let Some(txn) = self.history.redo() {
+                    txn.apply(&mut self.table);
+                    self.view.clamp_cursor(&self.table);
+                    self.message = Some("Redo".to_string());
+                }
+                self.clear_progress();
+            }
+            PendingOp::Calc { formula_count } => {
+                let calc = Calculator::new(&self.table, self.header_mode);
+                match calc.evaluate_all() {
+                    Ok(updates) => {
+                        if updates.is_empty() {
+                            self.message = Some("No formulas found".to_string());
+                        } else {
+                            let txns: Vec<Transaction> = updates
+                                .into_iter()
+                                .map(|(row, col, new_value)| {
+                                    let old_value = self.table.get_cell(row, col)
+                                        .cloned()
+                                        .unwrap_or_default();
+                                    Transaction::SetCell { row, col, old_value, new_value }
+                                })
+                                .collect();
+                            let count = txns.len();
+                            self.execute(Transaction::Batch(txns));
+                            self.message = Some(format!("Evaluated {} formula(s)", count));
+                        }
+                    }
+                    Err(e) => self.message = Some(format!("{}", e)),
+                }
+                self.clear_progress();
+                let _ = formula_count; // Suppress unused warning
+            }
+        }
+    }
+
+    pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
         while !self.should_quit {
+            // Check for completed background operations
+            self.poll_background_result();
+
             terminal.draw(|f| ui::render(f, self))?;
 
-            if poll(Duration::from_millis(10))? {
+            // Execute pending operation after render (so progress bar is visible)
+            if let Some(op) = self.pending_op.take() {
+                self.execute_pending_op(op);
+                continue; // Re-render immediately after
+            }
+
+            if poll(Duration::from_millis(16))? {
                 if let Event::Key(key) = event::read()? {
                     self.message = None;
                     self.handle_key(key);
@@ -113,6 +212,68 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// Check for and handle completed background operations
+    fn poll_background_result(&mut self) {
+        if let Some(ref receiver) = self.bg_receiver {
+            match receiver.try_recv() {
+                Ok(result) => {
+                    self.handle_background_result(result);
+                    self.bg_receiver = None;
+                    self.bg_handle = None;
+                    self.clear_progress();
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    // Still working, progress is updated by the background thread
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    // Thread died unexpectedly
+                    self.bg_receiver = None;
+                    self.bg_handle = None;
+                    self.clear_progress();
+                    self.message = Some("Operation failed".to_string());
+                }
+            }
+        }
+    }
+
+    /// Handle a completed background operation
+    fn handle_background_result(&mut self, result: BackgroundResult) {
+        match result {
+            BackgroundResult::SortComplete { permutation, direction, sort_type, is_column_sort } => {
+                // Empty permutation means already sorted
+                if permutation.is_empty() {
+                    self.message = Some("Already sorted".to_string());
+                    return;
+                }
+
+                if is_column_sort {
+                    self.table.apply_col_permutation(&permutation);
+                    let txn = Transaction::PermuteCols { permutation };
+                    self.history.record(txn);
+                } else {
+                    self.table.apply_row_permutation(&permutation);
+                    let txn = Transaction::PermuteRows { permutation };
+                    self.history.record(txn);
+                }
+                self.dirty = true;
+
+                let type_str = match sort_type {
+                    SortType::Numeric => "numeric",
+                    SortType::Text => "text",
+                };
+                let dir_str = match direction {
+                    SortDirection::Ascending => "ascending",
+                    SortDirection::Descending => "descending",
+                };
+                if is_column_sort {
+                    self.message = Some(format!("Columns sorted {} ({})", dir_str, type_str));
+                } else {
+                    self.message = Some(format!("Sorted {} ({})", dir_str, type_str));
+                }
+            }
+        }
     }
 
     // === Transaction helpers ===
@@ -403,17 +564,31 @@ impl App {
                 self.execute(txn);
             }
             KeyCode::Char('u') => {
-                if let Some(inverse) = self.history.undo() {
-                    inverse.apply(&mut self.table);
-                    self.view.clamp_cursor(&self.table);
-                                self.message = Some("Undo".to_string());
+                // Check if undo is large before executing
+                if let Some(txn) = self.history.peek_undo() {
+                    if txn.is_large() {
+                        let size = txn.estimated_size();
+                        self.start_progress("Undoing", size);
+                        self.pending_op = Some(PendingOp::Undo);
+                    } else if let Some(inverse) = self.history.undo() {
+                        inverse.apply(&mut self.table);
+                        self.view.clamp_cursor(&self.table);
+                        self.message = Some("Undo".to_string());
+                    }
                 }
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if let Some(txn) = self.history.redo() {
-                    txn.apply(&mut self.table);
-                    self.view.clamp_cursor(&self.table);
-                                self.message = Some("Redo".to_string());
+                // Check if redo is large before executing
+                if let Some(txn) = self.history.peek_redo() {
+                    if txn.is_large() {
+                        let size = txn.estimated_size();
+                        self.start_progress("Redoing", size);
+                        self.pending_op = Some(PendingOp::Redo);
+                    } else if let Some(txn) = self.history.redo() {
+                        txn.apply(&mut self.table);
+                        self.view.clamp_cursor(&self.table);
+                        self.message = Some("Redo".to_string());
+                    }
                 }
             }
             KeyCode::Char('/') => {
@@ -577,27 +752,34 @@ impl App {
                 ));
             }
             Command::Calc => {
-                let calc = Calculator::new(&self.table, self.header_mode);
-                match calc.evaluate_all() {
-                    Ok(updates) => {
-                        if updates.is_empty() {
-                            self.message = Some("No formulas found".to_string());
-                            return;
+                // For large tables, queue as pending op to show progress
+                let cell_count = self.table.row_count() * self.table.col_count();
+                if cell_count >= 50_000 {
+                    self.start_progress("Calculating", cell_count);
+                    self.pending_op = Some(PendingOp::Calc { formula_count: cell_count });
+                } else {
+                    let calc = Calculator::new(&self.table, self.header_mode);
+                    match calc.evaluate_all() {
+                        Ok(updates) => {
+                            if updates.is_empty() {
+                                self.message = Some("No formulas found".to_string());
+                                return;
+                            }
+                            let txns: Vec<Transaction> = updates
+                                .into_iter()
+                                .map(|(row, col, new_value)| {
+                                    let old_value = self.table.get_cell(row, col)
+                                        .cloned()
+                                        .unwrap_or_default();
+                                    Transaction::SetCell { row, col, old_value, new_value }
+                                })
+                                .collect();
+                            let count = txns.len();
+                            self.execute(Transaction::Batch(txns));
+                            self.message = Some(format!("Evaluated {} formula(s)", count));
                         }
-                        let txns: Vec<Transaction> = updates
-                            .into_iter()
-                            .map(|(row, col, new_value)| {
-                                let old_value = self.table.get_cell(row, col)
-                                    .cloned()
-                                    .unwrap_or_default();
-                                Transaction::SetCell { row, col, old_value, new_value }
-                            })
-                            .collect();
-                        let count = txns.len();
-                        self.execute(Transaction::Batch(txns));
-                                        self.message = Some(format!("Evaluated {} formula(s)", count));
+                        Err(e) => self.message = Some(format!("{}", e)),
                     }
-                    Err(e) => self.message = Some(format!("{}", e)),
                 }
             }
             Command::Grid => self.style.toggle_grid(),
@@ -820,10 +1002,113 @@ impl App {
     }
 
     fn sort_by_column(&mut self, direction: SortDirection) {
+        // Don't start a new sort if one is already running
+        if self.bg_receiver.is_some() {
+            self.message = Some("Sort already in progress".to_string());
+            return;
+        }
+
+        let sort_col = self.view.cursor_col;
+        let skip_header = self.header_mode;
+        let row_count = self.table.row_count();
+
+        // For small tables, sort synchronously
+        if row_count < 50_000 {
+            self.sort_by_column_sync(direction);
+            return;
+        }
+
+        // Extract the column data for sorting (clone to send to thread)
+        let sort_type = self.table.probe_column_type(sort_col, skip_header);
+        let col_data: Vec<String> = (0..row_count)
+            .map(|row| {
+                self.table.get_cell(row, sort_col)
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .collect();
+
+        // Set up progress tracking
+        let progress = self.start_progress("Sorting", row_count);
+
+        // Create channel for result
+        let (tx, rx) = mpsc::channel();
+        self.bg_receiver = Some(rx);
+
+        // Spawn background thread
+        let handle = thread::spawn(move || {
+            let start_row = if skip_header { 1 } else { 0 };
+
+            // Build keyed vector with progress updates
+            let mut keyed: Vec<(usize, SortKey)> = Vec::with_capacity(row_count - start_row);
+
+            for (i, row) in (start_row..row_count).enumerate() {
+                let key = match sort_type {
+                    SortType::Numeric => {
+                        let val = crate::format::parse_numeric(col_data[row].trim())
+                            .unwrap_or(f64::NAN);
+                        SortKey::Numeric(val)
+                    }
+                    SortType::Text => {
+                        SortKey::Text(col_data[row].to_lowercase())
+                    }
+                };
+                keyed.push((row, key));
+
+                // Update progress periodically
+                if i % 10000 == 0 {
+                    progress.set(i);
+                }
+            }
+
+            progress.set(row_count / 2); // Halfway point before sort
+
+            // Sort
+            keyed.sort_unstable_by(|(idx_a, key_a), (idx_b, key_b)| {
+                let cmp = key_a.cmp(key_b);
+                match direction {
+                    SortDirection::Ascending => cmp.then(idx_a.cmp(idx_b)),
+                    SortDirection::Descending => cmp.reverse().then(idx_a.cmp(idx_b)),
+                }
+            });
+
+            progress.set(row_count);
+
+            // Build permutation
+            let mut permutation: Vec<usize> = if skip_header {
+                vec![0]
+            } else {
+                Vec::new()
+            };
+            permutation.extend(keyed.into_iter().map(|(row, _)| row));
+
+            // Check if already sorted
+            let already_sorted = permutation.iter().enumerate().all(|(i, &idx)| i == idx);
+            if already_sorted {
+                let _ = tx.send(BackgroundResult::SortComplete {
+                    permutation: Vec::new(), // Empty signals already sorted
+                    direction,
+                    sort_type,
+                    is_column_sort: false,
+                });
+            } else {
+                let _ = tx.send(BackgroundResult::SortComplete {
+                    permutation,
+                    direction,
+                    sort_type,
+                    is_column_sort: false,
+                });
+            }
+        });
+
+        self.bg_handle = Some(handle);
+    }
+
+    /// Synchronous sort for small tables
+    fn sort_by_column_sync(&mut self, direction: SortDirection) {
         let sort_col = self.view.cursor_col;
         let skip_header = self.header_mode;
 
-        // Get the sort permutation (returns None if already sorted)
         let permutation = match self.table.get_sort_permutation(sort_col, direction, skip_header) {
             Some(p) => p,
             None => {
@@ -832,10 +1117,7 @@ impl App {
             }
         };
 
-        // Apply the permutation
         self.table.apply_row_permutation(&permutation);
-
-        // Record the permutation transaction (memory-efficient: only stores indices)
         let txn = Transaction::PermuteRows { permutation };
         self.history.record(txn);
         self.dirty = true;
@@ -883,5 +1165,37 @@ impl App {
             SortDirection::Descending => "descending",
         };
         self.message = Some(format!("Columns sorted {} ({})", dir_str, type_str));
+    }
+}
+
+/// Sort key for background sorting
+#[derive(Clone, PartialEq)]
+enum SortKey {
+    Numeric(f64),
+    Text(String),
+}
+
+impl Eq for SortKey {}
+
+impl Ord for SortKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (SortKey::Numeric(a), SortKey::Numeric(b)) => {
+                match (a.is_nan(), b.is_nan()) {
+                    (true, true) => std::cmp::Ordering::Equal,
+                    (true, false) => std::cmp::Ordering::Greater,
+                    (false, true) => std::cmp::Ordering::Less,
+                    (false, false) => a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal),
+                }
+            }
+            (SortKey::Text(a), SortKey::Text(b)) => a.cmp(b),
+            _ => std::cmp::Ordering::Equal,
+        }
+    }
+}
+
+impl PartialOrd for SortKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }

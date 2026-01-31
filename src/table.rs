@@ -1,5 +1,10 @@
+use rayon::prelude::*;
+
 /// Number of rows per chunk for memory-efficient storage
 pub const CHUNK_SIZE: usize = 1024;
+
+/// Threshold for using parallel processing (rows * cols)
+const PARALLEL_THRESHOLD: usize = 10_000;
 
 /// Pure data structure for the table with chunked row storage
 #[derive(Debug, Clone)]
@@ -156,17 +161,40 @@ impl Table {
     }
 
     /// Force recompute of column widths
+    /// Uses parallel processing for large tables
     pub fn recompute_col_widths(&mut self) {
-        self.col_widths = (0..self.col_count)
-            .map(|col| {
-                self.rows_iter()
-                    .filter_map(|row| row.get(col))
-                    .map(|s| crate::util::display_width(s))
-                    .max()
-                    .unwrap_or(3)
-                    .max(3)
-            })
-            .collect();
+        let size = self.total_rows * self.col_count;
+
+        if size >= PARALLEL_THRESHOLD && self.col_count > 1 {
+            // Parallel: compute each column's max width in parallel
+            // Collect all cells first to enable parallel iteration
+            let all_rows: Vec<&Vec<String>> = self.rows_iter().collect();
+
+            self.col_widths = (0..self.col_count)
+                .into_par_iter()
+                .map(|col| {
+                    all_rows
+                        .iter()
+                        .filter_map(|row| row.get(col))
+                        .map(|s| crate::util::display_width(s))
+                        .max()
+                        .unwrap_or(3)
+                        .max(3)
+                })
+                .collect();
+        } else {
+            // Sequential for small tables
+            self.col_widths = (0..self.col_count)
+                .map(|col| {
+                    self.rows_iter()
+                        .filter_map(|row| row.get(col))
+                        .map(|s| crate::util::display_width(s))
+                        .max()
+                        .unwrap_or(3)
+                        .max(3)
+                })
+                .collect();
+        }
         self.col_widths_dirty = false;
     }
 
@@ -882,6 +910,7 @@ impl Table {
 
     /// Sort rows by a specific column, returns the sorted indices
     /// skip_header: if true, row 0 is not included in sorting
+    /// Uses parallel processing for large tables
     pub fn get_sorted_row_indices(
         &self,
         sort_col: usize,
@@ -890,6 +919,8 @@ impl Table {
     ) -> Vec<usize> {
         let sort_type = self.probe_column_type(sort_col, skip_header);
         let start_row = if skip_header { 1 } else { 0 };
+        let row_count = self.row_count();
+        let use_parallel = row_count >= PARALLEL_THRESHOLD;
 
         let mut indices: Vec<usize> = if skip_header {
             vec![0]
@@ -899,47 +930,98 @@ impl Table {
 
         match sort_type {
             SortType::Numeric => {
-                let mut keyed: Vec<(usize, f64)> = (start_row..self.row_count())
-                    .map(|row| {
-                        let s = crate::format::parse_numeric(self.get_cell(row, sort_col).map(|x| x.as_str().trim()).unwrap_or("")).unwrap_or(f64::NAN);
-                        (row, s)
-                        }).collect();
+                // Build keyed vector (parallel for large tables)
+                let mut keyed: Vec<(usize, f64)> = if use_parallel {
+                    // Need to collect cell references first for parallel access
+                    let cells: Vec<Option<&String>> = (start_row..row_count)
+                        .map(|row| self.get_cell(row, sort_col))
+                        .collect();
 
-                match direction {
-                    SortDirection::Ascending => keyed.sort_unstable_by(|(idx_a,num_a), (idx_b,num_b)| -> std::cmp::Ordering { 
-                            match (num_a.is_nan(), num_b.is_nan()) {
-                                (true, true) => std::cmp::Ordering::Equal, // Both NaN
-                                (true, false) => std::cmp::Ordering::Greater, // NaN goes last
-                                (false, true) => std::cmp::Ordering::Less,
-                                (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
-                            }.then(idx_a.cmp(&idx_b))
-                        }),
-                    SortDirection::Descending => keyed.sort_unstable_by(|(idx_a,num_a), (idx_b,num_b)| -> std::cmp::Ordering { 
-                            match (num_a.is_nan(), num_b.is_nan()) {
-                                (true, true) => std::cmp::Ordering::Equal, // Both NaN
-                                (true, false) => std::cmp::Ordering::Greater, // NaN goes last
-                                (false, true) => std::cmp::Ordering::Less,
-                                (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal).reverse(),
-                            }.then(idx_a.cmp(&idx_b))
-                        }),
+                    cells.into_par_iter()
+                        .enumerate()
+                        .map(|(i, cell)| {
+                            let row = start_row + i;
+                            let val = crate::format::parse_numeric(
+                                cell.map(|x| x.as_str().trim()).unwrap_or("")
+                            ).unwrap_or(f64::NAN);
+                            (row, val)
+                        })
+                        .collect()
+                } else {
+                    (start_row..row_count)
+                        .map(|row| {
+                            let val = crate::format::parse_numeric(
+                                self.get_cell(row, sort_col).map(|x| x.as_str().trim()).unwrap_or("")
+                            ).unwrap_or(f64::NAN);
+                            (row, val)
+                        })
+                        .collect()
+                };
 
+                // Sort (parallel for large tables)
+                let cmp_fn = |&(idx_a, num_a): &(usize, f64), &(idx_b, num_b): &(usize, f64)| -> std::cmp::Ordering {
+                    let base = match (num_a.is_nan(), num_b.is_nan()) {
+                        (true, true) => std::cmp::Ordering::Equal,
+                        (true, false) => std::cmp::Ordering::Greater,
+                        (false, true) => std::cmp::Ordering::Less,
+                        (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
+                    };
+                    match direction {
+                        SortDirection::Ascending => base.then(idx_a.cmp(&idx_b)),
+                        SortDirection::Descending => base.reverse().then(idx_a.cmp(&idx_b)),
+                    }
+                };
+
+                if use_parallel {
+                    keyed.par_sort_unstable_by(cmp_fn);
+                } else {
+                    keyed.sort_unstable_by(cmp_fn);
                 }
 
-                indices.extend(keyed.into_iter().map(|(row,_)| row));
-            },
+                indices.extend(keyed.into_iter().map(|(row, _)| row));
+            }
             SortType::Text => {
-                let mut keyed: Vec<(usize, String)> = (start_row..self.row_count())
-                    .map(|row| {
-                        let s = self.get_cell(row, sort_col).unwrap_or(&String::new()).to_lowercase().trim().to_owned();
-                        (row, s)
-                        }).collect();
+                // Build keyed vector (parallel for large tables)
+                let mut keyed: Vec<(usize, String)> = if use_parallel {
+                    let cells: Vec<Option<&String>> = (start_row..row_count)
+                        .map(|row| self.get_cell(row, sort_col))
+                        .collect();
 
-                match direction {
-                    SortDirection::Ascending => keyed.sort_unstable_by(|(i,a), (j,b)|  a.cmp(&b).then(i.cmp(&j))),
-                    SortDirection::Descending => keyed.sort_unstable_by(|(i,a), (j,b)|  a.cmp(&b).reverse().then(i.cmp(&j)))
+                    cells.into_par_iter()
+                        .enumerate()
+                        .map(|(i, cell)| {
+                            let row = start_row + i;
+                            let val = cell.map(|s| s.to_lowercase().trim().to_owned())
+                                .unwrap_or_default();
+                            (row, val)
+                        })
+                        .collect()
+                } else {
+                    (start_row..row_count)
+                        .map(|row| {
+                            let val = self.get_cell(row, sort_col)
+                                .map(|s| s.to_lowercase().trim().to_owned())
+                                .unwrap_or_default();
+                            (row, val)
+                        })
+                        .collect()
+                };
+
+                // Sort (parallel for large tables)
+                let cmp_fn = |&(ref i, ref a): &(usize, String), &(ref j, ref b): &(usize, String)| -> std::cmp::Ordering {
+                    match direction {
+                        SortDirection::Ascending => a.cmp(b).then(i.cmp(j)),
+                        SortDirection::Descending => a.cmp(b).reverse().then(i.cmp(j)),
+                    }
+                };
+
+                if use_parallel {
+                    keyed.par_sort_unstable_by(cmp_fn);
+                } else {
+                    keyed.sort_unstable_by(cmp_fn);
                 }
 
-                indices.extend(keyed.into_iter().map(|(row,_)| row));
+                indices.extend(keyed.into_iter().map(|(row, _)| row));
             }
         }
 
@@ -947,6 +1029,7 @@ impl Table {
     }
 
     /// Sort columns by a specific row, returns the sorted column indices
+    /// Uses parallel processing for tables with many columns
     pub fn get_sorted_col_indices(
         &self,
         sort_row: usize,
@@ -955,59 +1038,106 @@ impl Table {
     ) -> Vec<usize> {
         let sort_type = self.probe_row_type(sort_row, skip_first_col);
         let start_col = if skip_first_col { 1 } else { 0 };
+        let col_count = self.col_count();
+        let use_parallel = col_count >= PARALLEL_THRESHOLD;
 
         let mut indices: Vec<usize> = if skip_first_col {
             vec![0]
         } else {
             Vec::new()
         };
-        
+
         match sort_type {
             SortType::Numeric => {
-                let mut keyed: Vec<(usize, f64)> = (start_col..self.col_count())
-                    .map(|col| {
-                        let s = crate::format::parse_numeric(self.get_cell(sort_row, col).map(|x| x.as_str().trim()).unwrap_or("")).unwrap_or(f64::NAN);
-                        (col, s)
-                        }).collect();
+                let mut keyed: Vec<(usize, f64)> = if use_parallel {
+                    let cells: Vec<Option<&String>> = (start_col..col_count)
+                        .map(|col| self.get_cell(sort_row, col))
+                        .collect();
 
-                match direction {
-                    SortDirection::Ascending => keyed.sort_unstable_by(|(idx_a,num_a), (idx_b,num_b)| -> std::cmp::Ordering { 
-                            match (num_a.is_nan(), num_b.is_nan()) {
-                                (true, true) => std::cmp::Ordering::Equal, // Both NaN
-                                (true, false) => std::cmp::Ordering::Greater, // NaN goes last
-                                (false, true) => std::cmp::Ordering::Less,
-                                (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
-                            }.then(idx_a.cmp(&idx_b))
-                        }),
-                    SortDirection::Descending => keyed.sort_unstable_by(|(idx_a,num_a), (idx_b,num_b)| -> std::cmp::Ordering { 
-                            match (num_a.is_nan(), num_b.is_nan()) {
-                                (true, true) => std::cmp::Ordering::Equal, // Both NaN
-                                (true, false) => std::cmp::Ordering::Greater, // NaN goes last
-                                (false, true) => std::cmp::Ordering::Less,
-                                (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal).reverse(),
-                            }.then(idx_a.cmp(&idx_b))
-                        }),
+                    cells.into_par_iter()
+                        .enumerate()
+                        .map(|(i, cell)| {
+                            let col = start_col + i;
+                            let val = crate::format::parse_numeric(
+                                cell.map(|x| x.as_str().trim()).unwrap_or("")
+                            ).unwrap_or(f64::NAN);
+                            (col, val)
+                        })
+                        .collect()
+                } else {
+                    (start_col..col_count)
+                        .map(|col| {
+                            let val = crate::format::parse_numeric(
+                                self.get_cell(sort_row, col).map(|x| x.as_str().trim()).unwrap_or("")
+                            ).unwrap_or(f64::NAN);
+                            (col, val)
+                        })
+                        .collect()
+                };
 
+                let cmp_fn = |&(idx_a, num_a): &(usize, f64), &(idx_b, num_b): &(usize, f64)| -> std::cmp::Ordering {
+                    let base = match (num_a.is_nan(), num_b.is_nan()) {
+                        (true, true) => std::cmp::Ordering::Equal,
+                        (true, false) => std::cmp::Ordering::Greater,
+                        (false, true) => std::cmp::Ordering::Less,
+                        (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
+                    };
+                    match direction {
+                        SortDirection::Ascending => base.then(idx_a.cmp(&idx_b)),
+                        SortDirection::Descending => base.reverse().then(idx_a.cmp(&idx_b)),
+                    }
+                };
+
+                if use_parallel {
+                    keyed.par_sort_unstable_by(cmp_fn);
+                } else {
+                    keyed.sort_unstable_by(cmp_fn);
                 }
 
-                indices.extend(keyed.into_iter().map(|(col,_)| col));
-            },
+                indices.extend(keyed.into_iter().map(|(col, _)| col));
+            }
             SortType::Text => {
-                let mut keyed: Vec<(usize, String)> = (start_col..self.col_count())
-                    .map(|col| {
-                        let s = self.get_cell(sort_row, col).unwrap_or(&String::new()).to_lowercase().trim().to_owned();
-                        (col, s)
-                        }).collect();
+                let mut keyed: Vec<(usize, String)> = if use_parallel {
+                    let cells: Vec<Option<&String>> = (start_col..col_count)
+                        .map(|col| self.get_cell(sort_row, col))
+                        .collect();
 
-                match direction {
-                    SortDirection::Ascending => keyed.sort_unstable_by(|(i,a), (j,b)|  a.cmp(&b).then(i.cmp(&j))),
-                    SortDirection::Descending => keyed.sort_unstable_by(|(i,a), (j,b)|  a.cmp(&b).reverse().then(i.cmp(&j))),
+                    cells.into_par_iter()
+                        .enumerate()
+                        .map(|(i, cell)| {
+                            let col = start_col + i;
+                            let val = cell.map(|s| s.to_lowercase().trim().to_owned())
+                                .unwrap_or_default();
+                            (col, val)
+                        })
+                        .collect()
+                } else {
+                    (start_col..col_count)
+                        .map(|col| {
+                            let val = self.get_cell(sort_row, col)
+                                .map(|s| s.to_lowercase().trim().to_owned())
+                                .unwrap_or_default();
+                            (col, val)
+                        })
+                        .collect()
+                };
+
+                let cmp_fn = |&(ref i, ref a): &(usize, String), &(ref j, ref b): &(usize, String)| -> std::cmp::Ordering {
+                    match direction {
+                        SortDirection::Ascending => a.cmp(b).then(i.cmp(j)),
+                        SortDirection::Descending => a.cmp(b).reverse().then(i.cmp(j)),
+                    }
+                };
+
+                if use_parallel {
+                    keyed.par_sort_unstable_by(cmp_fn);
+                } else {
+                    keyed.sort_unstable_by(cmp_fn);
                 }
 
-                indices.extend(keyed.into_iter().map(|(col,_)| col));
+                indices.extend(keyed.into_iter().map(|(col, _)| col));
             }
         }
-    
 
         indices
     }

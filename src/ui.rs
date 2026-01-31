@@ -271,9 +271,26 @@ fn render_command_line(frame: &mut Frame, app: &App, area: Rect) {
             (line, app.style.command_line())
         }
         _ => {
-            let msg = app.message.as_deref().unwrap_or("");
-            let line = Line::from(msg);
-            (line, app.style.message_info())
+            // Check for active progress first
+            if let Some((ref op_name, ref progress)) = app.progress {
+                let pct = progress.percent();
+                let bar_width = 20usize;
+                let filled = (pct * bar_width) / 100;
+                let empty = bar_width.saturating_sub(filled);
+                let bar = format!(
+                    "{}: [{}{}] {}%",
+                    op_name,
+                    "█".repeat(filled),
+                    "░".repeat(empty),
+                    pct
+                );
+                let line = Line::from(bar);
+                (line, app.style.message_info())
+            } else {
+                let msg = app.message.as_deref().unwrap_or("");
+                let line = Line::from(msg);
+                (line, app.style.message_info())
+            }
         }
     };
 

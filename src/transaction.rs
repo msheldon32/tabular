@@ -45,6 +45,38 @@ pub enum Transaction {
 }
 
 impl Transaction {
+    /// Estimate the size/complexity of this transaction for progress reporting
+    /// Returns the number of cells or operations involved
+    pub fn estimated_size(&self) -> usize {
+        match self {
+            Transaction::SetCell { .. } => 1,
+            Transaction::InsertRow { .. } => 1,
+            Transaction::InsertRowWithData { data, .. } => data.len(),
+            Transaction::DeleteRow { data, .. } => data.len(),
+            Transaction::InsertRowsBulk { count, .. } => *count,
+            Transaction::InsertRowsWithDataBulk { data, .. } => {
+                data.iter().map(|r| r.len()).sum::<usize>().max(data.len())
+            }
+            Transaction::DeleteRowsBulk { data, .. } => {
+                data.iter().map(|r| r.len()).sum::<usize>().max(data.len())
+            }
+            Transaction::InsertCol { .. } => 1,
+            Transaction::InsertColWithData { data, .. } => data.len(),
+            Transaction::DeleteCol { data, .. } => data.len(),
+            Transaction::SetSpan { new_data, .. } => {
+                new_data.iter().map(|r| r.len()).sum()
+            }
+            Transaction::PermuteRows { permutation } => permutation.len(),
+            Transaction::PermuteCols { permutation } => permutation.len(),
+            Transaction::Batch(txns) => txns.iter().map(|t| t.estimated_size()).sum(),
+        }
+    }
+
+    /// Check if this transaction is large enough to warrant progress display
+    pub fn is_large(&self) -> bool {
+        self.estimated_size() >= 50_000
+    }
+
     pub fn apply(&self, table: &mut Table) {
         match self {
             Transaction::SetCell { row, col, new_value, .. } => {
@@ -223,6 +255,16 @@ impl History {
 
     pub fn can_redo(&self) -> bool {
         !self.redo_stack.is_empty()
+    }
+
+    /// Peek at the next undo transaction without removing it
+    pub fn peek_undo(&self) -> Option<&Transaction> {
+        self.undo_stack.last()
+    }
+
+    /// Peek at the next redo transaction without removing it
+    pub fn peek_redo(&self) -> Option<&Transaction> {
+        self.redo_stack.last()
     }
 
     pub fn clear(&mut self) {
