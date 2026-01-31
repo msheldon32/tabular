@@ -57,6 +57,17 @@ pub enum SequenceAction {
     FormatPercentage,      // f%
 }
 
+impl SequenceAction {
+    pub fn is_navigation(&self) -> bool {
+        matches!(self, 
+                 SequenceAction::MoveToTop |
+                 SequenceAction::MoveDown  |
+                 SequenceAction::MoveLeft  |
+                 SequenceAction::MoveRight
+                 )
+    }
+}
+
 /// Result of processing a key through the buffer
 pub enum KeyBufferResult {
     /// A sequence matched, execute this action with optional count
@@ -180,6 +191,29 @@ pub struct NavigationHandler;
 impl NavigationHandler {
     pub fn new() -> Self {
         Self
+    }
+
+    /// Handle sequence actions
+    pub fn handle_sequence(&self, action: SequenceAction, count: usize, view: &mut TableView, table: &Table) {
+        match action {
+            SequenceAction::MoveToTop => {
+                view.move_to_top();
+            }
+            SequenceAction::MoveDown => {
+                view.move_down_n(count, &table);
+            }
+            SequenceAction::MoveUp => {
+                view.move_up_n(count);
+            }
+            SequenceAction::MoveLeft => {
+                view.move_left_n(count);
+            }
+            SequenceAction::MoveRight => {
+                view.move_right_n(count, &table);
+            }
+
+            _ => {}
+        }
     }
 
     /// Handle navigation keys, returns true if the key was handled

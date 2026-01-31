@@ -179,21 +179,6 @@ impl App {
 
     fn execute_sequence_action(&mut self, action: SequenceAction, count: usize) {
         match action {
-            SequenceAction::MoveToTop => {
-                self.view.move_to_top();
-            }
-            SequenceAction::MoveDown => {
-                self.view.move_down_n(count, &self.table);
-            }
-            SequenceAction::MoveUp => {
-                self.view.move_up_n(count);
-            }
-            SequenceAction::MoveLeft => {
-                self.view.move_left_n(count);
-            }
-            SequenceAction::MoveRight => {
-                self.view.move_right_n(count, &self.table);
-            }
             SequenceAction::DeleteRow => {
                 let start_row = self.view.cursor_row;
                 let actual_count = count.min(self.table.row_count().saturating_sub(start_row));
@@ -302,12 +287,21 @@ impl App {
                     self.message = Some("Row deleted".to_string());
                 }
             }
+             SequenceAction::MoveToTop
+             | SequenceAction::MoveDown 
+             | SequenceAction::MoveLeft
+             | SequenceAction::MoveRight => {
+                self.nav_handler.handle_sequence(action, count, &mut self.view, &self.table);
+            }
+
             // Format actions are only meaningful in visual mode
             SequenceAction::FormatReduceDecimal
             | SequenceAction::FormatIncreaseDecimal
             | SequenceAction::FormatCurrency
             | SequenceAction::FormatScientific
             | SequenceAction::FormatPercentage => {}
+
+            _ => {}
         }
     }
 
