@@ -12,6 +12,7 @@ use crate::input::{
     NavigationHandler, SearchHandler, SequenceAction, VisualHandler, VisualType,
 };
 use crate::mode::Mode;
+use crate::plugin::{PluginManager, PluginAction, CommandContext};
 use crate::table::{SortDirection, Table, TableView, SortType};
 use crate::transaction::{History, Transaction};
 use crate::ui;
@@ -37,12 +38,17 @@ pub struct App {
     search_handler: SearchHandler,
     insert_handler: InsertHandler,
     command_handler: CommandHandler,
+    // Plugin system
+    plugin_manager: PluginManager,
 }
 
 impl App {
     pub fn new(table: Table, file_io: FileIO) -> Self {
         let mut view = TableView::new();
         view.update_col_widths(&table);
+
+        let mut plugin_manager = PluginManager::new();
+        let _ = plugin_manager.load_plugins();
 
         Self {
             table,
@@ -62,6 +68,7 @@ impl App {
             search_handler: SearchHandler::new(),
             insert_handler: InsertHandler::new(),
             command_handler: CommandHandler::new(),
+            plugin_manager,
         }
     }
 
@@ -646,9 +653,79 @@ impl App {
                     Err(e) => self.message = Some(e),
                 }
             }
-            Command::Unknown(s) => self.message = Some(format!("Unknown command: {}", s)),
+            Command::PluginList => {
+                let commands = self.plugin_manager.list_commands();
+                if commands.is_empty() {
+                    self.message = Some(format!(
+                        "No plugins loaded. Add .lua files to {}",
+                        crate::plugin::plugin_dir().display()
+                    ));
+                } else {
+                    self.message = Some(format!("Plugins: {}", commands.into_iter().cloned().collect::<Vec<_>>().join(", ")));
+                }
+            }
+            Command::Custom { name, args } => {
+                self.execute_plugin(&name, &args);
+            }
+            Command::Unknown(s) => {
+                // Check if it's a plugin command
+                let parts: Vec<&str> = s.split_whitespace().collect();
+                if let Some(cmd_name) = parts.first() {
+                    if self.plugin_manager.has_command(cmd_name) {
+                        let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+                        self.execute_plugin(cmd_name, &args);
+                        return;
+                    }
+                }
+                self.message = Some(format!("Unknown command: {}", s));
+            }
         }
         self.calling_mode = None;
+    }
+
+    fn execute_plugin(&mut self, name: &str, args: &[String]) {
+        let ctx = CommandContext {
+            cursor_row: self.view.cursor_row,
+            cursor_col: self.view.cursor_col,
+            row_count: self.table.row_count(),
+            col_count: self.table.col_count(),
+        };
+
+        // Create a closure to get cell values
+        let table = &self.table;
+        let get_cell = |row: usize, col: usize| -> Option<String> {
+            table.get_cell(row, col).cloned()
+        };
+
+        match self.plugin_manager.execute(name, args, &ctx, get_cell) {
+            Ok(result) => {
+                // Process actions from the plugin
+                let mut txns = Vec::new();
+                for action in result.actions {
+                    let PluginAction::SetCell { row, col, value } = action;
+                    if let Some(old_value) = self.table.get_cell(row, col).cloned() {
+                        txns.push(Transaction::SetCell {
+                            row,
+                            col,
+                            old_value,
+                            new_value: value,
+                        });
+                    }
+                }
+
+                if !txns.is_empty() {
+                    self.execute(Transaction::Batch(txns));
+                    self.view.update_col_widths(&self.table);
+                }
+
+                if let Some(msg) = result.message {
+                    self.message = Some(msg);
+                }
+            }
+            Err(e) => {
+                self.message = Some(format!("Plugin error: {}", e));
+            }
+        }
     }
 
     fn execute_replace(&mut self, cmd: ReplaceCommand) {

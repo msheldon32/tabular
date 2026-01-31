@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::fs::File;
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, BufWriter, Write};
 
 use crate::table::{Table, CHUNK_SIZE};
 
@@ -182,7 +182,7 @@ impl FileIO {
         }
 
         Ok(LoadResult {
-            table: Table::from_chunks_lazy(chunks, max_cols),
+            table: Table::from_chunks(chunks, max_cols),
             warnings,
         })
     }

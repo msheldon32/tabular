@@ -6,6 +6,7 @@ mod fileio;
 mod format;
 mod input;
 mod mode;
+mod plugin;
 mod style;
 mod table;
 mod transaction;

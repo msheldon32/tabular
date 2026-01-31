@@ -38,6 +38,8 @@ pub enum Command {
     NavigateCell(CellRef),
     Clip,           // Copy yank to system clipboard
     SysPaste,       // Yank from system clipboard
+    PluginList,     // List loaded plugins
+    Custom { name: String, args: Vec<String> },
     Unknown(String),
 }
 
@@ -82,6 +84,7 @@ impl Command {
             "theme" | "themes" => Some(Command::ThemeList),
             "clip" | "cp" => Some(Command::Clip),
             "sp" | "syspaste" => Some(Command::SysPaste),
+            "plugins" => Some(Command::PluginList),
             _ => Some(Command::Unknown(trimmed.to_string())),
         }
     }
