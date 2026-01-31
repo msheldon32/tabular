@@ -39,6 +39,7 @@ pub enum Command {
     Clip,           // Copy yank to system clipboard
     SysPaste,       // Yank from system clipboard
     PluginList,     // List loaded plugins
+    Precision(Option<usize>),  // Set display precision for numbers (None = auto)
     Custom { name: String, args: Vec<String> },
     Unknown(String),
 }
@@ -65,6 +66,21 @@ impl Command {
         // Check for theme command with argument
         if let Some(theme_name) = trimmed.strip_prefix("theme ") {
             return Some(Command::Theme(theme_name.trim().to_string()));
+        }
+
+        // Check for precision command: prec N or precision N (or just prec/precision for auto)
+        if let Some(rest) = trimmed.strip_prefix("prec ").or_else(|| trimmed.strip_prefix("precision ")) {
+            let rest = rest.trim();
+            if rest.is_empty() || rest == "auto" {
+                return Some(Command::Precision(None));
+            }
+            if let Ok(n) = rest.parse::<usize>() {
+                return Some(Command::Precision(Some(n)));
+            }
+            // Invalid precision value, fall through to unknown
+        }
+        if trimmed == "prec" || trimmed == "precision" {
+            return Some(Command::Precision(None));
         }
 
         match trimmed {

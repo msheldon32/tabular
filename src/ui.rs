@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::format::format_display;
 use crate::mode::Mode;
 use crate::util::letters_from_col;
 
@@ -112,9 +113,11 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
 
             // Data cells (only visible columns)
             for col_idx in app.view.viewport_col..end_col {
-                let content = app.table.get_cell(row_idx, col_idx)
+                let raw_content = app.table.get_cell(row_idx, col_idx)
                     .map(|s| s.as_str())
                     .unwrap_or("");
+                // Apply precision formatting for display
+                let content = format_display(raw_content, app.precision);
 
                 let is_cursor = row_idx == app.view.cursor_row && col_idx == app.view.cursor_col;
                 let is_selected = matches!(app.mode, Mode::Visual | Mode::VisualCol | Mode::VisualRow)

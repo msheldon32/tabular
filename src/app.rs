@@ -34,6 +34,7 @@ pub struct App {
     pub message: Option<String>,
     pub should_quit: bool,
     pub header_mode: bool,
+    pub precision: Option<usize>,  // Display precision for numbers (None = auto)
     // Mode handlers
     key_buffer: KeyBuffer,
     nav_handler: NavigationHandler,
@@ -64,6 +65,7 @@ impl App {
             message: None,
             should_quit: false,
             header_mode: true,
+            precision: None,
             key_buffer: KeyBuffer::new(),
             nav_handler: NavigationHandler::new(),
             search_handler: SearchHandler::new(),
@@ -300,8 +302,8 @@ impl App {
             }
 
             // Format actions are only meaningful in visual mode
-            SequenceAction::FormatReduceDecimal
-            | SequenceAction::FormatIncreaseDecimal
+            SequenceAction::FormatDefault
+            | SequenceAction::FormatCommas
             | SequenceAction::FormatCurrency
             | SequenceAction::FormatScientific
             | SequenceAction::FormatPercentage => {}
@@ -653,6 +655,14 @@ impl App {
                 } else {
                     self.message = Some(format!("Plugins: {}", commands.into_iter().cloned().collect::<Vec<_>>().join(", ")));
                 }
+            }
+            Command::Precision(prec) => {
+                self.precision = prec;
+                let msg = match prec {
+                    Some(n) => format!("Display precision set to {} decimal places", n),
+                    None => "Display precision set to auto".to_string(),
+                };
+                self.message = Some(msg);
             }
             Command::Custom { name, args } => {
                 self.execute_plugin(&name, &args);

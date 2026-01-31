@@ -50,8 +50,8 @@ pub enum SequenceAction {
     MoveLeft,    // h
     MoveRight,   // l
     // Format actions (visual mode)
-    FormatReduceDecimal,   // f-
-    FormatIncreaseDecimal, // f+
+    FormatDefault,         // ff - reset to default number format
+    FormatCommas,          // f, - add comma separators
     FormatCurrency,        // f$
     FormatScientific,      // fe
     FormatPercentage,      // f%
@@ -185,8 +185,8 @@ impl KeyBuffer {
             ['h'] => Some(SequenceAction::MoveLeft),
             ['l'] => Some(SequenceAction::MoveRight),
             // Format sequences
-            ['f', '-'] => Some(SequenceAction::FormatReduceDecimal),
-            ['f', '+'] => Some(SequenceAction::FormatIncreaseDecimal),
+            ['f', 'f'] => Some(SequenceAction::FormatDefault),
+            ['f', ','] => Some(SequenceAction::FormatCommas),
             ['f', '$'] => Some(SequenceAction::FormatCurrency),
             ['f', 'e'] => Some(SequenceAction::FormatScientific),
             ['f', '%'] => Some(SequenceAction::FormatPercentage),
@@ -483,8 +483,8 @@ pub enum VisualType {
 /// Format operation types for visual mode formatting
 #[derive(Clone, Copy, PartialEq)]
 pub enum FormatOp {
-    ReduceDecimal,
-    IncreaseDecimal,
+    Default,
+    Commas,
     Currency,
     Scientific,
     Percentage,
@@ -527,11 +527,11 @@ impl VisualHandler {
                     SequenceAction::Yank => return self.handle_yank(view, table, clipboard),
                     SequenceAction::Delete => return self.handle_delete(view, table),
                     // Format actions
-                    SequenceAction::FormatReduceDecimal => {
-                        return self.handle_format(view, table, FormatOp::ReduceDecimal);
+                    SequenceAction::FormatDefault => {
+                        return self.handle_format(view, table, FormatOp::Default);
                     }
-                    SequenceAction::FormatIncreaseDecimal => {
-                        return self.handle_format(view, table, FormatOp::IncreaseDecimal);
+                    SequenceAction::FormatCommas => {
+                        return self.handle_format(view, table, FormatOp::Commas);
                     }
                     SequenceAction::FormatCurrency => {
                         return self.handle_format(view, table, FormatOp::Currency);
@@ -702,8 +702,8 @@ impl VisualHandler {
                 row.iter()
                     .map(|cell| {
                         let formatted = match op {
-                            FormatOp::ReduceDecimal => crate::format::reduce_decimal(cell),
-                            FormatOp::IncreaseDecimal => crate::format::increase_decimal(cell),
+                            FormatOp::Default => crate::format::format_default(cell),
+                            FormatOp::Commas => crate::format::format_commas(cell),
                             FormatOp::Currency => crate::format::format_currency(cell, '$'),
                             FormatOp::Scientific => crate::format::format_scientific(cell, 2),
                             FormatOp::Percentage => crate::format::format_percentage(cell, 0),

@@ -120,8 +120,8 @@ Format commands start with `f` and modify the selected cells:
 
 | Key | Action | Example |
 |-----|--------|---------|
-| `f-` | Reduce decimal places | `123.456` -> `123.46` |
-| `f+` | Increase decimal places | `123.4` -> `123.40` |
+| `ff` | Reset to default (plain number) | `$1,234.56` -> `1234.56` |
+| `f,` | Add comma separators | `1234567.89` -> `1,234,567.89` |
 | `f$` | Format as currency | `1234.56` -> `$1,234.56` |
 | `fe` | Format as scientific notation | `0.00123` -> `1.23e-3` |
 | `f%` | Format as percentage | `0.15` -> `15%` |
@@ -156,6 +156,7 @@ In **visual row mode** (`V`), `q` fills entire rows. In **visual column mode** (
 | `:sortr` | Sort columns by current row (ascending) |
 | `:sortrd` | Sort columns by current row (descending) |
 | `:grid` | Toggle grid lines |
+| `:prec [N]` | Set display precision (N decimal places, or `auto`) |
 | `:theme [name]` | Set color theme (dark, light, solarized-dark) |
 | `:themes` | List available themes |
 | `:clip` | Copy yanked data to system clipboard |
@@ -316,6 +317,18 @@ Formulas recognize formatted numbers in cell references:
 - **Column letters**: Excel-style letters at the top (A, B, C... Z, AA, AB...)
 - **Header mode**: First row is highlighted as a header (on by default, toggle with `:header`)
 - **Scrolling**: Large tables scroll automatically as you navigate. Title bar shows visible range when scrolled.
+
+### Display Precision
+
+Control how many decimal places are shown for numeric values with `:prec`:
+
+| Command | Effect |
+|---------|--------|
+| `:prec 2` | Display numbers with 2 decimal places |
+| `:prec 0` | Display numbers as integers (rounded) |
+| `:prec` or `:prec auto` | Display numbers as stored (default) |
+
+**Note:** Display precision only affects how numbers are shown—it does not modify the underlying cell values. The actual data remains unchanged.
 
 ## Themes
 

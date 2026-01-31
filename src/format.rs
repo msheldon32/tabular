@@ -70,48 +70,62 @@ pub fn parse_numeric(s: &str) -> Option<f64> {
     None
 }
 
-/// Count decimal places in a string representation of a number
-fn decimal_places(s: &str) -> usize {
-    // Handle scientific notation
-    if s.contains('e') || s.contains('E') {
-        return 0; // Already in scientific notation
-    }
+/// Format a number to its default representation (no formatting, just the number)
+/// Parses the input (which may have currency, commas, etc.) and outputs a plain number.
+pub fn format_default(val: &str) -> Option<String> {
+    let n = parse_numeric(val)?;
 
-    if let Some(dot_pos) = s.find('.') {
-        s.len() - dot_pos - 1
+    // Format as integer if no fractional part, otherwise as float
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        Some(format!("{}", n as i64))
     } else {
-        0
+        // Trim trailing zeros after decimal point
+        let s = format!("{}", n);
+        Some(s)
     }
 }
 
-/// Reduce decimal places by one (e.g., 123.456 -> 123.46)
-pub fn reduce_decimal(val: &str) -> Option<String> {
+/// Format a number with comma separators (e.g., 1234567.89 -> 1,234,567.89)
+pub fn format_commas(val: &str) -> Option<String> {
     let trimmed = val.trim();
-    let n: f64 = trimmed.parse().ok()?;
 
-    let current = decimal_places(trimmed);
-    if current == 0 {
-        // Already an integer, nothing to reduce
-        return Some(format!("{}", n as i64));
-    }
+    // First verify it's a valid number
+    let _ = parse_numeric(trimmed)?;
 
-    let new_places = current.saturating_sub(1);
-    if new_places == 0 {
-        Some(format!("{}", n.round() as i64))
+    // Work with the string representation to preserve decimal places
+    let is_negative = trimmed.starts_with('-');
+    let without_sign = trimmed.trim_start_matches('-');
+
+    // Remove any existing commas
+    let clean: String = without_sign.chars().filter(|c| *c != ',').collect();
+
+    // Split on decimal point
+    let (int_part, dec_part) = if let Some(dot_pos) = clean.find('.') {
+        (&clean[..dot_pos], Some(&clean[dot_pos + 1..]))
     } else {
-        Some(format!("{:.prec$}", n, prec = new_places))
+        (clean.as_str(), None)
+    };
+
+    // Format integer part with commas
+    let with_commas: String = int_part
+        .as_bytes()
+        .rchunks(3)
+        .rev()
+        .map(|chunk| std::str::from_utf8(chunk).unwrap())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    // Reconstruct the number
+    let result = match dec_part {
+        Some(d) if !d.is_empty() => format!("{}.{}", with_commas, d),
+        _ => with_commas,
+    };
+
+    if is_negative {
+        Some(format!("-{}", result))
+    } else {
+        Some(result)
     }
-}
-
-/// Increase decimal places by one (e.g., 123.4 -> 123.40)
-pub fn increase_decimal(val: &str) -> Option<String> {
-    let trimmed = val.trim();
-    let n: f64 = trimmed.parse().ok()?;
-
-    let current = decimal_places(trimmed);
-    let new_places = current + 1;
-
-    Some(format!("{:.prec$}", n, prec = new_places))
 }
 
 /// Format as currency with symbol and thousands separators (e.g., 1234.56 -> $1,234.56)
@@ -168,6 +182,33 @@ pub fn format_percentage(val: &str, decimals: usize) -> Option<String> {
     }
 }
 
+/// Format a number for display with optional precision.
+/// If precision is None, displays the number as-is.
+/// If precision is Some(n), displays exactly n decimal places for numeric values.
+/// Non-numeric values are returned unchanged.
+pub fn format_display(val: &str, precision: Option<usize>) -> String {
+    let precision = match precision {
+        Some(p) => p,
+        None => return val.to_string(),
+    };
+
+    let trimmed = val.trim();
+
+    // Try to parse as a plain number (not formatted)
+    if let Ok(n) = trimmed.parse::<f64>() {
+        if n.is_nan() || n.is_infinite() {
+            return val.to_string();
+        }
+        if precision == 0 {
+            return format!("{}", n.round() as i64);
+        }
+        return format!("{:.prec$}", n, prec = precision);
+    }
+
+    // Not a number, return as-is
+    val.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,30 +254,22 @@ mod tests {
     }
 
     #[test]
-    fn test_decimal_places() {
-        assert_eq!(decimal_places("123"), 0);
-        assert_eq!(decimal_places("123.4"), 1);
-        assert_eq!(decimal_places("123.45"), 2);
-        assert_eq!(decimal_places("123.456"), 3);
-        assert_eq!(decimal_places("0.1"), 1);
+    fn test_format_default() {
+        assert_eq!(format_default("$1,234.56"), Some("1234.56".to_string()));
+        assert_eq!(format_default("1,234"), Some("1234".to_string()));
+        assert_eq!(format_default("15%"), Some("0.15".to_string()));
+        assert_eq!(format_default("123.45"), Some("123.45".to_string()));
+        assert_eq!(format_default("123"), Some("123".to_string()));
+        assert_eq!(format_default("abc"), None);
     }
 
     #[test]
-    fn test_reduce_decimal() {
-        assert_eq!(reduce_decimal("123.456"), Some("123.46".to_string()));
-        assert_eq!(reduce_decimal("123.45"), Some("123.5".to_string()));
-        assert_eq!(reduce_decimal("123.4"), Some("123".to_string()));
-        assert_eq!(reduce_decimal("123"), Some("123".to_string()));
-        assert_eq!(reduce_decimal("0.999"), Some("1.00".to_string()));
-        assert_eq!(reduce_decimal("abc"), None);
-    }
-
-    #[test]
-    fn test_increase_decimal() {
-        assert_eq!(increase_decimal("123"), Some("123.0".to_string()));
-        assert_eq!(increase_decimal("123.4"), Some("123.40".to_string()));
-        assert_eq!(increase_decimal("123.45"), Some("123.450".to_string()));
-        assert_eq!(increase_decimal("abc"), None);
+    fn test_format_commas() {
+        assert_eq!(format_commas("1234567"), Some("1,234,567".to_string()));
+        assert_eq!(format_commas("1234567.89"), Some("1,234,567.89".to_string()));
+        assert_eq!(format_commas("123"), Some("123".to_string()));
+        assert_eq!(format_commas("-1234567"), Some("-1,234,567".to_string()));
+        assert_eq!(format_commas("abc"), None);
     }
 
     #[test]
