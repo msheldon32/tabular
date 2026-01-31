@@ -407,8 +407,10 @@ impl SearchHandler {
 }
 
 /// Insert mode handler
+/// Note: cursor is a CHARACTER index, not a byte index
 pub struct InsertHandler {
     pub buffer: String,
+    /// Cursor position as character index (not byte index)
     pub cursor: usize,
 }
 
@@ -422,7 +424,12 @@ impl InsertHandler {
 
     pub fn start_edit(&mut self, initial: String) {
         self.buffer = initial;
-        self.cursor = self.buffer.len();
+        self.cursor = crate::util::char_count(&self.buffer);
+    }
+
+    /// Get the byte index for the current cursor position
+    pub fn cursor_byte_index(&self) -> usize {
+        crate::util::byte_index_of_char(&self.buffer, self.cursor)
     }
 
     pub fn handle_key(&mut self, key: KeyEvent, view: &TableView) -> (KeyResult, Option<Transaction>) {
@@ -440,11 +447,13 @@ impl InsertHandler {
             KeyCode::Backspace => {
                 if self.cursor > 0 {
                     self.cursor -= 1;
-                    self.buffer.remove(self.cursor);
+                    if let Some((new_buf, _)) = crate::util::remove_char_at(&self.buffer, self.cursor) {
+                        self.buffer = new_buf;
+                    }
                 }
             }
             KeyCode::Char(c) => {
-                self.buffer.insert(self.cursor, c);
+                self.buffer = crate::util::insert_char_at(&self.buffer, self.cursor, c);
                 self.cursor += 1;
             }
             KeyCode::Left => {
@@ -453,7 +462,8 @@ impl InsertHandler {
                 }
             }
             KeyCode::Right => {
-                self.cursor = std::cmp::min(self.cursor + 1, self.buffer.len());
+                let char_count = crate::util::char_count(&self.buffer);
+                self.cursor = std::cmp::min(self.cursor + 1, char_count);
             }
             _ => {}
         }

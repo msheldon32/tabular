@@ -138,15 +138,29 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
                 };
 
                 let display_content = if is_cursor && app.mode == Mode::Insert {
-                    let mut buf = app.edit_buffer().to_string();
-                    let cursor = app.edit_cursor();
-                    if cursor == buf.len() {
-                        buf.push(' ');
-                    }
+                    let buf = app.edit_buffer();
+                    let cursor_char = app.edit_cursor(); // Character index
+                    let char_count = crate::util::char_count(buf);
+
+                    // Get byte indices for slicing
+                    let cursor_byte = crate::util::byte_index_of_char(buf, cursor_char);
+                    let next_byte = crate::util::byte_index_of_char(buf, cursor_char + 1);
+
+                    let (before, cursor_char_str, after) = if cursor_char >= char_count {
+                        // Cursor at end - show space as cursor
+                        (buf.to_string(), " ".to_string(), String::new())
+                    } else {
+                        (
+                            buf[..cursor_byte].to_string(),
+                            buf[cursor_byte..next_byte].to_string(),
+                            buf[next_byte..].to_string(),
+                        )
+                    };
+
                     let spans = vec![
-                        Span::raw(buf[..cursor].to_string()),
-                        Span::styled(buf[cursor..cursor+1].to_string(), Style::default().add_modifier(Modifier::UNDERLINED)),
-                        Span::raw(buf[cursor+1..].to_string())
+                        Span::raw(before),
+                        Span::styled(cursor_char_str, Style::default().add_modifier(Modifier::UNDERLINED)),
+                        Span::raw(after),
                     ];
                     Line::from(spans)
                 } else {

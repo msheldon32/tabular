@@ -161,7 +161,7 @@ impl Table {
             .map(|col| {
                 self.rows_iter()
                     .filter_map(|row| row.get(col))
-                    .map(|s| s.len())
+                    .map(|s| crate::util::display_width(s))
                     .max()
                     .unwrap_or(3)
                     .max(3)

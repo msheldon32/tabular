@@ -241,6 +241,69 @@ pub fn parse_col_range(s: &str, row_count: usize, skip_header: bool) -> Result<V
     Ok(refs)
 }
 
+// === Unicode utilities ===
+
+use unicode_width::UnicodeWidthStr;
+
+/// Get the display width of a string (handles CJK double-width characters)
+pub fn display_width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
+
+/// Get the number of characters in a string
+pub fn char_count(s: &str) -> usize {
+    s.chars().count()
+}
+
+/// Get the byte index for a character index
+/// Returns string length if char_idx is >= character count
+pub fn byte_index_of_char(s: &str, char_idx: usize) -> usize {
+    s.char_indices()
+        .nth(char_idx)
+        .map(|(byte_idx, _)| byte_idx)
+        .unwrap_or(s.len())
+}
+
+/// Get the character index for a byte index
+/// Finds the character that contains or starts at the given byte position
+pub fn char_index_of_byte(s: &str, byte_idx: usize) -> usize {
+    s.char_indices()
+        .take_while(|(idx, _)| *idx < byte_idx)
+        .count()
+}
+
+/// Safely slice a string by character indices (not byte indices)
+/// Returns the substring from char_start to char_end (exclusive)
+pub fn slice_by_chars(s: &str, char_start: usize, char_end: usize) -> &str {
+    let start_byte = byte_index_of_char(s, char_start);
+    let end_byte = byte_index_of_char(s, char_end);
+    &s[start_byte..end_byte]
+}
+
+/// Get the character at a given character index, if it exists
+pub fn char_at(s: &str, char_idx: usize) -> Option<char> {
+    s.chars().nth(char_idx)
+}
+
+/// Remove the character at the given character index
+/// Returns (new_string, removed_char) or None if index is out of bounds
+pub fn remove_char_at(s: &str, char_idx: usize) -> Option<(String, char)> {
+    let mut chars: Vec<char> = s.chars().collect();
+    if char_idx >= chars.len() {
+        return None;
+    }
+    let removed = chars.remove(char_idx);
+    Some((chars.into_iter().collect(), removed))
+}
+
+/// Insert a character at the given character index
+pub fn insert_char_at(s: &str, char_idx: usize, c: char) -> String {
+    let mut chars: Vec<char> = s.chars().collect();
+    let insert_pos = char_idx.min(chars.len());
+    chars.insert(insert_pos, c);
+    chars.into_iter().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -488,5 +551,37 @@ mod tests {
         assert_eq!(translate_references("=(A1)", 1, 0), "=(A2)");
         assert_eq!(translate_references("=[A1]", 1, 0), "=[A2]");
         assert_eq!(translate_references("=A1,B2,C3", 1, 0), "=A2,B3,C4");
+    }
+
+    #[test]
+    fn test_display_width() {
+        use super::display_width;
+        assert_eq!(display_width("hello"), 5);
+        assert_eq!(display_width("héllo"), 5); // é is still 1 display width
+        assert_eq!(display_width("你好"), 4);   // CJK chars are 2 columns each
+        assert_eq!(display_width(""), 0);
+    }
+
+    #[test]
+    fn test_char_count() {
+        use super::char_count;
+        assert_eq!(char_count("hello"), 5);
+        assert_eq!(char_count("héllo"), 5);
+        assert_eq!(char_count("你好"), 2);
+        assert_eq!(char_count(""), 0);
+    }
+
+    #[test]
+    fn test_char_indices() {
+        use super::{byte_index_of_char, char_index_of_byte};
+        let s = "héllo"; // é is 2 bytes
+        assert_eq!(byte_index_of_char(s, 0), 0);
+        assert_eq!(byte_index_of_char(s, 1), 1);  // 'h' ends, 'é' starts
+        assert_eq!(byte_index_of_char(s, 2), 3);  // 'é' is 2 bytes, 'l' starts at 3
+        assert_eq!(byte_index_of_char(s, 5), 6);  // End of string
+
+        assert_eq!(char_index_of_byte(s, 0), 0);
+        assert_eq!(char_index_of_byte(s, 1), 1);
+        assert_eq!(char_index_of_byte(s, 3), 2);
     }
 }
