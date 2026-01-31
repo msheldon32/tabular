@@ -51,7 +51,7 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
     let mut total_width = 0u16;
     let mut visible_cols = 0usize;
     for col in app.view.viewport_col..col_count {
-        let col_width = app.view.col_widths.get(col).copied().unwrap_or(3);
+        let col_width = app.table.col_widths().get(col).copied().unwrap_or(3);
         let cell_width = col_width as u16 + 2; // padding
         if total_width + cell_width > available_width && visible_cols > 0 {
             break;
@@ -70,7 +70,7 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let end_col = (app.view.viewport_col + visible_cols).min(col_count);
     for col in app.view.viewport_col..end_col {
-        let w = app.view.col_widths.get(col).copied().unwrap_or(3);
+        let w = app.table.col_widths().get(col).copied().unwrap_or(3);
         let header_w = letters_from_col(col).len();
         col_widths.push(Constraint::Length(w.max(header_w) as u16 + 2));
     }

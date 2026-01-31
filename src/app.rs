@@ -1,5 +1,4 @@
 use std::io;
-use std::cmp;
 use std::time::Duration;
 
 use crossterm::event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers};
@@ -13,6 +12,7 @@ use crate::input::{
     NavigationHandler, SearchHandler, SequenceAction, VisualHandler, VisualType,
 };
 use crate::mode::Mode;
+use crate::operations;
 use crate::plugin::{PluginManager, PluginAction, CommandContext};
 use crate::table::{SortDirection, Table, SortType};
 use crate::tableview::TableView;
@@ -46,8 +46,7 @@ pub struct App {
 
 impl App {
     pub fn new(table: Table, file_io: FileIO) -> Self {
-        let mut view = TableView::new();
-        view.update_col_widths(&table);
+        let view = TableView::new();
 
         let mut plugin_manager = PluginManager::new();
         let _ = plugin_manager.load_plugins();
@@ -96,7 +95,6 @@ impl App {
     }
 
     pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
-        self.view.update_col_widths(&self.table);
 
         while !self.should_quit {
             terminal.draw(|f| ui::render(f, self))?;
@@ -129,7 +127,6 @@ impl App {
     /// Return to normal mode and update column widths
     fn finish_edit(&mut self) {
         self.mode = Mode::Normal;
-        self.view.update_col_widths(&self.table);
     }
 
     // === Key handling ===
@@ -200,8 +197,7 @@ impl App {
                     self.execute(txn);
                 }
                 self.view.clamp_cursor(&self.table);
-                self.view.update_col_widths(&self.table);
-                let msg = if actual_count == 1 { "Row deleted".to_string() } else { format!("{} rows deleted", actual_count) };
+                        let msg = if actual_count == 1 { "Row deleted".to_string() } else { format!("{} rows deleted", actual_count) };
                 self.message = Some(msg);
             }
             SequenceAction::DeleteCol => {
@@ -232,8 +228,7 @@ impl App {
                     }
                 }
                 self.view.clamp_cursor(&self.table);
-                self.view.update_col_widths(&self.table);
-                let msg = if actual_count == 1 { "Column deleted".to_string() } else { format!("{} columns deleted", actual_count) };
+                        let msg = if actual_count == 1 { "Column deleted".to_string() } else { format!("{} columns deleted", actual_count) };
                 self.message = Some(msg);
             }
             SequenceAction::YankRow => {
@@ -283,12 +278,12 @@ impl App {
                     };
                     self.execute(txn);
                     self.view.clamp_cursor(&self.table);
-                    self.view.update_col_widths(&self.table);
-                    self.message = Some("Row deleted".to_string());
+                                self.message = Some("Row deleted".to_string());
                 }
             }
              SequenceAction::MoveToTop
-             | SequenceAction::MoveDown 
+             | SequenceAction::MoveDown
+             | SequenceAction::MoveUp
              | SequenceAction::MoveLeft
              | SequenceAction::MoveRight => {
                 self.nav_handler.handle_sequence(action, count, &mut self.view, &self.table);
@@ -312,7 +307,7 @@ impl App {
         match key.code {
             KeyCode::Char('i') => {
                 self.mode = Mode::Insert;
-                let current = self.view.current_cell(&self.table).clone();
+                let current = operations::current_cell(&self.view, &self.table).clone();
                 self.insert_handler.start_edit(current);
             }
             KeyCode::Char('V') => {
@@ -363,21 +358,18 @@ impl App {
                 );
                 if let Some(txn) = txn_opt {
                     self.execute(txn);
-                    self.view.update_col_widths(&self.table);
-                }
+                            }
                 self.message = Some(message);
             }
             KeyCode::Char('a') => {
                 let txn = Transaction::InsertCol { idx: self.view.cursor_col };
                 self.execute(txn);
-                self.view.update_col_widths(&self.table);
-                self.message = Some("Column added".to_string());
+                        self.message = Some("Column added".to_string());
             }
             KeyCode::Char('A') => {
                 let txn = Transaction::InsertCol { idx: self.view.cursor_col + 1 };
                 self.execute(txn);
-                self.view.update_col_widths(&self.table);
-                self.message = Some("Column added".to_string());
+                        self.message = Some("Column added".to_string());
             }
             KeyCode::Char('X') => {
                 if let Some(col_data) = self.table.get_col_cloned(self.view.cursor_col) {
@@ -387,12 +379,11 @@ impl App {
                     };
                     self.execute(txn);
                     self.view.clamp_cursor(&self.table);
-                    self.view.update_col_widths(&self.table);
-                    self.message = Some("Column deleted".to_string());
+                                self.message = Some("Column deleted".to_string());
                 }
             }
             KeyCode::Char('x') => {
-                let old_value = self.view.current_cell(&self.table).clone();
+                let old_value = operations::current_cell(&self.view, &self.table).clone();
                 let txn = Transaction::SetCell {
                     row: self.view.cursor_row,
                     col: self.view.cursor_col,
@@ -405,16 +396,14 @@ impl App {
                 if let Some(inverse) = self.history.undo() {
                     inverse.apply(&mut self.table);
                     self.view.clamp_cursor(&self.table);
-                    self.view.update_col_widths(&self.table);
-                    self.message = Some("Undo".to_string());
+                                self.message = Some("Undo".to_string());
                 }
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if let Some(txn) = self.history.redo() {
                     txn.apply(&mut self.table);
                     self.view.clamp_cursor(&self.table);
-                    self.view.update_col_widths(&self.table);
-                    self.message = Some("Redo".to_string());
+                                self.message = Some("Redo".to_string());
                 }
             }
             KeyCode::Char('/') => {
@@ -456,7 +445,7 @@ impl App {
 
     fn handle_insert_mode(&mut self, key: KeyEvent) {
         if is_escape(key) || key.code == KeyCode::Enter {
-            let old_value = self.view.current_cell(&self.table).clone();
+            let old_value = operations::current_cell(&self.view, &self.table).clone();
             let txn = Transaction::SetCell {
                 row: self.view.cursor_row,
                 col: self.view.cursor_col,
@@ -468,7 +457,7 @@ impl App {
         }
 
         self.insert_handler.handle_key(key, &self.view);
-        self.view.expand_column(self.insert_handler.buffer.len());
+        self.table.expand_col_width(self.view.cursor_col, self.insert_handler.buffer.len());
     }
 
     fn handle_command_mode(&mut self, key: KeyEvent) {
@@ -557,8 +546,7 @@ impl App {
             Command::AddColumn => {
                 let txn = Transaction::InsertCol { idx: self.view.cursor_col + 1 };
                 self.execute(txn);
-                self.view.update_col_widths(&self.table);
-                self.message = Some("Column added".to_string());
+                        self.message = Some("Column added".to_string());
             }
             Command::DeleteColumn => {
                 if let Some(col_data) = self.table.get_col_cloned(self.view.cursor_col) {
@@ -568,8 +556,7 @@ impl App {
                     };
                     self.execute(txn);
                     self.view.clamp_cursor(&self.table);
-                    self.view.update_col_widths(&self.table);
-                    self.message = Some("Column deleted".to_string());
+                                self.message = Some("Column deleted".to_string());
                 }
             }
             Command::ToggleHeader => {
@@ -598,8 +585,7 @@ impl App {
                             .collect();
                         let count = txns.len();
                         self.execute(Transaction::Batch(txns));
-                        self.view.update_col_widths(&self.table);
-                        self.message = Some(format!("Evaluated {} formula(s)", count));
+                                        self.message = Some(format!("Evaluated {} formula(s)", count));
                     }
                     Err(e) => self.message = Some(format!("{}", e)),
                 }
@@ -728,8 +714,7 @@ impl App {
 
                 if !txns.is_empty() {
                     self.execute(Transaction::Batch(txns));
-                    self.view.update_col_widths(&self.table);
-                }
+                            }
 
                 if let Some(msg) = result.message {
                     self.message = Some(msg);
@@ -812,8 +797,7 @@ impl App {
             self.message = Some(format!("Pattern not found: {}", cmd.pattern));
         } else {
             self.execute(Transaction::Batch(txns));
-            self.view.update_col_widths(&self.table);
-            self.message = Some(format!("{} replacement(s) made", replacements));
+                self.message = Some(format!("{} replacement(s) made", replacements));
         }
     }
 
@@ -837,7 +821,6 @@ impl App {
         let txn = Transaction::PermuteRows { permutation };
         self.history.record(txn);
         self.dirty = true;
-        self.view.update_col_widths(&self.table);
 
         let sort_type = self.table.probe_column_type(sort_col, skip_header);
         let type_str = match sort_type {
@@ -871,7 +854,6 @@ impl App {
         let txn = Transaction::PermuteCols { permutation };
         self.history.record(txn);
         self.dirty = true;
-        self.view.update_col_widths(&self.table);
 
         let sort_type = self.table.probe_row_type(sort_row, skip_first);
         let type_str = match sort_type {

@@ -1,10 +1,9 @@
 use std::cmp;
 
-use crate::table::{Table, SortType, SortDirection};
-use crate::util::translate_references;
+use crate::table::Table;
 use crate::mode::Mode;
 
-/// View state for the table (cursor, viewport, cached widths)
+/// View state for the table (cursor, viewport, selection)
 #[derive(Debug, Clone)]
 pub struct TableView {
     // Cursor position
@@ -22,9 +21,6 @@ pub struct TableView {
     // Visible area size (set during render)
     pub visible_rows: usize,
     pub visible_cols: usize,
-
-    // Cached column widths
-    pub col_widths: Vec<usize>,
 }
 
 impl TableView {
@@ -38,19 +34,7 @@ impl TableView {
             visible_cols: 10,
             support_row: 0,
             support_col: 0,
-            col_widths: Vec::new(),
         }
-    }
-
-    /// Update cached column widths based on table content
-    /// Now delegates to Table's cached widths
-    pub fn update_col_widths(&mut self, table: &Table) {
-        self.col_widths = table.col_widths_cached().to_vec();
-    }
-
-    /// Sync column widths from a mutable table (forces recompute if dirty)
-    pub fn sync_col_widths(&mut self, table: &mut Table) {
-        self.col_widths = table.col_widths().to_vec();
     }
 
     pub fn is_selected(&mut self, row_idx: usize, col_idx: usize, mode: Mode) -> bool {
@@ -82,10 +66,6 @@ impl TableView {
             cmp::min(self.cursor_col, self.support_col),
             cmp::max(self.cursor_col, self.support_col),
         )
-    }
-
-    pub fn expand_column(&mut self, length: usize) {
-        self.col_widths[self.cursor_col] = cmp::max(self.col_widths[self.cursor_col], length);
     }
 
     /// Ensure cursor is within table bounds
@@ -318,227 +298,6 @@ impl TableView {
         self.scroll_to_cursor();
     }
 
-    /// Get current cell content
-    pub fn current_cell<'a>(&self, table: &'a Table) -> &'a String {
-        table.get_cell(self.cursor_row, self.cursor_col)
-            .expect("Cursor should be within bounds")
-    }
-
-    /// Get mutable reference to current cell
-    pub fn current_cell_mut<'a>(&self, table: &'a mut Table) -> &'a mut String {
-        table.get_row_mut(self.cursor_row)
-            .and_then(|r| r.get_mut(self.cursor_col))
-            .expect("Cursor should be within bounds")
-    }
-
-    // Row operations that update cursor
-    pub fn insert_row_below(&mut self, table: &mut Table) {
-        table.insert_row_at(self.cursor_row + 1);
-        self.cursor_row += 1;
-        self.scroll_to_cursor();
-    }
-
-    pub fn insert_row_above(&mut self, table: &mut Table) {
-        table.insert_row_at(self.cursor_row);
-        self.scroll_to_cursor();
-    }
-
-    pub fn delete_row(&mut self, table: &mut Table) -> Option<Vec<String>> {
-        let row = table.delete_row_at(self.cursor_row);
-        self.clamp_cursor(table);
-        self.scroll_to_cursor();
-        row
-    }
-
-    /// Delete multiple selected rows (for VisualRow mode), returns deleted rows
-    pub fn delete_rows_bulk(&mut self, table: &mut Table) -> Vec<Vec<String>> {
-        let (start_row, end_row, _, _) = self.get_selection_bounds();
-        let count = end_row - start_row + 1;
-        let deleted = table.delete_rows_bulk(start_row, count);
-        self.cursor_row = start_row;
-        self.support_row = start_row;
-        self.clamp_cursor(table);
-        self.scroll_to_cursor();
-        deleted
-    }
-
-    pub fn yank_row(&self, table: &Table) -> Option<Vec<String>> {
-        table.get_row_cloned(self.cursor_row)
-    }
-
-    /// Yank multiple selected rows (for VisualRow mode)
-    pub fn yank_rows_bulk(&self, table: &Table) -> Vec<Vec<String>> {
-        let (start_row, end_row, _, _) = self.get_selection_bounds();
-        let count = end_row - start_row + 1;
-        table.get_rows_cloned(start_row, count)
-    }
-
-    pub fn paste_row(&mut self, table: &mut Table, row: Vec<String>) {
-        table.fill_row_with_data(self.cursor_row, row);
-    }
-
-    /// Paste multiple rows starting at cursor, overwriting existing rows
-    pub fn paste_rows_bulk(&mut self, table: &mut Table, rows: Vec<Vec<String>>) {
-        table.fill_rows_with_data_bulk(self.cursor_row, rows);
-    }
-
-    /// Insert multiple rows below current selection with data (e.g., after paste)
-    pub fn insert_rows_below_bulk(&mut self, table: &mut Table, rows: Vec<Vec<String>>) {
-        let count = rows.len();
-        let insert_at = self.cursor_row + 1;
-        table.insert_rows_with_data_bulk(insert_at, rows);
-        self.cursor_row = insert_at;
-        self.support_row = insert_at + count - 1;
-        self.scroll_to_cursor();
-    }
-
-    /// Insert multiple empty rows below cursor
-    pub fn insert_rows_below_empty(&mut self, table: &mut Table, count: usize) {
-        let insert_at = self.cursor_row + 1;
-        table.insert_rows_bulk(insert_at, count);
-        self.cursor_row = insert_at;
-        self.support_row = insert_at + count - 1;
-        self.scroll_to_cursor();
-    }
-
-    /// Insert multiple rows above current selection with data
-    pub fn insert_rows_above_bulk(&mut self, table: &mut Table, rows: Vec<Vec<String>>) {
-        let count = rows.len();
-        table.insert_rows_with_data_bulk(self.cursor_row, rows);
-        self.support_row = self.cursor_row + count - 1;
-        self.scroll_to_cursor();
-    }
-
-    // Column operations that update cursor
-    pub fn insert_col_after(&mut self, table: &mut Table) {
-        table.insert_col_at(self.cursor_col + 1);
-        self.update_col_widths(table);
-    }
-
-    pub fn delete_col(&mut self, table: &mut Table) -> Option<Vec<String>> {
-        let col = table.delete_col_at(self.cursor_col);
-        self.clamp_cursor(table);
-        self.update_col_widths(table);
-        self.scroll_to_cursor();
-        col
-    }
-
-    pub fn yank_col(&self, table: &Table) -> Option<Vec<String>> {
-        table.get_col_cloned(self.cursor_col)
-    }
-
-    pub fn paste_col(&mut self, table: &mut Table, col: Vec<String>) {
-        table.fill_col_with_data(self.cursor_col, col);
-        self.update_col_widths(table);
-    }
-
-    pub fn yank_span(&self, table: &Table) -> Option<Vec<Vec<String>>> {
-        let (start_row, end_row, start_col, end_col) = self.get_selection_bounds();
-        table.get_span(start_row, end_row, start_col, end_col)
-    }
-
-    pub fn paste_span(&mut self, table: &mut Table, span: Vec<Vec<String>>) {
-        table.fill_span_with_data(self.cursor_row, self.cursor_col, span);
-    }
-
-    pub fn clear_span(&mut self, table: &mut Table) {
-        let (start_row, end_row, start_col, end_col) = self.get_selection_bounds();
-        for row_idx in start_row..=end_row {
-            for col_idx in start_col..=end_col {
-                table.set_cell(row_idx, col_idx, String::new());
-            }
-        }
-    }
-
-    pub fn clear_row_span(&mut self, table: &mut Table) {
-        let (start_row, end_row, _, _) = self.get_selection_bounds();
-        let col_count = table.col_count();
-        for row_idx in start_row..=end_row {
-            for col_idx in 0..col_count {
-                table.set_cell(row_idx, col_idx, String::new());
-            }
-        }
-    }
-
-    pub fn clear_col_span(&mut self, table: &mut Table) {
-        let (_, _, start_col, end_col) = self.get_selection_bounds();
-        let row_count = table.row_count();
-        for row_idx in 0..row_count {
-            for col_idx in start_col..=end_col {
-                table.set_cell(row_idx, col_idx, String::new());
-            }
-        }
-    }
-
-    pub fn drag_down(&mut self, table: &mut Table, whole_row: bool) {
-        let (start_row, end_row, sel_start_col, sel_end_col) = self.get_selection_bounds();
-        let (start_col, end_col) = if whole_row {
-            (0, table.col_count() - 1)
-        } else {
-            (sel_start_col, sel_end_col)
-        };
-
-        for row_idx in start_row+1..=end_row {
-            for col_idx in start_col..=end_col {
-                let source = table.get_cell(start_row, col_idx).cloned().unwrap_or_default();
-                let new_val = translate_references(&source, (row_idx - start_row) as isize, 0isize);
-                table.set_cell(row_idx, col_idx, new_val);
-            }
-        }
-    }
-
-    pub fn drag_up(&mut self, table: &mut Table, whole_row: bool) {
-        let (start_row, end_row, sel_start_col, sel_end_col) = self.get_selection_bounds();
-        let (start_col, end_col) = if whole_row {
-            (0, table.col_count() - 1)
-        } else {
-            (sel_start_col, sel_end_col)
-        };
-
-        for row_idx in start_row..end_row {
-            let offset = row_idx as isize - end_row as isize;
-            for col_idx in start_col..=end_col {
-                let source = table.get_cell(end_row, col_idx).cloned().unwrap_or_default();
-                let new_val = translate_references(&source, offset, 0isize);
-                table.set_cell(row_idx, col_idx, new_val);
-            }
-        }
-    }
-
-    pub fn drag_right(&mut self, table: &mut Table, whole_col: bool) {
-        let (sel_start_row, sel_end_row, start_col, end_col) = self.get_selection_bounds();
-        let (start_row, end_row) = if whole_col {
-            (0, table.row_count() - 1)
-        } else {
-            (sel_start_row, sel_end_row)
-        };
-
-        for row_idx in start_row..=end_row {
-            for col_idx in start_col+1..=end_col {
-                let source = table.get_cell(row_idx, start_col).cloned().unwrap_or_default();
-                let new_val = translate_references(&source, 0isize, (col_idx - start_col) as isize);
-                table.set_cell(row_idx, col_idx, new_val);
-            }
-        }
-    }
-
-    pub fn drag_left(&mut self, table: &mut Table, whole_col: bool) {
-        let (sel_start_row, sel_end_row, start_col, end_col) = self.get_selection_bounds();
-        let (start_row, end_row) = if whole_col {
-            (0, table.row_count() - 1)
-        } else {
-            (sel_start_row, sel_end_row)
-        };
-
-        for row_idx in start_row..=end_row {
-            for col_idx in start_col..end_col {
-                let offset = col_idx as isize - end_col as isize;
-                let source = table.get_cell(row_idx, end_col).cloned().unwrap_or_default();
-                let new_val = translate_references(&source, 0isize, offset);
-                table.set_cell(row_idx, col_idx, new_val);
-            }
-        }
-    }
 }
 
 impl Default for TableView {
@@ -550,7 +309,8 @@ impl Default for TableView {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use crate::table::{SortType, SortDirection};
+    use crate::operations;
 
     // === Basic operations ===
     fn make_table(data: Vec<Vec<&str>>) -> Table {
@@ -678,22 +438,7 @@ mod tests {
             vec!["hello", "world"],
         ]);
 
-        assert_eq!(view.current_cell(&table), "hello");
-    }
-
-    #[test]
-    fn test_tableview_update_col_widths() {
-        let mut view = TableView::new();
-        let table = make_table(vec![
-            vec!["a", "longer", "x"],
-            vec!["bb", "y", "shortest"],
-        ]);
-
-        view.update_col_widths(&table);
-
-        assert_eq!(view.col_widths[0], 3); // min width is 3
-        assert_eq!(view.col_widths[1], 6); // "longer"
-        assert_eq!(view.col_widths[2], 8); // "shortest"
+        assert_eq!(operations::current_cell(&view, &table), "hello");
     }
 
     #[test]
@@ -716,7 +461,7 @@ mod tests {
             vec!["d", "e", "f"],
         ]);
 
-        let row = view.yank_row(&table).unwrap();
+        let row = operations::yank_row(&view, &table).unwrap();
         assert_eq!(row, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
     }
 
@@ -729,7 +474,7 @@ mod tests {
             vec!["e", "f"],
         ]);
 
-        let col = view.yank_col(&table).unwrap();
+        let col = operations::yank_col(&view, &table).unwrap();
         assert_eq!(col, vec!["a".to_string(), "c".to_string(), "e".to_string()]);
     }
 
@@ -747,7 +492,7 @@ mod tests {
             vec!["g", "h", "i"],
         ]);
 
-        let span = view.yank_span(&table).unwrap();
+        let span = operations::yank_span(&view, &table).unwrap();
         assert_eq!(span, vec![
             vec!["a".to_string(), "b".to_string()],
             vec!["d".to_string(), "e".to_string()],
@@ -822,20 +567,6 @@ mod tests {
 
         view.half_page_up();
         assert_eq!(view.cursor_row, 9);
-    }
-
-    #[test]
-    fn test_tableview_expand_column() {
-        let mut view = TableView::new();
-        view.col_widths = vec![5, 5, 5];
-        view.cursor_col = 1;
-
-        view.expand_column(10);
-        assert_eq!(view.col_widths[1], 10);
-
-        // Shouldn't shrink
-        view.expand_column(3);
-        assert_eq!(view.col_widths[1], 10);
     }
 
     // === Sorting tests ===

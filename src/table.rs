@@ -1,7 +1,3 @@
-use std::cmp;
-
-use crate::mode::Mode;
-
 /// Number of rows per chunk for memory-efficient storage
 pub const CHUNK_SIZE: usize = 1024;
 
@@ -186,6 +182,12 @@ impl Table {
         if col < self.col_widths.len() {
             self.col_widths[col] = self.col_widths[col].max(new_len).max(3);
         }
+    }
+
+    /// Expand a column width if the new length is larger (public API for insert mode)
+    #[inline]
+    pub fn expand_col_width(&mut self, col: usize, new_len: usize) {
+        self.update_col_width(col, new_len);
     }
 
     pub fn get_cell(&self, row: usize, col: usize) -> Option<&String> {
