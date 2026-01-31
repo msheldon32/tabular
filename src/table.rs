@@ -1,7 +1,4 @@
 use std::cmp;
-use std::collections::HashSet;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use crate::mode::Mode;
 use crate::util::translate_references;
@@ -907,7 +904,7 @@ impl Table {
                         (row, s)
                         }).collect();
 
-                match (direction) {
+                match direction {
                     SortDirection::Ascending => keyed.sort_unstable_by(|(idx_a,num_a), (idx_b,num_b)| -> std::cmp::Ordering { 
                             match (num_a.is_nan(), num_b.is_nan()) {
                                 (true, true) => std::cmp::Ordering::Equal, // Both NaN
@@ -972,7 +969,7 @@ impl Table {
                         (col, s)
                         }).collect();
 
-                match (direction) {
+                match direction {
                     SortDirection::Ascending => keyed.sort_unstable_by(|(idx_a,num_a), (idx_b,num_b)| -> std::cmp::Ordering { 
                             match (num_a.is_nan(), num_b.is_nan()) {
                                 (true, true) => std::cmp::Ordering::Equal, // Both NaN

@@ -108,7 +108,8 @@ impl FileIO {
         }
 
         let file = File::open(path)?;
-        let reader = BufReader::new(file);
+        let reader = BufReader::with_capacity(1 << 20, file); // 1 MB
+
         let mut csv_reader = csv::ReaderBuilder::new()
             .delimiter(delim)
             .has_headers(false)
