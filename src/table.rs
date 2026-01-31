@@ -943,28 +943,20 @@ impl TableView {
             return;
         }
 
-        let current_occupied = Self::is_cell_occupied(table, self.cursor_row, self.cursor_col);
+        let mut target = self.cursor_col - 1;
 
-        if current_occupied {
-            // Find last occupied cell before hitting empty or edge
-            let mut target = self.cursor_col - 1;
-            // First skip any empty cells
-            while target > 0 && !Self::is_cell_occupied(table, self.cursor_row, target) {
-                target -= 1;
-            }
-            // Then find the start of the occupied region
-            while target > 0 && Self::is_cell_occupied(table, self.cursor_row, target - 1) {
-                target -= 1;
-            }
-            self.cursor_col = target;
-        } else {
-            // Find first occupied cell to the left
-            let mut target = self.cursor_col - 1;
-            while target > 0 && !Self::is_cell_occupied(table, self.cursor_row, target) {
-                target -= 1;
-            }
-            self.cursor_col = target;
+        let is_occupied = Self::is_cell_occupied(table, self.cursor_row, target);
+
+        while target > 0 && (Self::is_cell_occupied(table, self.cursor_row, target-1) == is_occupied) {
+            target -= 1;
         }
+
+        if target > 0 && !is_occupied {
+            target -= 1;
+        }
+
+        self.cursor_col = target;
+
         self.scroll_to_cursor();
     }
 
@@ -974,28 +966,20 @@ impl TableView {
             return;
         }
 
-        let current_occupied = Self::is_cell_occupied(table, self.cursor_row, self.cursor_col);
+        let mut target = self.cursor_col + 1;
 
-        if current_occupied {
-            // Find last occupied cell before hitting empty or edge
-            let mut target = self.cursor_col + 1;
-            // First skip any empty cells
-            while target < max_col && !Self::is_cell_occupied(table, self.cursor_row, target) {
-                target += 1;
-            }
-            // Then find the end of the occupied region
-            while target < max_col && Self::is_cell_occupied(table, self.cursor_row, target + 1) {
-                target += 1;
-            }
-            self.cursor_col = target;
-        } else {
-            // Find first occupied cell to the right
-            let mut target = self.cursor_col + 1;
-            while target < max_col && !Self::is_cell_occupied(table, self.cursor_row, target) {
-                target += 1;
-            }
-            self.cursor_col = target;
+        let is_occupied = Self::is_cell_occupied(table, self.cursor_row, target);
+
+        while target < max_col && (Self::is_cell_occupied(table, self.cursor_row, target+1) == is_occupied) {
+            target += 1;
         }
+
+        if target < max_col && !is_occupied {
+            target += 1;
+        }
+
+        self.cursor_col = target;
+
         self.scroll_to_cursor();
     }
 
@@ -1004,28 +988,20 @@ impl TableView {
             return;
         }
 
-        let current_occupied = Self::is_cell_occupied(table, self.cursor_row, self.cursor_col);
+        let mut target = self.cursor_row - 1;
 
-        if current_occupied {
-            // Find last occupied cell before hitting empty or edge
-            let mut target = self.cursor_row - 1;
-            // First skip any empty cells
-            while target > 0 && !Self::is_cell_occupied(table, target, self.cursor_col) {
-                target -= 1;
-            }
-            // Then find the start of the occupied region
-            while target > 0 && Self::is_cell_occupied(table, target - 1, self.cursor_col) {
-                target -= 1;
-            }
-            self.cursor_row = target;
-        } else {
-            // Find first occupied cell upward
-            let mut target = self.cursor_row - 1;
-            while target > 0 && !Self::is_cell_occupied(table, target, self.cursor_col) {
-                target -= 1;
-            }
-            self.cursor_row = target;
+        let is_occupied = Self::is_cell_occupied(table, target, self.cursor_col);
+
+        while target > 0 && (Self::is_cell_occupied(table, target-1, self.cursor_col) == is_occupied) {
+            target -= 1;
         }
+
+        if target > 0 && !is_occupied {
+            target -= 1;
+        }
+
+        self.cursor_row = target;
+
         self.scroll_to_cursor();
     }
 
@@ -1035,28 +1011,20 @@ impl TableView {
             return;
         }
 
-        let current_occupied = Self::is_cell_occupied(table, self.cursor_row, self.cursor_col);
+        let mut target = self.cursor_row + 1;
 
-        if current_occupied {
-            // Find last occupied cell before hitting empty or edge
-            let mut target = self.cursor_row + 1;
-            // First skip any empty cells
-            while target < max_row && !Self::is_cell_occupied(table, target, self.cursor_col) {
-                target += 1;
-            }
-            // Then find the end of the occupied region
-            while target < max_row && Self::is_cell_occupied(table, target + 1, self.cursor_col) {
-                target += 1;
-            }
-            self.cursor_row = target;
-        } else {
-            // Find first occupied cell downward
-            let mut target = self.cursor_row + 1;
-            while target < max_row && !Self::is_cell_occupied(table, target, self.cursor_col) {
-                target += 1;
-            }
-            self.cursor_row = target;
+        let is_occupied = Self::is_cell_occupied(table, target, self.cursor_col);
+
+        while target < max_row && (Self::is_cell_occupied(table, target+1, self.cursor_col) == is_occupied) {
+            target += 1;
         }
+
+        if target < max_row && !is_occupied {
+            target += 1;
+        }
+
+        self.cursor_row = target;
+
         self.scroll_to_cursor();
     }
 
