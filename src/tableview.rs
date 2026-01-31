@@ -18,9 +18,9 @@ pub struct TableView {
     pub viewport_row: usize,
     pub viewport_col: usize,
 
-    // Visible area size (set during render)
-    pub visible_rows: usize,
-    pub visible_cols: usize,
+    // Last visible row (set during render)
+    pub viewport_height: usize,
+    pub viewport_width: usize,
 }
 
 impl TableView {
@@ -30,8 +30,8 @@ impl TableView {
             cursor_col: 0,
             viewport_row: 0,
             viewport_col: 0,
-            visible_rows: 20,
-            visible_cols: 10,
+            viewport_height: 20,
+            viewport_width: 10,
             support_row: 0,
             support_col: 0,
         }
@@ -83,15 +83,15 @@ impl TableView {
         // Vertical scrolling
         if self.cursor_row < self.viewport_row {
             self.viewport_row = self.cursor_row;
-        } else if self.cursor_row >= self.viewport_row + self.visible_rows {
-            self.viewport_row = self.cursor_row.saturating_sub(self.visible_rows - 1);
+        } else if self.cursor_row >= self.viewport_row + self.viewport_height {
+            self.viewport_row = self.cursor_row.saturating_sub(self.viewport_height - 1);
         }
 
         // Horizontal scrolling
         if self.cursor_col < self.viewport_col {
             self.viewport_col = self.cursor_col;
-        } else if self.cursor_col >= self.viewport_col + self.visible_cols {
-            self.viewport_col = self.cursor_col.saturating_sub(self.visible_cols - 1);
+        } else if self.cursor_col >= self.viewport_col + self.viewport_width {
+            self.viewport_col = self.cursor_col.saturating_sub(self.viewport_width - 1);
         }
     }
 
@@ -149,25 +149,25 @@ impl TableView {
     }
 
     pub fn page_down(&mut self, table: &Table) {
-        let jump = self.visible_rows.saturating_sub(1).max(1);
+        let jump = self.viewport_height.saturating_sub(1).max(1);
         self.cursor_row = (self.cursor_row + jump).min(table.row_count().saturating_sub(1));
         self.scroll_to_cursor();
     }
 
     pub fn page_up(&mut self) {
-        let jump = self.visible_rows.saturating_sub(1).max(1);
+        let jump = self.viewport_height.saturating_sub(1).max(1);
         self.cursor_row = self.cursor_row.saturating_sub(jump);
         self.scroll_to_cursor();
     }
 
     pub fn half_page_down(&mut self, table: &Table) {
-        let jump = self.visible_rows / 2;
+        let jump = self.viewport_height / 2;
         self.cursor_row = (self.cursor_row + jump).min(table.row_count().saturating_sub(1));
         self.scroll_to_cursor();
     }
 
     pub fn half_page_up(&mut self) {
-        let jump = self.visible_rows / 2;
+        let jump = self.viewport_height / 2;
         self.cursor_row = self.cursor_row.saturating_sub(jump);
         self.scroll_to_cursor();
     }
@@ -549,7 +549,7 @@ mod tests {
     #[test]
     fn test_tableview_page_navigation() {
         let mut view = TableView::new();
-        view.visible_rows = 10;
+        view.viewport_height = 10;
 
         let table = make_table(vec![vec!["x"]; 100]); // 100 rows
 

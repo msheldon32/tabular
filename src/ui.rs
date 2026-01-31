@@ -43,14 +43,15 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
     // Calculate available space for data (accounting for borders and row numbers)
     let row_num_width = row_count.to_string().len().max(3);
     let available_width = area.width.saturating_sub(4 + row_num_width as u16); // borders + row nums
-    let available_height = area.height.saturating_sub(4); // borders + header
+    let available_height = area.height.saturating_sub(3); // borders + header
 
     // Update visible rows/cols in view
-    app.view.visible_rows = available_height as usize;
+    let visible_rows = available_height as usize;
 
     // Calculate how many columns fit in available width
     let mut total_width = 0u16;
     let mut visible_cols = 0usize;
+    let mut last_col = app.view.viewport_col;
     for col in app.view.viewport_col..col_count {
         let col_width = app.table.col_widths().get(col).copied().unwrap_or(3);
         let cell_width = col_width as u16 + 2; // padding
@@ -59,8 +60,9 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
         }
         total_width += cell_width;
         visible_cols += 1;
+        last_col = col;
     }
-    app.view.visible_cols = visible_cols.max(1);
+    app.view.viewport_width = visible_cols;
 
     // Ensure cursor is visible
     app.view.scroll_to_cursor();
@@ -93,12 +95,20 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
     }
     let header_row = Row::new(header_cells);
 
-    // Calculate visible row range
-    let end_row = (app.view.viewport_row + app.view.visible_rows).min(row_count);
+    // Selected row indices
+    let selected_indices: Box<dyn Iterator<Item = usize>> = if (app.header_mode && app.view.viewport_row > 0) {
+        Box::new((0..1).chain((app.view.viewport_row..)).take(visible_rows))
+    } else {
+        Box::new((app.view.viewport_row..).take(visible_rows))
+    };
+
+    let mut end_row = 0;
 
     // Build data rows (only visible ones)
-    let rows: Vec<Row> = (app.view.viewport_row..end_row)
+    let rows: Vec<Row> = selected_indices
         .map(|row_idx| {
+            end_row = row_idx;
+
             let is_header_row = app.header_mode && row_idx == 0;
 
             let mut cells: Vec<Cell> = Vec::with_capacity(visible_cols + 1);
@@ -176,6 +186,9 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
             Row::new(cells)
         })
         .collect();
+    
+    // update viewport
+    app.view.viewport_height = (end_row-app.view.viewport_row)+1;
 
     // Build title with scroll indicator
     let title = if app.view.viewport_row > 0 || app.view.viewport_col > 0 {
