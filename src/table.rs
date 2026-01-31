@@ -200,11 +200,11 @@ impl Table {
         if let Some(chunk) = self.get_chunk_mut(row) {
             if let Some(r) = chunk.get_mut(Self::row_in_chunk(row)) {
                 if let Some(cell) = r.get_mut(col) {
-                    let new_len = value.len();
+                    let new_width = crate::util::display_width(&value);
                     *cell = value;
 
                     // Update column width incrementally (only grows, never shrinks)
-                    self.update_col_width(col, new_len);
+                    self.update_col_width(col, new_width);
                 }
             }
         }
@@ -425,7 +425,7 @@ impl Table {
         // Update widths for new data
         for row in &rows {
             for (col, val) in row.iter().enumerate() {
-                self.update_col_width(col, val.len());
+                self.update_col_width(col, crate::util::display_width(val));
             }
         }
 
@@ -705,7 +705,7 @@ impl Table {
         row.resize(self.col_count, String::new());
         // Update widths for new data
         for (col, val) in row.iter().enumerate() {
-            self.update_col_width(col, val.len());
+            self.update_col_width(col, crate::util::display_width(val));
         }
         self.insert_row_internal(idx, row);
     }
@@ -722,7 +722,7 @@ impl Table {
     }
 
     pub fn insert_col_with_data(&mut self, idx: usize, col: Vec<String>) {
-        let max_width = col.iter().map(|s| s.len()).max().unwrap_or(0).max(3);
+        let max_width = col.iter().map(|s| crate::util::display_width(s)).max().unwrap_or(0).max(3);
         let mut col_iter = col.into_iter();
         for chunk in &mut self.chunks {
             for row in chunk {
