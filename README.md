@@ -74,6 +74,13 @@ tabular <file.csv>
 | `yy` | Yank current selection |
 | `dd` | Delete current selection |
 
+#### Search
+| Key | Action |
+|-----|--------|
+| `/` | Start search |
+| `n` | Jump to next match |
+| `N` | Jump to previous match |
+
 #### Other
 | Key | Action |
 |-----|--------|
@@ -151,6 +158,7 @@ In **visual row mode** (`V`), `q` fills entire rows. In **visual column mode** (
 | `:themes` | List available themes |
 | `:clip` | Copy yanked data to system clipboard |
 | `:sp` | Yank from system clipboard (then `p` to paste) |
+| `:%s/old/new/g` | Find and replace (see [Find and Replace](#find-and-replace)) |
 | `:[NUMBER]` | Jump to row NUMBER |
 | `:[CELL]` | Jump to CELL (e.g., `:A1`, `:B5`) |
 
@@ -181,6 +189,51 @@ All editing operations can be undone and redone:
 - `Ctrl+r` - Redo last undone change
 
 The undo history tracks cell edits, row/column insertions and deletions, drag fills, and more.
+
+## Search
+
+Press `/` to enter search mode. Type a pattern and press `Enter` to search. The search is case-insensitive and matches any part of cell content.
+
+| Key | Action |
+|-----|--------|
+| `/` | Start search |
+| `Enter` | Execute search and jump to first match |
+| `n` | Jump to next match |
+| `N` | Jump to previous match |
+| `Escape` | Cancel search |
+
+The status bar shows the current match position (e.g., `[3/15] matches`).
+
+## Find and Replace
+
+Use vim-style substitute commands to find and replace text.
+
+### Syntax
+
+| Command | Description |
+|---------|-------------|
+| `:s/old/new/` | Replace first occurrence of "old" with "new" in current cell |
+| `:s/old/new/g` | Replace all occurrences in current cell |
+| `:%s/old/new/` | Replace first occurrence in each cell of the entire table |
+| `:%s/old/new/g` | Replace all occurrences in all cells |
+
+### With Visual Selection
+
+When in visual mode (`v`, `V`, or `Ctrl+v`), pressing `:` enters command mode with the selection preserved:
+
+- `:s/old/new/` - Replace within the selected cells only
+- `:s/old/new/g` - Replace all occurrences within selected cells
+
+### Examples
+
+```
+:%s/foo/bar/g      # Replace all "foo" with "bar" in entire table
+:s/USD/$/          # Replace "USD" with "$" in current cell
+:%s/  / /g         # Replace double spaces with single space everywhere
+:%s/old//g         # Delete all occurrences of "old"
+```
+
+**Note:** Replacements are literal string matches, not regular expressions. All replace operations can be undone with `u`.
 
 ## Registers
 
