@@ -908,21 +908,21 @@ impl Table {
                         }).collect();
 
                 match (direction) {
-                    SortDirection::Ascending => keyed.sort_by(|(_,num_a), (_,num_b)| -> std::cmp::Ordering { 
+                    SortDirection::Ascending => keyed.sort_unstable_by(|(idx_a,num_a), (idx_b,num_b)| -> std::cmp::Ordering { 
                             match (num_a.is_nan(), num_b.is_nan()) {
                                 (true, true) => std::cmp::Ordering::Equal, // Both NaN
                                 (true, false) => std::cmp::Ordering::Greater, // NaN goes last
                                 (false, true) => std::cmp::Ordering::Less,
                                 (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
-                            }
+                            }.then(idx_a.cmp(&idx_b))
                         }),
-                    SortDirection::Descending => keyed.sort_by(|(_,num_a), (_,num_b)| -> std::cmp::Ordering { 
+                    SortDirection::Descending => keyed.sort_unstable_by(|(idx_a,num_a), (idx_b,num_b)| -> std::cmp::Ordering { 
                             match (num_a.is_nan(), num_b.is_nan()) {
                                 (true, true) => std::cmp::Ordering::Equal, // Both NaN
                                 (true, false) => std::cmp::Ordering::Greater, // NaN goes last
                                 (false, true) => std::cmp::Ordering::Less,
                                 (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal).reverse(),
-                            }
+                            }.then(idx_a.cmp(&idx_b))
                         }),
 
                 }
@@ -937,8 +937,8 @@ impl Table {
                         }).collect();
 
                 match direction {
-                    SortDirection::Ascending => keyed.sort_by(|(_,a), (_,b)|  a.cmp(&b)),
-                    SortDirection::Descending => keyed.sort_by(|(_,a), (_,b)|  a.cmp(&b).reverse())
+                    SortDirection::Ascending => keyed.sort_unstable_by(|(i,a), (j,b)|  a.cmp(&b).then(i.cmp(&j))),
+                    SortDirection::Descending => keyed.sort_unstable_by(|(i,a), (j,b)|  a.cmp(&b).reverse().then(i.cmp(&j)))
                 }
 
                 indices.extend(keyed.into_iter().map(|(row,_)| row));
@@ -973,21 +973,21 @@ impl Table {
                         }).collect();
 
                 match (direction) {
-                    SortDirection::Ascending => keyed.sort_by(|(_,num_a), (_,num_b)| -> std::cmp::Ordering { 
+                    SortDirection::Ascending => keyed.sort_unstable_by(|(idx_a,num_a), (idx_b,num_b)| -> std::cmp::Ordering { 
                             match (num_a.is_nan(), num_b.is_nan()) {
                                 (true, true) => std::cmp::Ordering::Equal, // Both NaN
                                 (true, false) => std::cmp::Ordering::Greater, // NaN goes last
                                 (false, true) => std::cmp::Ordering::Less,
                                 (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
-                            }
+                            }.then(idx_a.cmp(&idx_b))
                         }),
-                    SortDirection::Descending => keyed.sort_by(|(_,num_a), (_,num_b)| -> std::cmp::Ordering { 
+                    SortDirection::Descending => keyed.sort_unstable_by(|(idx_a,num_a), (idx_b,num_b)| -> std::cmp::Ordering { 
                             match (num_a.is_nan(), num_b.is_nan()) {
                                 (true, true) => std::cmp::Ordering::Equal, // Both NaN
                                 (true, false) => std::cmp::Ordering::Greater, // NaN goes last
                                 (false, true) => std::cmp::Ordering::Less,
                                 (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal).reverse(),
-                            }
+                            }.then(idx_a.cmp(&idx_b))
                         }),
 
                 }
@@ -1002,8 +1002,8 @@ impl Table {
                         }).collect();
 
                 match direction {
-                    SortDirection::Ascending => keyed.sort_by(|(_,a), (_,b)|  a.cmp(&b)),
-                    SortDirection::Descending => keyed.sort_by(|(_,a), (_,b)|  a.cmp(&b).reverse())
+                    SortDirection::Ascending => keyed.sort_unstable_by(|(i,a), (j,b)|  a.cmp(&b).then(i.cmp(&j))),
+                    SortDirection::Descending => keyed.sort_unstable_by(|(i,a), (j,b)|  a.cmp(&b).reverse().then(i.cmp(&j))),
                 }
 
                 indices.extend(keyed.into_iter().map(|(col,_)| col));
