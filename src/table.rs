@@ -893,23 +893,59 @@ impl Table {
         let sort_type = self.probe_column_type(sort_col, skip_header);
         let start_row = if skip_header { 1 } else { 0 };
 
-        let mut indices: Vec<usize> = (start_row..self.row_count()).collect();
-
-        // Use get_cell for chunked access
-        indices.sort_by(|&a, &b| {
-            let cell_a = self.get_cell(a, sort_col).map(|s| s.trim()).unwrap_or("");
-            let cell_b = self.get_cell(b, sort_col).map(|s| s.trim()).unwrap_or("");
-            compare_cells(cell_a, cell_b, sort_type, direction)
-        });
-
-        // If we skipped header, prepend 0
-        if skip_header {
-            let mut result = vec![0];
-            result.extend(indices);
-            result
+        let mut indices: Vec<usize> = if skip_header {
+            vec![0]
         } else {
-            indices
+            Vec::new()
+        };
+
+        match sort_type {
+            SortType::Numeric => {
+                let mut keyed: Vec<(usize, f64)> = (start_row..self.row_count())
+                    .map(|row| {
+                        let s = crate::format::parse_numeric(self.get_cell(row, sort_col).unwrap_or(&String::new()).trim()).unwrap_or(f64::NAN);
+                        (row, s)
+                        }).collect();
+
+                match (direction) {
+                    SortDirection::Ascending => keyed.sort_by(|(_,num_a), (_,num_b)| -> std::cmp::Ordering { 
+                            match (num_a.is_nan(), num_b.is_nan()) {
+                                (true, true) => std::cmp::Ordering::Equal, // Both NaN
+                                (true, false) => std::cmp::Ordering::Greater, // NaN goes last
+                                (false, true) => std::cmp::Ordering::Less,
+                                (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
+                            }
+                        }),
+                    SortDirection::Descending => keyed.sort_by(|(_,num_a), (_,num_b)| -> std::cmp::Ordering { 
+                            match (num_a.is_nan(), num_b.is_nan()) {
+                                (true, true) => std::cmp::Ordering::Equal, // Both NaN
+                                (true, false) => std::cmp::Ordering::Greater, // NaN goes last
+                                (false, true) => std::cmp::Ordering::Less,
+                                (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal).reverse(),
+                            }
+                        }),
+
+                }
+
+                indices.extend(keyed.into_iter().map(|(row,_)| row));
+            },
+            SortType::Text => {
+                let mut keyed: Vec<(usize, String)> = (start_row..self.row_count())
+                    .map(|row| {
+                        let s = self.get_cell(row, sort_col).unwrap_or(&String::new()).to_lowercase().trim().to_owned();
+                        (row, s)
+                        }).collect();
+
+                match direction {
+                    SortDirection::Ascending => keyed.sort_by(|(_,a), (_,b)|  a.cmp(&b)),
+                    SortDirection::Descending => keyed.sort_by(|(_,a), (_,b)|  a.cmp(&b).reverse())
+                }
+
+                indices.extend(keyed.into_iter().map(|(row,_)| row));
+            }
         }
+
+        indices
     }
 
     /// Sort columns by a specific row, returns the sorted column indices
@@ -922,24 +958,60 @@ impl Table {
         let sort_type = self.probe_row_type(sort_row, skip_first_col);
         let start_col = if skip_first_col { 1 } else { 0 };
 
-        let mut indices: Vec<usize> = (start_col..self.col_count()).collect();
-
-        // Use get_row for chunked access
-        if let Some(row) = self.get_row(sort_row) {
-            indices.sort_by(|&a, &b| {
-                let cell_a = row.get(a).map(|s| s.trim()).unwrap_or("");
-                let cell_b = row.get(b).map(|s| s.trim()).unwrap_or("");
-                compare_cells(cell_a, cell_b, sort_type, direction)
-            });
-        }
-
-        if skip_first_col {
-            let mut result = vec![0];
-            result.extend(indices);
-            result
+        let mut indices: Vec<usize> = if skip_first_col {
+            vec![0]
         } else {
-            indices
+            Vec::new()
+        };
+        
+        match sort_type {
+            SortType::Numeric => {
+                let mut keyed: Vec<(usize, f64)> = (start_col..self.col_count())
+                    .map(|col| {
+                        let s = crate::format::parse_numeric(self.get_cell(sort_row, col).unwrap_or(&String::new()).trim()).unwrap_or(f64::NAN);
+                        (col, s)
+                        }).collect();
+
+                match (direction) {
+                    SortDirection::Ascending => keyed.sort_by(|(_,num_a), (_,num_b)| -> std::cmp::Ordering { 
+                            match (num_a.is_nan(), num_b.is_nan()) {
+                                (true, true) => std::cmp::Ordering::Equal, // Both NaN
+                                (true, false) => std::cmp::Ordering::Greater, // NaN goes last
+                                (false, true) => std::cmp::Ordering::Less,
+                                (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
+                            }
+                        }),
+                    SortDirection::Descending => keyed.sort_by(|(_,num_a), (_,num_b)| -> std::cmp::Ordering { 
+                            match (num_a.is_nan(), num_b.is_nan()) {
+                                (true, true) => std::cmp::Ordering::Equal, // Both NaN
+                                (true, false) => std::cmp::Ordering::Greater, // NaN goes last
+                                (false, true) => std::cmp::Ordering::Less,
+                                (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal).reverse(),
+                            }
+                        }),
+
+                }
+
+                indices.extend(keyed.into_iter().map(|(col,_)| col));
+            },
+            SortType::Text => {
+                let mut keyed: Vec<(usize, String)> = (start_col..self.col_count())
+                    .map(|col| {
+                        let s = self.get_cell(sort_row, col).unwrap_or(&String::new()).to_lowercase().trim().to_owned();
+                        (col, s)
+                        }).collect();
+
+                match direction {
+                    SortDirection::Ascending => keyed.sort_by(|(_,a), (_,b)|  a.cmp(&b)),
+                    SortDirection::Descending => keyed.sort_by(|(_,a), (_,b)|  a.cmp(&b).reverse())
+                }
+
+                indices.extend(keyed.into_iter().map(|(col,_)| col));
+            }
         }
+    
+
+        indices
     }
 
     /// Reorder rows according to the given indices
