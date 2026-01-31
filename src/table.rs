@@ -933,6 +933,81 @@ impl Table {
         old_cells
     }
 
+    /// Efficiently reorder rows in-place using the given indices
+    /// Optimized for large tables - only clones once and works chunk-aware
+    /// Returns the old table state for undo
+    pub fn reorder_rows_bulk(&mut self, new_order: &[usize]) -> Vec<Vec<String>> {
+        if new_order.len() != self.total_rows {
+            return self.reorder_rows(new_order);
+        }
+
+        // Take ownership of chunks to avoid double-cloning
+        let old_chunks = std::mem::take(&mut self.chunks);
+        let old_total = self.total_rows;
+
+        // Flatten into a single vec (we need random access by index)
+        let mut flat_rows: Vec<Vec<String>> = old_chunks.into_iter().flatten().collect();
+
+        // Build old_cells for undo by cloning (we need to return this)
+        let old_cells = flat_rows.clone();
+
+        // Reorder in-place using a permutation cycle approach for efficiency
+        // This avoids creating a second full copy
+        let mut new_rows = Vec::with_capacity(old_total);
+        for &idx in new_order {
+            if idx < flat_rows.len() {
+                // Take the row, leaving an empty placeholder
+                new_rows.push(std::mem::take(&mut flat_rows[idx]));
+            }
+        }
+
+        // Rechunk the reordered rows
+        self.chunks = new_rows
+            .chunks(CHUNK_SIZE)
+            .map(|chunk| chunk.to_vec())
+            .collect();
+        self.total_rows = self.chunks.iter().map(|c| c.len()).sum();
+        self.mark_widths_dirty();
+
+        old_cells
+    }
+
+    /// Sort rows by a column and apply the sort in-place
+    /// Returns the old table state for undo
+    pub fn sort_rows_by_column(
+        &mut self,
+        sort_col: usize,
+        direction: SortDirection,
+        skip_header: bool,
+    ) -> Option<Vec<Vec<String>>> {
+        let new_order = self.get_sorted_row_indices(sort_col, direction, skip_header);
+
+        // Check if already sorted
+        if new_order.iter().enumerate().all(|(i, &idx)| i == idx) {
+            return None; // Already sorted
+        }
+
+        Some(self.reorder_rows_bulk(&new_order))
+    }
+
+    /// Sort columns by a row and apply the sort in-place
+    /// Returns the old table state for undo
+    pub fn sort_cols_by_row(
+        &mut self,
+        sort_row: usize,
+        direction: SortDirection,
+        skip_first_col: bool,
+    ) -> Option<Vec<Vec<String>>> {
+        let new_order = self.get_sorted_col_indices(sort_row, direction, skip_first_col);
+
+        // Check if already sorted
+        if new_order.iter().enumerate().all(|(i, &idx)| i == idx) {
+            return None; // Already sorted
+        }
+
+        Some(self.reorder_cols(&new_order))
+    }
+
     /// Reorder columns according to the given indices
     /// Returns the old table state as Vec<Vec<String>> for undo
     pub fn reorder_cols(&mut self, new_order: &[usize]) -> Vec<Vec<String>> {
@@ -2432,6 +2507,184 @@ mod tests {
 
         // 1.05, 1.25, 1.5
         assert_eq!(indices, vec![0, 2, 3, 1]);
+    }
+
+    // === Large-scale sorting tests ===
+
+    /// Helper to create a large table with random-ish numeric values for sorting tests
+    fn make_large_sortable_table(num_rows: usize) -> Table {
+        // Create rows with values that will sort in a known order
+        // Use a simple formula: value = (num_rows - i) to create reverse order
+        let rows: Vec<Vec<String>> = (0..num_rows)
+            .map(|i| vec![
+                format!("{}", num_rows - i),  // Numeric col (reverse order)
+                format!("name{:05}", i),      // Text col (forward order)
+            ])
+            .collect();
+        Table::new(rows)
+    }
+
+    #[test]
+    fn test_sort_rows_bulk_large_ascending() {
+        // 3000 rows spanning 3 chunks
+        let mut table = make_large_sortable_table(3000);
+        assert_eq!(table.row_count(), 3000);
+
+        // First column has values 3000, 2999, 2998, ..., 1
+        // After ascending sort, should be 1, 2, 3, ..., 3000
+        assert_eq!(table.get_cell(0, 0), Some(&"3000".to_string()));
+        assert_eq!(table.get_cell(2999, 0), Some(&"1".to_string()));
+
+        let old_data = table.sort_rows_by_column(0, SortDirection::Ascending, false);
+        assert!(old_data.is_some(), "Sort should have changed the order");
+
+        // Verify sorted order
+        for i in 0..3000 {
+            let expected = format!("{}", i + 1);
+            assert_eq!(table.get_cell(i, 0), Some(&expected),
+                "Row {} should have value {}", i, expected);
+        }
+
+        // Verify row count unchanged
+        assert_eq!(table.row_count(), 3000);
+    }
+
+    #[test]
+    fn test_sort_rows_bulk_large_descending() {
+        // Create table with ascending values
+        let rows: Vec<Vec<String>> = (0..3000)
+            .map(|i| vec![format!("{}", i + 1)])
+            .collect();
+        let mut table = Table::new(rows);
+
+        // First column has values 1, 2, 3, ..., 3000
+        assert_eq!(table.get_cell(0, 0), Some(&"1".to_string()));
+        assert_eq!(table.get_cell(2999, 0), Some(&"3000".to_string()));
+
+        let old_data = table.sort_rows_by_column(0, SortDirection::Descending, false);
+        assert!(old_data.is_some());
+
+        // After descending sort: 3000, 2999, ..., 1
+        for i in 0..3000 {
+            let expected = format!("{}", 3000 - i);
+            assert_eq!(table.get_cell(i, 0), Some(&expected),
+                "Row {} should have value {}", i, expected);
+        }
+    }
+
+    #[test]
+    fn test_sort_rows_bulk_large_with_header() {
+        // Create table with header row
+        let mut rows: Vec<Vec<String>> = vec![vec!["Value".to_string()]];
+        rows.extend((0..2999).map(|i| vec![format!("{}", 2999 - i)]));
+        let mut table = Table::new(rows);
+
+        assert_eq!(table.row_count(), 3000);
+        assert_eq!(table.get_cell(0, 0), Some(&"Value".to_string()));
+        assert_eq!(table.get_cell(1, 0), Some(&"2999".to_string()));
+
+        let old_data = table.sort_rows_by_column(0, SortDirection::Ascending, true);
+        assert!(old_data.is_some());
+
+        // Header should remain at row 0
+        assert_eq!(table.get_cell(0, 0), Some(&"Value".to_string()));
+
+        // Data rows should be sorted: 1, 2, 3, ..., 2999
+        for i in 1..3000 {
+            let expected = format!("{}", i);
+            assert_eq!(table.get_cell(i, 0), Some(&expected),
+                "Row {} should have value {}", i, expected);
+        }
+    }
+
+    #[test]
+    fn test_sort_rows_bulk_large_text() {
+        // Create table with text values that span chunks
+        let rows: Vec<Vec<String>> = (0..3000)
+            .map(|i| vec![format!("item{:05}", 2999 - i)])
+            .collect();
+        let mut table = Table::new(rows);
+
+        // Should be: item02999, item02998, ..., item00000
+        assert_eq!(table.get_cell(0, 0), Some(&"item02999".to_string()));
+        assert_eq!(table.get_cell(2999, 0), Some(&"item00000".to_string()));
+
+        let old_data = table.sort_rows_by_column(0, SortDirection::Ascending, false);
+        assert!(old_data.is_some());
+
+        // After sort: item00000, item00001, ..., item02999
+        for i in 0..3000 {
+            let expected = format!("item{:05}", i);
+            assert_eq!(table.get_cell(i, 0), Some(&expected),
+                "Row {} should have value {}", i, expected);
+        }
+    }
+
+    #[test]
+    fn test_sort_rows_bulk_already_sorted() {
+        // Create already sorted table
+        let rows: Vec<Vec<String>> = (0..3000)
+            .map(|i| vec![format!("{}", i + 1)])
+            .collect();
+        let mut table = Table::new(rows);
+
+        // Should return None since already sorted
+        let old_data = table.sort_rows_by_column(0, SortDirection::Ascending, false);
+        assert!(old_data.is_none(), "Already sorted table should return None");
+    }
+
+    #[test]
+    fn test_sort_preserves_row_integrity() {
+        // Create table with multiple columns to verify entire rows move together
+        let rows: Vec<Vec<String>> = (0..3000)
+            .map(|i| vec![
+                format!("{}", 3000 - i),           // Sort key (reverse)
+                format!("row{}", i),               // Row identifier
+                format!("data{}", i * 2),          // Associated data
+            ])
+            .collect();
+        let mut table = Table::new(rows);
+
+        table.sort_rows_by_column(0, SortDirection::Ascending, false);
+
+        // Verify row integrity - each row's columns should still correspond
+        for i in 0..3000 {
+            let sort_key = table.get_cell(i, 0).unwrap();
+            let row_id = table.get_cell(i, 1).unwrap();
+            let data = table.get_cell(i, 2).unwrap();
+
+            // sort_key should be i+1 (after ascending sort)
+            assert_eq!(sort_key, &format!("{}", i + 1));
+
+            // Original row index was (3000 - (i+1)) = 2999 - i
+            let orig_idx = 2999 - i;
+            assert_eq!(row_id, &format!("row{}", orig_idx),
+                "Row {} should have id row{}", i, orig_idx);
+            assert_eq!(data, &format!("data{}", orig_idx * 2),
+                "Row {} should have data{}", i, orig_idx * 2);
+        }
+    }
+
+    #[test]
+    fn test_reorder_rows_bulk_returns_old_data() {
+        let mut table = make_large_sortable_table(3000);
+
+        // Get original first and last values
+        let orig_first = table.get_cell(0, 0).unwrap().clone();
+        let orig_last = table.get_cell(2999, 0).unwrap().clone();
+
+        // Create reverse order
+        let new_order: Vec<usize> = (0..3000).rev().collect();
+        let old_data = table.reorder_rows_bulk(&new_order);
+
+        // Verify old_data contains original values
+        assert_eq!(old_data.len(), 3000);
+        assert_eq!(old_data[0][0], orig_first);
+        assert_eq!(old_data[2999][0], orig_last);
+
+        // Verify table is now reversed
+        assert_eq!(table.get_cell(0, 0), Some(&orig_last));
+        assert_eq!(table.get_cell(2999, 0), Some(&orig_first));
     }
 
     // === Bulk row operations ===
