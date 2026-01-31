@@ -731,30 +731,20 @@ impl App {
         let sort_col = self.view.cursor_col;
         let skip_header = self.header_mode;
 
-        // Get the sort order
-        let new_order = self.table.get_sorted_row_indices(sort_col, direction, skip_header);
-
-        // Check if already sorted
-        let already_sorted: bool = new_order.iter().enumerate().all(|(i, &idx)| i == idx);
-        if already_sorted {
-            self.message = Some("Already sorted".to_string());
-            return;
-        }
-
-        // Capture old state for undo
-        let old_data = self.table.clone_all_rows();
-
-        // Perform the reorder
-        self.table.reorder_rows(&new_order);
-
-        // Create transaction for undo
-        let new_data = self.table.clone_all_rows();
-        let txn = Transaction::SetSpan {
-            row: 0,
-            col: 0,
-            old_data,
-            new_data,
+        // Get the sort permutation (returns None if already sorted)
+        let permutation = match self.table.get_sort_permutation(sort_col, direction, skip_header) {
+            Some(p) => p,
+            None => {
+                self.message = Some("Already sorted".to_string());
+                return;
+            }
         };
+
+        // Apply the permutation
+        self.table.apply_row_permutation(&permutation);
+
+        // Record the permutation transaction (memory-efficient: only stores indices)
+        let txn = Transaction::PermuteRows { permutation };
         self.history.record(txn);
         self.dirty = true;
         self.view.update_col_widths(&self.table);
@@ -773,32 +763,22 @@ impl App {
 
     fn sort_by_row(&mut self, direction: SortDirection) {
         let sort_row = self.view.cursor_row;
-        let skip_first = self.header_mode; // Optionally skip first column like row labels
+        let skip_first = self.header_mode;
 
-        // Get the sort order
-        let new_order = self.table.get_sorted_col_indices(sort_row, direction, false);
-
-        // Check if already sorted
-        let already_sorted: bool = new_order.iter().enumerate().all(|(i, &idx)| i == idx);
-        if already_sorted {
-            self.message = Some("Already sorted".to_string());
-            return;
-        }
-
-        // Capture old state for undo
-        let old_data = self.table.clone_all_rows();
-
-        // Perform the reorder
-        self.table.reorder_cols(&new_order);
-
-        // Create transaction for undo
-        let new_data = self.table.clone_all_rows();
-        let txn = Transaction::SetSpan {
-            row: 0,
-            col: 0,
-            old_data,
-            new_data,
+        // Get the sort permutation (returns None if already sorted)
+        let permutation = match self.table.get_col_sort_permutation(sort_row, direction, false) {
+            Some(p) => p,
+            None => {
+                self.message = Some("Already sorted".to_string());
+                return;
+            }
         };
+
+        // Apply the permutation
+        self.table.apply_col_permutation(&permutation);
+
+        // Record the permutation transaction (memory-efficient: only stores indices)
+        let txn = Transaction::PermuteCols { permutation };
         self.history.record(txn);
         self.dirty = true;
         self.view.update_col_widths(&self.table);

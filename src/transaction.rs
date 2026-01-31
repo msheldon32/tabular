@@ -35,6 +35,11 @@ pub enum Transaction {
         old_data: Vec<Vec<String>>,
         new_data: Vec<Vec<String>>,
     },
+    /// Reorder rows by permutation (memory-efficient for sorting)
+    /// permutation[i] = j means row i in new table comes from row j in old table
+    PermuteRows { permutation: Vec<usize> },
+    /// Reorder columns by permutation (memory-efficient for sorting)
+    PermuteCols { permutation: Vec<usize> },
     /// Multiple transactions grouped together
     Batch(Vec<Transaction>),
 }
@@ -84,12 +89,30 @@ impl Transaction {
                     }
                 }
             }
+            Transaction::PermuteRows { permutation } => {
+                table.apply_row_permutation(permutation);
+            }
+            Transaction::PermuteCols { permutation } => {
+                table.apply_col_permutation(permutation);
+            }
             Transaction::Batch(txns) => {
                 for txn in txns {
                     txn.apply(table);
                 }
             }
         }
+    }
+
+    /// Compute the inverse of a permutation
+    /// If perm[i] = j, then inverse[j] = i
+    fn inverse_permutation(perm: &[usize]) -> Vec<usize> {
+        let mut inv = vec![0; perm.len()];
+        for (i, &p) in perm.iter().enumerate() {
+            if p < inv.len() {
+                inv[p] = i;
+            }
+        }
+        inv
     }
 
     pub fn inverse(&self) -> Transaction {
@@ -137,6 +160,16 @@ impl Transaction {
                     col: *col,
                     old_data: new_data.clone(),
                     new_data: old_data.clone(),
+                }
+            }
+            Transaction::PermuteRows { permutation } => {
+                Transaction::PermuteRows {
+                    permutation: Self::inverse_permutation(permutation),
+                }
+            }
+            Transaction::PermuteCols { permutation } => {
+                Transaction::PermuteCols {
+                    permutation: Self::inverse_permutation(permutation),
                 }
             }
             Transaction::Batch(txns) => {
@@ -780,5 +813,152 @@ mod tests {
             redo.apply(&mut table);
         }
         assert_eq!(cell(&table, 1, 0), "inserted");
+    }
+
+    // === PermuteRows tests ===
+
+    #[test]
+    fn test_permute_rows_apply() {
+        let mut table = make_table_with_data(vec![
+            vec!["a", "1"],
+            vec!["b", "2"],
+            vec!["c", "3"],
+        ]);
+
+        // Reverse the rows: [2, 1, 0] means row 0 <- old row 2, etc.
+        let txn = Transaction::PermuteRows {
+            permutation: vec![2, 1, 0],
+        };
+
+        txn.apply(&mut table);
+
+        assert_eq!(row(&table, 0), vec!["c", "3"]);
+        assert_eq!(row(&table, 1), vec!["b", "2"]);
+        assert_eq!(row(&table, 2), vec!["a", "1"]);
+    }
+
+    #[test]
+    fn test_permute_rows_inverse() {
+        let mut table = make_table_with_data(vec![
+            vec!["c", "3"],
+            vec!["b", "2"],
+            vec!["a", "1"],
+        ]);
+
+        // The permutation that created this state
+        let txn = Transaction::PermuteRows {
+            permutation: vec![2, 1, 0],
+        };
+
+        // Apply the inverse to restore original order
+        let inverse = txn.inverse();
+        inverse.apply(&mut table);
+
+        assert_eq!(row(&table, 0), vec!["a", "1"]);
+        assert_eq!(row(&table, 1), vec!["b", "2"]);
+        assert_eq!(row(&table, 2), vec!["c", "3"]);
+    }
+
+    #[test]
+    fn test_permute_rows_roundtrip() {
+        let mut table = make_table_with_data(vec![
+            vec!["a", "1"],
+            vec!["b", "2"],
+            vec!["c", "3"],
+            vec!["d", "4"],
+        ]);
+        let original = table.clone_all_rows();
+
+        // Shuffle: [3, 0, 2, 1] means new order is [d, a, c, b]
+        let txn = Transaction::PermuteRows {
+            permutation: vec![3, 0, 2, 1],
+        };
+
+        txn.apply(&mut table);
+        assert_ne!(table.clone_all_rows(), original);
+
+        // Undo should restore original
+        txn.inverse().apply(&mut table);
+        assert_eq!(table.clone_all_rows(), original);
+    }
+
+    #[test]
+    fn test_permute_rows_large_scale() {
+        // Create a large table (3000 rows, spans 3 chunks)
+        let rows: Vec<Vec<String>> = (0..3000)
+            .map(|i| vec![format!("{}", i)])
+            .collect();
+        let mut table = Table::new(rows);
+
+        // Create reverse permutation
+        let permutation: Vec<usize> = (0..3000).rev().collect();
+        let txn = Transaction::PermuteRows { permutation };
+
+        txn.apply(&mut table);
+
+        // Verify reversed
+        assert_eq!(table.get_cell(0, 0), Some(&"2999".to_string()));
+        assert_eq!(table.get_cell(2999, 0), Some(&"0".to_string()));
+
+        // Undo
+        txn.inverse().apply(&mut table);
+
+        // Verify restored
+        assert_eq!(table.get_cell(0, 0), Some(&"0".to_string()));
+        assert_eq!(table.get_cell(2999, 0), Some(&"2999".to_string()));
+    }
+
+    #[test]
+    fn test_permute_cols_apply() {
+        let mut table = make_table_with_data(vec![
+            vec!["a", "b", "c"],
+            vec!["1", "2", "3"],
+        ]);
+
+        // Reverse the columns
+        let txn = Transaction::PermuteCols {
+            permutation: vec![2, 1, 0],
+        };
+
+        txn.apply(&mut table);
+
+        assert_eq!(row(&table, 0), vec!["c", "b", "a"]);
+        assert_eq!(row(&table, 1), vec!["3", "2", "1"]);
+    }
+
+    #[test]
+    fn test_permute_cols_roundtrip() {
+        let mut table = make_table_with_data(vec![
+            vec!["a", "b", "c"],
+            vec!["1", "2", "3"],
+        ]);
+        let original = table.clone_all_rows();
+
+        let txn = Transaction::PermuteCols {
+            permutation: vec![2, 0, 1],
+        };
+
+        txn.apply(&mut table);
+        assert_ne!(table.clone_all_rows(), original);
+
+        txn.inverse().apply(&mut table);
+        assert_eq!(table.clone_all_rows(), original);
+    }
+
+    #[test]
+    fn test_inverse_permutation_correctness() {
+        // Test the inverse_permutation helper directly
+        let perm = vec![3, 0, 2, 1]; // Maps: 0<-3, 1<-0, 2<-2, 3<-1
+        let inv = Transaction::inverse_permutation(&perm);
+
+        // Inverse should satisfy: inv[perm[i]] = i
+        for i in 0..perm.len() {
+            assert_eq!(inv[perm[i]], i);
+        }
+
+        // Also: perm[inv[i]] = i
+        for i in 0..inv.len() {
+            assert_eq!(perm[inv[i]], i);
+        }
     }
 }

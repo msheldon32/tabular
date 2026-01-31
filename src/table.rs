@@ -1008,6 +1008,97 @@ impl Table {
         Some(self.reorder_cols(&new_order))
     }
 
+    /// Apply a row permutation in-place (memory-efficient)
+    /// permutation[i] = j means row i in new table comes from row j in old table
+    pub fn apply_row_permutation(&mut self, permutation: &[usize]) {
+        if permutation.len() != self.total_rows {
+            return;
+        }
+
+        // Flatten chunks, apply permutation, rechunk
+        let old_chunks = std::mem::take(&mut self.chunks);
+        let mut flat_rows: Vec<Vec<String>> = old_chunks.into_iter().flatten().collect();
+
+        // Build new order by taking rows according to permutation
+        let mut new_rows = Vec::with_capacity(flat_rows.len());
+        for &src_idx in permutation {
+            if src_idx < flat_rows.len() {
+                new_rows.push(std::mem::take(&mut flat_rows[src_idx]));
+            }
+        }
+
+        // Rechunk
+        self.chunks = new_rows
+            .chunks(CHUNK_SIZE)
+            .map(|chunk| chunk.to_vec())
+            .collect();
+        self.total_rows = self.chunks.iter().map(|c| c.len()).sum();
+        self.mark_widths_dirty();
+    }
+
+    /// Apply a column permutation in-place
+    /// permutation[i] = j means column i in new table comes from column j in old table
+    pub fn apply_col_permutation(&mut self, permutation: &[usize]) {
+        if permutation.len() != self.col_count {
+            return;
+        }
+
+        for chunk in &mut self.chunks {
+            for row in chunk {
+                let old_row = row.clone();
+                for (new_col, &src_col) in permutation.iter().enumerate() {
+                    if new_col < row.len() && src_col < old_row.len() {
+                        row[new_col] = old_row[src_col].clone();
+                    }
+                }
+            }
+        }
+
+        // Reorder column widths to match
+        let old_widths = self.col_widths.clone();
+        for (new_col, &src_col) in permutation.iter().enumerate() {
+            if new_col < self.col_widths.len() && src_col < old_widths.len() {
+                self.col_widths[new_col] = old_widths[src_col];
+            }
+        }
+    }
+
+    /// Get the permutation needed to sort rows by a column
+    /// Returns None if already sorted
+    pub fn get_sort_permutation(
+        &self,
+        sort_col: usize,
+        direction: SortDirection,
+        skip_header: bool,
+    ) -> Option<Vec<usize>> {
+        let new_order = self.get_sorted_row_indices(sort_col, direction, skip_header);
+
+        // Check if already sorted
+        if new_order.iter().enumerate().all(|(i, &idx)| i == idx) {
+            return None;
+        }
+
+        Some(new_order)
+    }
+
+    /// Get the permutation needed to sort columns by a row
+    /// Returns None if already sorted
+    pub fn get_col_sort_permutation(
+        &self,
+        sort_row: usize,
+        direction: SortDirection,
+        skip_first_col: bool,
+    ) -> Option<Vec<usize>> {
+        let new_order = self.get_sorted_col_indices(sort_row, direction, skip_first_col);
+
+        // Check if already sorted
+        if new_order.iter().enumerate().all(|(i, &idx)| i == idx) {
+            return None;
+        }
+
+        Some(new_order)
+    }
+
     /// Reorder columns according to the given indices
     /// Returns the old table state as Vec<Vec<String>> for undo
     pub fn reorder_cols(&mut self, new_order: &[usize]) -> Vec<Vec<String>> {
