@@ -702,14 +702,31 @@ impl App {
                 // Process actions from the plugin
                 let mut txns = Vec::new();
                 for action in result.actions {
-                    let PluginAction::SetCell { row, col, value } = action;
-                    if let Some(old_value) = self.table.get_cell(row, col).cloned() {
-                        txns.push(Transaction::SetCell {
-                            row,
-                            col,
-                            old_value,
-                            new_value: value,
-                        });
+                    match action {
+                        PluginAction::SetCell { row, col, value } => {
+                            if let Some(old_value) = self.table.get_cell(row, col).cloned() {
+                                txns.push(Transaction::SetCell {
+                                    row,
+                                    col,
+                                    old_value,
+                                    new_value: value,
+                                });
+                            }
+                        }
+                        PluginAction::InsertRow { at } => {
+                            txns.push(Transaction::InsertRow { idx: at });
+                        }
+                        PluginAction::DeleteRow { at } => {
+                            let data = self.table.get_row_cloned(at).unwrap_or_default();
+                            txns.push(Transaction::DeleteRow { idx: at, data });
+                        }
+                        PluginAction::InsertCol { at } => {
+                            txns.push(Transaction::InsertCol { idx: at });
+                        }
+                        PluginAction::DeleteCol { at } => {
+                            let data = self.table.get_col_cloned(at).unwrap_or_default();
+                            txns.push(Transaction::DeleteCol { idx: at, data });
+                        }
                     }
                 }
 

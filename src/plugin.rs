@@ -18,6 +18,10 @@ pub struct CommandContext {
 #[derive(Clone)]
 pub enum PluginAction {
     SetCell { row: usize, col: usize, value: String },
+    InsertRow { at: usize },
+    DeleteRow { at: usize },
+    InsertCol { at: usize },
+    DeleteCol { at: usize },
 }
 
 pub struct PluginResult {
@@ -161,6 +165,50 @@ impl PluginManager {
             Ok(())
         })?;
 
+        // Create insert_row function
+        let actions_ref2 = actions_table.clone();
+        let insert_row_fn = self.lua.create_function(move |lua, at: usize| {
+            let action = lua.create_table()?;
+            action.set("type", "insert_row")?;
+            action.set("at", at)?;
+            let len = actions_ref2.len()? + 1;
+            actions_ref2.set(len, action)?;
+            Ok(())
+        })?;
+
+        // Create delete_row function
+        let actions_ref3 = actions_table.clone();
+        let delete_row_fn = self.lua.create_function(move |lua, at: usize| {
+            let action = lua.create_table()?;
+            action.set("type", "delete_row")?;
+            action.set("at", at)?;
+            let len = actions_ref3.len()? + 1;
+            actions_ref3.set(len, action)?;
+            Ok(())
+        })?;
+
+        // Create insert_col function
+        let actions_ref4 = actions_table.clone();
+        let insert_col_fn = self.lua.create_function(move |lua, at: usize| {
+            let action = lua.create_table()?;
+            action.set("type", "insert_col")?;
+            action.set("at", at)?;
+            let len = actions_ref4.len()? + 1;
+            actions_ref4.set(len, action)?;
+            Ok(())
+        })?;
+
+        // Create delete_col function
+        let actions_ref5 = actions_table.clone();
+        let delete_col_fn = self.lua.create_function(move |lua, at: usize| {
+            let action = lua.create_table()?;
+            action.set("type", "delete_col")?;
+            action.set("at", at)?;
+            let len = actions_ref5.len()? + 1;
+            actions_ref5.set(len, action)?;
+            Ok(())
+        })?;
+
         // Create message holder
         let message_table = self.lua.create_table()?;
         let msg_ref = message_table.clone();
@@ -175,6 +223,10 @@ impl PluginManager {
         api.set("args", args_table)?;
         api.set("get_cell", get_cell_fn)?;
         api.set("set_cell", set_cell_fn)?;
+        api.set("insert_row", insert_row_fn)?;
+        api.set("delete_row", delete_row_fn)?;
+        api.set("insert_col", insert_col_fn)?;
+        api.set("delete_col", delete_col_fn)?;
         api.set("set_message", set_message_fn)?;
 
         self.lua.globals().set("tabular", api)?;
@@ -194,15 +246,34 @@ impl PluginManager {
         for i in 1..=actions_table.len()? {
             if let Ok(action) = actions_table.get::<mlua::Table>(i) {
                 let action_type: String = action.get("type")?;
-                if action_type == "set_cell" {
-                    let row: usize = action.get("row")?;
-                    let col: usize = action.get("col")?;
-                    let value: String = action.get("value")?;
-                    actions.push(PluginAction::SetCell {
-                        row: row.saturating_sub(1),
-                        col: col.saturating_sub(1),
-                        value,
-                    });
+                match action_type.as_str() {
+                    "set_cell" => {
+                        let row: usize = action.get("row")?;
+                        let col: usize = action.get("col")?;
+                        let value: String = action.get("value")?;
+                        actions.push(PluginAction::SetCell {
+                            row: row.saturating_sub(1),
+                            col: col.saturating_sub(1),
+                            value,
+                        });
+                    }
+                    "insert_row" => {
+                        let at: usize = action.get("at")?;
+                        actions.push(PluginAction::InsertRow { at: at.saturating_sub(1) });
+                    }
+                    "delete_row" => {
+                        let at: usize = action.get("at")?;
+                        actions.push(PluginAction::DeleteRow { at: at.saturating_sub(1) });
+                    }
+                    "insert_col" => {
+                        let at: usize = action.get("at")?;
+                        actions.push(PluginAction::InsertCol { at: at.saturating_sub(1) });
+                    }
+                    "delete_col" => {
+                        let at: usize = action.get("at")?;
+                        actions.push(PluginAction::DeleteCol { at: at.saturating_sub(1) });
+                    }
+                    _ => {}
                 }
             }
         }
