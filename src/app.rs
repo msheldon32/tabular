@@ -27,7 +27,7 @@ pub struct App {
     pub mode: Mode,
     pub file_io: FileIO,
     pub dirty: bool,
-    pub has_selection: bool,
+    pub calling_mode: Option<Mode>,
     pub message: Option<String>,
     pub should_quit: bool,
     pub header_mode: bool,
@@ -53,7 +53,7 @@ impl App {
             mode: Mode::Normal,
             file_io,
             dirty: false,
-            has_selection: false,
+            calling_mode: None,
             message: None,
             should_quit: false,
             header_mode: true,
@@ -319,20 +319,18 @@ impl App {
             }
             KeyCode::Char('V') => {
                 self.mode = Mode::VisualRow;
-                self.has_selection = true;
                 self.view.set_support();
             }
             KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.mode = Mode::VisualCol;
-                self.has_selection = true;
                 self.view.set_support();
             }
             KeyCode::Char('v') => {
                 self.mode = Mode::Visual;
-                self.has_selection = true;
                 self.view.set_support();
             }
             KeyCode::Char(':') => {
+                self.calling_mode = Some(self.mode);
                 self.mode = Mode::Command;
                 self.command_handler.start();
             }
@@ -478,7 +476,7 @@ impl App {
     fn handle_command_mode(&mut self, key: KeyEvent) {
         if is_escape(key) {
             self.mode = Mode::Normal;
-            self.has_selection = false;
+            self.calling_mode = None;
             self.command_handler.buffer.clear();
             return;
         }
@@ -498,11 +496,12 @@ impl App {
             KeyResult::Continue => {}
             KeyResult::Finish => {
                 self.finish_edit();
-                self.has_selection = false;
             }
             KeyResult::SwitchMode(mode) => {
+                let prev_mode = Some(self.mode);
                 self.mode = mode;
                 if mode == Mode::Command {
+                    self.calling_mode = prev_mode;
                     self.command_handler.start();
                 }
             }
@@ -511,7 +510,6 @@ impl App {
             }
             KeyResult::ExecuteAndFinish(txn) => {
                 self.execute_and_finish(txn);
-                self.has_selection = false;
             }
             KeyResult::Message(msg) => {
                 self.message = Some(msg);
@@ -655,8 +653,7 @@ impl App {
             }
             Command::Unknown(s) => self.message = Some(format!("Unknown command: {}", s)),
         }
-        
-        self.has_selection = false;
+        self.calling_mode = None;
     }
 
     fn execute_replace(&mut self, cmd: ReplaceCommand) {
@@ -668,12 +665,20 @@ impl App {
                 (0..self.table.row_count(), 0..self.table.col_count())
             }
             ReplaceScope::Selection => {
-                if self.has_selection {
+                if self.calling_mode.map_or(false, |x| x.is_visual()) {
                     // Use the visual selection bounds (stored in view)
-                    let start_row = std::cmp::min(self.view.cursor_row, self.view.support_row);
-                    let end_row = std::cmp::max(self.view.cursor_row, self.view.support_row);
-                    let start_col = std::cmp::min(self.view.cursor_col, self.view.support_col);
-                    let end_col = std::cmp::max(self.view.cursor_col, self.view.support_col);
+                    let (start_row, end_row) = if self.calling_mode != Some(Mode::VisualCol) {
+                        (std::cmp::min(self.view.cursor_row, self.view.support_row),
+                            std::cmp::max(self.view.cursor_row, self.view.support_row))
+                    } else {
+                        (0, self.table.row_count()-1)
+                    };
+                    let (start_col, end_col) = if self.calling_mode != Some(Mode::VisualRow) {
+                        (std::cmp::min(self.view.cursor_col, self.view.support_col),
+                            std::cmp::max(self.view.cursor_col, self.view.support_col))
+                    } else {
+                        (0, self.table.col_count()-1)
+                    };
                     (start_row..end_row + 1, start_col..end_col + 1)
                 } else {
                     (self.view.cursor_row..self.view.cursor_row+1, self.view.cursor_col..self.view.cursor_col+1)

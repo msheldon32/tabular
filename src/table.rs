@@ -1,4 +1,7 @@
 use std::cmp;
+use std::collections::HashSet;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::mode::Mode;
 use crate::util::translate_references;
@@ -174,6 +177,7 @@ impl Table {
                 if let Some(cell) = r.get_mut(col) {
                     let new_len = value.len();
                     *cell = value;
+
                     // Update column width incrementally (only grows, never shrinks)
                     self.update_col_width(col, new_len);
                 }
