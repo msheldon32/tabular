@@ -130,7 +130,7 @@ impl FileIO {
             b','
         };
 
-        let max_dim = (10000000, 10000000);
+        let max_dim = (50000000, 50000000);
         Ok(Self { file_path, format, delimiter, max_dim })
     }
 

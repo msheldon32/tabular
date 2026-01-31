@@ -114,6 +114,8 @@ All visual modes support navigation keys (`h`, `j`, `k`, `l`, etc.) to extend th
 
 #### Formatting
 
+> **Note:** Formatting commands **modify the underlying cell values**, not just how they are displayed. These operations may be lossy (e.g., rounding) and permanently change the contents of the cells. You can undo them with `u`.
+
 Format commands start with `f` and modify the selected cells:
 
 | Key | Action | Example |
