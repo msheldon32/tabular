@@ -205,6 +205,15 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         app.view.cursor_row + 1
     );
 
+    let key_buffer = app.key_buffer_display();
+    let key_buffer_display = if key_buffer.is_empty() {
+        String::new()
+    } else {
+        format!("{} ", key_buffer)
+    };
+
+    let right_side_len = position.len() + key_buffer_display.len();
+
     let status = Line::from(vec![
         Span::styled(
             format!(" {} ", app.mode.display_name()),
@@ -217,8 +226,9 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Span::raw(" ".repeat(
             area.width
                 .saturating_sub(30)
-                .saturating_sub(position.len() as u16) as usize,
+                .saturating_sub(right_side_len as u16) as usize,
         )),
+        Span::styled(key_buffer_display, app.style.status_mode(&app.mode)),
         Span::raw(position),
     ]);
 

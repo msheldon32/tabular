@@ -94,6 +94,10 @@ impl App {
         &self.search_handler.buffer
     }
 
+    pub fn key_buffer_display(&self) -> String {
+        self.key_buffer.display()
+    }
+
     pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
 
         while !self.should_quit {

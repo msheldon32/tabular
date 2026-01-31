@@ -155,6 +155,18 @@ impl KeyBuffer {
         self.count = None;
     }
 
+    /// Get the current buffer contents for display
+    pub fn display(&self) -> String {
+        let mut result = String::new();
+        if let Some(count) = self.count {
+            result.push_str(&count.to_string());
+        }
+        for c in &self.keys {
+            result.push(*c);
+        }
+        result
+    }
+
     fn take_count(&mut self) -> usize {
         self.count.take().unwrap_or(1)
     }
