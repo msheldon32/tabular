@@ -48,7 +48,7 @@ impl FileIO {
     pub fn new(file_path: Option<PathBuf>) -> io::Result<Self> {
         let format = file_path.as_ref().and_then(FileFormat::from_extension);
 
-        let max_dim = (1000000,1000000);
+        let max_dim = (10000000,10000000);
         Ok(Self { file_path, format, max_dim })
     }
 
@@ -179,7 +179,7 @@ impl FileIO {
             .delimiter(delim)
             .from_writer(writer);
 
-        for row in &table.cells {
+        for row in table.rows_iter() {
             csv_writer
                 .write_record(row)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;

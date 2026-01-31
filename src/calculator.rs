@@ -130,7 +130,7 @@ impl<'a> Calculator<'a> {
     pub fn evaluate_all(&self) -> Result<Vec<(usize, usize, String)>, CalcError> {
         // Find all formula cells
         let mut formulas: HashMap<CellRef, String> = HashMap::new();
-        for (row_idx, row) in self.table.cells.iter().enumerate() {
+        for (row_idx, row) in self.table.rows_iter().enumerate() {
             for (col_idx, cell) in row.iter().enumerate() {
                 if cell.starts_with('=') {
                     formulas.insert(

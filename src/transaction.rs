@@ -188,6 +188,16 @@ mod tests {
         )
     }
 
+    /// Helper to get a row as Vec<String> for assertion comparisons
+    fn row(table: &Table, idx: usize) -> Vec<String> {
+        table.get_row(idx).unwrap().to_vec()
+    }
+
+    /// Helper to get a cell value for assertion comparisons
+    fn cell(table: &Table, r: usize, c: usize) -> String {
+        table.get_cell(r, c).unwrap().clone()
+    }
+
     // === SetCell tests ===
 
     #[test]
@@ -201,13 +211,13 @@ mod tests {
         };
 
         txn.apply(&mut table);
-        assert_eq!(table.cells[1][1], "hello");
+        assert_eq!(cell(&table, 1, 1), "hello");
     }
 
     #[test]
     fn test_set_cell_inverse() {
         let mut table = make_table(3, 3);
-        table.cells[1][1] = "hello".to_string();
+        table.set_cell(1, 1, "hello".to_string());
 
         let txn = Transaction::SetCell {
             row: 1,
@@ -218,13 +228,13 @@ mod tests {
 
         let inverse = txn.inverse();
         inverse.apply(&mut table);
-        assert_eq!(table.cells[1][1], "");
+        assert_eq!(cell(&table, 1, 1), "");
     }
 
     #[test]
     fn test_set_cell_roundtrip() {
         let mut table = make_table(3, 3);
-        let original = table.cells.clone();
+        let original = table.clone_all_rows();
 
         let txn = Transaction::SetCell {
             row: 1,
@@ -234,10 +244,10 @@ mod tests {
         };
 
         txn.apply(&mut table);
-        assert_ne!(table.cells, original);
+        assert_ne!(table.clone_all_rows(), original);
 
         txn.inverse().apply(&mut table);
-        assert_eq!(table.cells, original);
+        assert_eq!(table.clone_all_rows(), original);
     }
 
     // === InsertRow tests ===
@@ -248,8 +258,8 @@ mod tests {
         let txn = Transaction::InsertRow { idx: 1 };
 
         txn.apply(&mut table);
-        assert_eq!(table.cells.len(), 3);
-        assert_eq!(table.cells[1], vec!["", "", ""]);
+        assert_eq!(table.row_count(), 3);
+        assert_eq!(row(&table, 1), vec!["", "", ""]);
     }
 
     #[test]
@@ -261,9 +271,9 @@ mod tests {
         let txn = Transaction::InsertRow { idx: 0 };
 
         txn.apply(&mut table);
-        assert_eq!(table.cells.len(), 3);
-        assert_eq!(table.cells[0], vec!["", ""]);
-        assert_eq!(table.cells[1], vec!["a", "b"]);
+        assert_eq!(table.row_count(), 3);
+        assert_eq!(row(&table, 0), vec!["", ""]);
+        assert_eq!(row(&table, 1), vec!["a", "b"]);
     }
 
     #[test]
@@ -275,8 +285,8 @@ mod tests {
         let txn = Transaction::InsertRow { idx: 2 };
 
         txn.apply(&mut table);
-        assert_eq!(table.cells.len(), 3);
-        assert_eq!(table.cells[2], vec!["", ""]);
+        assert_eq!(table.row_count(), 3);
+        assert_eq!(row(&table, 2), vec!["", ""]);
     }
 
     // === DeleteRow tests ===
@@ -294,9 +304,9 @@ mod tests {
         };
 
         txn.apply(&mut table);
-        assert_eq!(table.cells.len(), 2);
-        assert_eq!(table.cells[0], vec!["a", "b"]);
-        assert_eq!(table.cells[1], vec!["e", "f"]);
+        assert_eq!(table.row_count(), 2);
+        assert_eq!(row(&table, 0), vec!["a", "b"]);
+        assert_eq!(row(&table, 1), vec!["e", "f"]);
     }
 
     #[test]
@@ -314,8 +324,8 @@ mod tests {
         let inverse = txn.inverse();
         inverse.apply(&mut table);
 
-        assert_eq!(table.cells.len(), 3);
-        assert_eq!(table.cells[1], vec!["c", "d"]);
+        assert_eq!(table.row_count(), 3);
+        assert_eq!(row(&table, 1), vec!["c", "d"]);
     }
 
     // === InsertCol tests ===
@@ -329,8 +339,8 @@ mod tests {
         let txn = Transaction::InsertCol { idx: 1 };
 
         txn.apply(&mut table);
-        assert_eq!(table.cells[0], vec!["a", "", "b"]);
-        assert_eq!(table.cells[1], vec!["c", "", "d"]);
+        assert_eq!(row(&table, 0), vec!["a", "", "b"]);
+        assert_eq!(row(&table, 1), vec!["c", "", "d"]);
     }
 
     // === DeleteCol tests ===
@@ -347,8 +357,8 @@ mod tests {
         };
 
         txn.apply(&mut table);
-        assert_eq!(table.cells[0], vec!["a", "c"]);
-        assert_eq!(table.cells[1], vec!["d", "f"]);
+        assert_eq!(row(&table, 0), vec!["a", "c"]);
+        assert_eq!(row(&table, 1), vec!["d", "f"]);
     }
 
     #[test]
@@ -365,8 +375,8 @@ mod tests {
         let inverse = txn.inverse();
         inverse.apply(&mut table);
 
-        assert_eq!(table.cells[0], vec!["a", "b", "c"]);
-        assert_eq!(table.cells[1], vec!["d", "e", "f"]);
+        assert_eq!(row(&table, 0), vec!["a", "b", "c"]);
+        assert_eq!(row(&table, 1), vec!["d", "e", "f"]);
     }
 
     // === SetSpan tests ===
@@ -385,11 +395,11 @@ mod tests {
         };
 
         txn.apply(&mut table);
-        assert_eq!(table.cells[0][0], "a");
-        assert_eq!(table.cells[0][1], "b");
-        assert_eq!(table.cells[1][0], "c");
-        assert_eq!(table.cells[1][1], "d");
-        assert_eq!(table.cells[2][2], ""); // Unchanged
+        assert_eq!(cell(&table, 0, 0), "a");
+        assert_eq!(cell(&table, 0, 1), "b");
+        assert_eq!(cell(&table, 1, 0), "c");
+        assert_eq!(cell(&table, 1, 1), "d");
+        assert_eq!(cell(&table, 2, 2), ""); // Unchanged
     }
 
     #[test]
@@ -416,11 +426,11 @@ mod tests {
         let inverse = txn.inverse();
         inverse.apply(&mut table);
 
-        assert_eq!(table.cells[0][0], "");
-        assert_eq!(table.cells[0][1], "");
-        assert_eq!(table.cells[1][0], "");
-        assert_eq!(table.cells[1][1], "");
-        assert_eq!(table.cells[2][2], "x"); // Unchanged
+        assert_eq!(cell(&table, 0, 0), "");
+        assert_eq!(cell(&table, 0, 1), "");
+        assert_eq!(cell(&table, 1, 0), "");
+        assert_eq!(cell(&table, 1, 1), "");
+        assert_eq!(cell(&table, 2, 2), "x"); // Unchanged
     }
 
     // === Batch tests ===
@@ -444,8 +454,8 @@ mod tests {
         ]);
 
         txn.apply(&mut table);
-        assert_eq!(table.cells[0][0], "a");
-        assert_eq!(table.cells[1][1], "b");
+        assert_eq!(cell(&table, 0, 0), "a");
+        assert_eq!(cell(&table, 1, 1), "b");
     }
 
     #[test]
@@ -473,8 +483,8 @@ mod tests {
         let inverse = txn.inverse();
         inverse.apply(&mut table);
 
-        assert_eq!(table.cells[0][0], "");
-        assert_eq!(table.cells[1][1], "");
+        assert_eq!(cell(&table, 0, 0), "");
+        assert_eq!(cell(&table, 1, 1), "");
     }
 
     // === History tests ===
@@ -494,13 +504,13 @@ mod tests {
         txn.apply(&mut table);
         history.record(txn);
 
-        assert_eq!(table.cells[0][0], "hello");
+        assert_eq!(cell(&table, 0, 0), "hello");
 
         if let Some(undo) = history.undo() {
             undo.apply(&mut table);
         }
 
-        assert_eq!(table.cells[0][0], "");
+        assert_eq!(cell(&table, 0, 0), "");
     }
 
     #[test]
@@ -522,13 +532,13 @@ mod tests {
         if let Some(undo) = history.undo() {
             undo.apply(&mut table);
         }
-        assert_eq!(table.cells[0][0], "");
+        assert_eq!(cell(&table, 0, 0), "");
 
         // Redo
         if let Some(redo) = history.redo() {
             redo.apply(&mut table);
         }
-        assert_eq!(table.cells[0][0], "hello");
+        assert_eq!(cell(&table, 0, 0), "hello");
     }
 
     #[test]
@@ -582,21 +592,21 @@ mod tests {
             history.record(txn);
         }
 
-        assert_eq!(table.cells[0][0], "4");
+        assert_eq!(cell(&table, 0, 0), "4");
 
         // Undo all
         for expected in (0..4).rev() {
             if let Some(undo) = history.undo() {
                 undo.apply(&mut table);
             }
-            assert_eq!(table.cells[0][0], expected.to_string());
+            assert_eq!(cell(&table, 0, 0), expected.to_string());
         }
 
         // One more undo to get back to empty
         if let Some(undo) = history.undo() {
             undo.apply(&mut table);
         }
-        assert_eq!(table.cells[0][0], "");
+        assert_eq!(cell(&table, 0, 0), "");
 
         // No more undos
         assert!(!history.can_undo());
@@ -669,10 +679,10 @@ mod tests {
 
         txn.apply(&mut table);
 
-        assert_eq!(table.cells.len(), 3);
-        assert_eq!(table.cells[0], vec!["a", "b"]);
-        assert_eq!(table.cells[1], vec!["x", "y"]);
-        assert_eq!(table.cells[2], vec!["c", "d"]);
+        assert_eq!(table.row_count(), 3);
+        assert_eq!(row(&table, 0), vec!["a", "b"]);
+        assert_eq!(row(&table, 1), vec!["x", "y"]);
+        assert_eq!(row(&table, 2), vec!["c", "d"]);
     }
 
     #[test]
@@ -689,8 +699,8 @@ mod tests {
 
         txn.apply(&mut table);
 
-        assert_eq!(table.cells[0], vec!["a", "x", "b"]);
-        assert_eq!(table.cells[1], vec!["c", "y", "d"]);
+        assert_eq!(row(&table, 0), vec!["a", "x", "b"]);
+        assert_eq!(row(&table, 1), vec!["c", "y", "d"]);
     }
 
     // === Complex scenario tests ===
@@ -704,10 +714,10 @@ mod tests {
         let txn1 = Transaction::InsertRow { idx: 1 };
         txn1.apply(&mut table);
         // Manually capture what was inserted for proper undo
-        let row_data = table.cells[1].clone();
+        let row_data = row(&table, 1);
         history.record(Transaction::InsertRowWithData { idx: 1, data: row_data });
 
-        assert_eq!(table.cells.len(), 4);
+        assert_eq!(table.row_count(), 4);
 
         // Set some cells
         let txn2 = Transaction::SetCell {
@@ -719,30 +729,30 @@ mod tests {
         txn2.apply(&mut table);
         history.record(txn2);
 
-        assert_eq!(table.cells[1][0], "inserted");
+        assert_eq!(cell(&table, 1, 0), "inserted");
 
         // Undo the cell change
         if let Some(undo) = history.undo() {
             undo.apply(&mut table);
         }
-        assert_eq!(table.cells[1][0], "");
+        assert_eq!(cell(&table, 1, 0), "");
 
         // Undo the row insert
         if let Some(undo) = history.undo() {
             undo.apply(&mut table);
         }
-        assert_eq!(table.cells.len(), 3);
+        assert_eq!(table.row_count(), 3);
 
         // Redo row insert
         if let Some(redo) = history.redo() {
             redo.apply(&mut table);
         }
-        assert_eq!(table.cells.len(), 4);
+        assert_eq!(table.row_count(), 4);
 
         // Redo cell change
         if let Some(redo) = history.redo() {
             redo.apply(&mut table);
         }
-        assert_eq!(table.cells[1][0], "inserted");
+        assert_eq!(cell(&table, 1, 0), "inserted");
     }
 }

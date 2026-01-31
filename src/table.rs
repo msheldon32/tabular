@@ -3,10 +3,18 @@ use std::cmp;
 use crate::mode::Mode;
 use crate::util::translate_references;
 
-/// Pure data structure for the table
+/// Number of rows per chunk for memory-efficient storage
+const CHUNK_SIZE: usize = 1024;
+
+/// Pure data structure for the table with chunked row storage
 #[derive(Debug, Clone)]
 pub struct Table {
-    pub cells: Vec<Vec<String>>,
+    /// Rows stored in fixed-size chunks for memory efficiency
+    chunks: Vec<Vec<Vec<String>>>,
+    /// Total number of rows
+    total_rows: usize,
+    /// Number of columns
+    col_count: usize,
     /// Cached column widths (max length of any cell in each column)
     col_widths: Vec<usize>,
     /// Whether col_widths needs full recompute
@@ -14,9 +22,97 @@ pub struct Table {
 }
 
 impl Table {
+    /// Compute which chunk a row belongs to
+    #[inline]
+    fn chunk_idx(row: usize) -> usize {
+        row / CHUNK_SIZE
+    }
+
+    /// Compute the index within a chunk
+    #[inline]
+    fn row_in_chunk(row: usize) -> usize {
+        row % CHUNK_SIZE
+    }
+
+    /// Get a reference to the chunk containing a row
+    #[inline]
+    fn get_chunk(&self, row: usize) -> Option<&Vec<Vec<String>>> {
+        self.chunks.get(Self::chunk_idx(row))
+    }
+
+    /// Get a mutable reference to the chunk containing a row
+    #[inline]
+    fn get_chunk_mut(&mut self, row: usize) -> Option<&mut Vec<Vec<String>>> {
+        self.chunks.get_mut(Self::chunk_idx(row))
+    }
+
+    /// Get a mutable reference to a row
+    pub fn get_row_mut(&mut self, idx: usize) -> Option<&mut Vec<String>> {
+        if idx >= self.total_rows {
+            return None;
+        }
+        let chunk = self.get_chunk_mut(idx)?;
+        chunk.get_mut(Self::row_in_chunk(idx))
+    }
+
+    /// Swap two rows in the table
+    pub fn swap_rows(&mut self, i: usize, j: usize) {
+        if i == j || i >= self.total_rows || j >= self.total_rows {
+            return;
+        }
+
+        let chunk_i = Self::chunk_idx(i);
+        let chunk_j = Self::chunk_idx(j);
+        let row_in_i = Self::row_in_chunk(i);
+        let row_in_j = Self::row_in_chunk(j);
+
+        if chunk_i == chunk_j {
+            // Same chunk - simple swap
+            self.chunks[chunk_i].swap(row_in_i, row_in_j);
+        } else {
+            // Different chunks - need to swap between chunks
+            // Use a temporary to avoid borrow conflicts
+            let row_i = std::mem::take(&mut self.chunks[chunk_i][row_in_i]);
+            let row_j = std::mem::take(&mut self.chunks[chunk_j][row_in_j]);
+            self.chunks[chunk_i][row_in_i] = row_j;
+            self.chunks[chunk_j][row_in_j] = row_i;
+        }
+    }
+
+    /// Clone all rows into a flat Vec (for undo/redo operations)
+    pub fn clone_all_rows(&self) -> Vec<Vec<String>> {
+        self.chunks.iter().flat_map(|chunk| chunk.iter().cloned()).collect()
+    }
+
+    /// Restore table from a flat Vec of rows
+    pub fn restore_from_rows(&mut self, rows: Vec<Vec<String>>) {
+        self.total_rows = rows.len();
+        self.col_count = rows.first().map(|r| r.len()).unwrap_or(0);
+        self.chunks = rows
+            .chunks(CHUNK_SIZE)
+            .map(|chunk| chunk.to_vec())
+            .collect();
+        self.mark_widths_dirty();
+    }
+
+    /// Iterator over all rows
+    pub fn rows_iter(&self) -> impl Iterator<Item = &Vec<String>> {
+        self.chunks.iter().flat_map(|chunk| chunk.iter())
+    }
+
     pub fn new(cells: Vec<Vec<String>>) -> Self {
+        let total_rows = cells.len();
+        let col_count = cells.first().map(|r| r.len()).unwrap_or(0);
+
+        let chunks: Vec<Vec<Vec<String>>> = cells
+            .chunks(CHUNK_SIZE)
+            .map(|chunk| chunk.to_vec())
+            .collect();
+
         let mut table = Self {
-            cells,
+            chunks,
+            total_rows,
+            col_count,
             col_widths: Vec::new(),
             col_widths_dirty: true,
         };
@@ -39,10 +135,9 @@ impl Table {
 
     /// Force recompute of column widths
     pub fn recompute_col_widths(&mut self) {
-        self.col_widths = (0..self.col_count())
+        self.col_widths = (0..self.col_count)
             .map(|col| {
-                self.cells
-                    .iter()
+                self.rows_iter()
                     .filter_map(|row| row.get(col))
                     .map(|s| s.len())
                     .max()
@@ -68,57 +163,124 @@ impl Table {
     }
 
     pub fn get_cell(&self, row: usize, col: usize) -> Option<&String> {
-        self.cells.get(row).and_then(|r| r.get(col))
+        self.get_chunk(row)?
+            .get(Self::row_in_chunk(row))?
+            .get(col)
     }
 
     pub fn set_cell(&mut self, row: usize, col: usize, value: String) {
-        if let Some(r) = self.cells.get_mut(row) {
-            if let Some(cell) = r.get_mut(col) {
-                let new_len = value.len();
-                *cell = value;
-                // Update column width incrementally (only grows, never shrinks)
-                self.update_col_width(col, new_len);
+        if let Some(chunk) = self.get_chunk_mut(row) {
+            if let Some(r) = chunk.get_mut(Self::row_in_chunk(row)) {
+                if let Some(cell) = r.get_mut(col) {
+                    let new_len = value.len();
+                    *cell = value;
+                    // Update column width incrementally (only grows, never shrinks)
+                    self.update_col_width(col, new_len);
+                }
             }
         }
     }
 
     pub fn row_count(&self) -> usize {
-        self.cells.len()
+        self.total_rows
     }
 
     pub fn col_count(&self) -> usize {
-        self.cells.first().map(|r| r.len()).unwrap_or(0)
+        self.col_count
     }
 
     pub fn insert_row_at(&mut self, idx: usize) {
-        let new_row = vec![String::new(); self.col_count()];
-        self.cells.insert(idx, new_row);
-        // Empty row doesn't change max widths
+        let new_row = vec![String::new(); self.col_count];
+        self.insert_row_internal(idx, new_row);
+    }
+
+    /// Internal helper to insert a row and handle chunk rebalancing
+    fn insert_row_internal(&mut self, idx: usize, row: Vec<String>) {
+        if self.chunks.is_empty() {
+            self.chunks.push(vec![row]);
+            self.total_rows = 1;
+            return;
+        }
+
+        let chunk_idx = Self::chunk_idx(idx.min(self.total_rows));
+        let row_in_chunk = if idx >= self.total_rows {
+            // Appending at end
+            let last_chunk = self.chunks.len() - 1;
+            self.chunks[last_chunk].len()
+        } else {
+            Self::row_in_chunk(idx)
+        };
+
+        // Insert into the appropriate chunk
+        let actual_chunk = chunk_idx.min(self.chunks.len() - 1);
+        let insert_pos = row_in_chunk.min(self.chunks[actual_chunk].len());
+        self.chunks[actual_chunk].insert(insert_pos, row);
+        self.total_rows += 1;
+
+        // Rebalance chunks if needed (cascade overflow to next chunks)
+        self.rebalance_chunks_after_insert(actual_chunk);
+    }
+
+    /// Rebalance chunks after an insert to maintain CHUNK_SIZE invariant
+    fn rebalance_chunks_after_insert(&mut self, start_chunk: usize) {
+        let mut chunk_idx = start_chunk;
+        while chunk_idx < self.chunks.len() && self.chunks[chunk_idx].len() > CHUNK_SIZE {
+            let overflow = self.chunks[chunk_idx].split_off(CHUNK_SIZE);
+            if chunk_idx + 1 < self.chunks.len() {
+                // Prepend overflow to next chunk
+                let next_chunk = &mut self.chunks[chunk_idx + 1];
+                for (i, row) in overflow.into_iter().enumerate() {
+                    next_chunk.insert(i, row);
+                }
+            } else {
+                // Create new chunk with overflow
+                self.chunks.push(overflow);
+            }
+            chunk_idx += 1;
+        }
     }
 
     pub fn delete_row_at(&mut self, idx: usize) -> Option<Vec<String>> {
-        if self.row_count() <= 1 {
-            let row = self.cells[0].clone();
-            self.cells[0] = vec![String::new(); self.col_count()];
-            self.mark_widths_dirty(); // Widths may shrink
+        if self.total_rows <= 1 {
+            // Clear the only row instead of deleting
+            let row = self.get_row_cloned(0)?;
+            if let Some(chunk) = self.chunks.first_mut() {
+                if let Some(r) = chunk.first_mut() {
+                    *r = vec![String::new(); self.col_count];
+                }
+            }
+            self.mark_widths_dirty();
             return Some(row);
         }
 
-        if idx < self.row_count() {
-            let removed = self.cells.remove(idx);
-            self.mark_widths_dirty(); // Widths may shrink
-            Some(removed)
-        } else {
-            None
+        if idx >= self.total_rows {
+            return None;
         }
+
+        let chunk_idx = Self::chunk_idx(idx);
+        let row_in_chunk = Self::row_in_chunk(idx);
+
+        let removed = self.chunks[chunk_idx].remove(row_in_chunk);
+        self.total_rows -= 1;
+
+        // Remove empty chunks (except keep at least one)
+        if self.chunks[chunk_idx].is_empty() && self.chunks.len() > 1 {
+            self.chunks.remove(chunk_idx);
+        }
+
+        self.mark_widths_dirty();
+        Some(removed)
     }
 
     pub fn insert_col_at(&mut self, idx: usize) {
-        for row in &mut self.cells {
-            if idx <= row.len() {
-                row.insert(idx, String::new());
+        for chunk in &mut self.chunks {
+            for row in chunk {
+                if idx <= row.len() {
+                    row.insert(idx, String::new());
+                }
             }
         }
+        self.col_count += 1;
         // Insert new column width (minimum width)
         if idx <= self.col_widths.len() {
             self.col_widths.insert(idx, 3);
@@ -126,55 +288,69 @@ impl Table {
     }
 
     pub fn delete_col_at(&mut self, idx: usize) -> Option<Vec<String>> {
-        if self.col_count() <= 1 {
-            let col: Vec<String> = self.cells.iter().map(|r| r[0].clone()).collect();
-            for row in &mut self.cells {
-                row[0] = String::new();
+        if self.col_count <= 1 {
+            let col: Vec<String> = self.rows_iter().map(|r| r[0].clone()).collect();
+            for chunk in &mut self.chunks {
+                for row in chunk {
+                    row[0] = String::new();
+                }
             }
             self.mark_widths_dirty();
             return Some(col);
         }
 
-        if idx < self.col_count() {
-            let col: Vec<String> = self.cells.iter().map(|r| r[idx].clone()).collect();
-            for row in &mut self.cells {
+        if idx >= self.col_count {
+            return None;
+        }
+
+        let col: Vec<String> = self.rows_iter().map(|r| r[idx].clone()).collect();
+        for chunk in &mut self.chunks {
+            for row in chunk {
                 if idx < row.len() {
                     row.remove(idx);
                 }
             }
-            // Remove the column width entry
-            if idx < self.col_widths.len() {
-                self.col_widths.remove(idx);
-            }
-            Some(col)
-        } else {
-            None
         }
+        self.col_count -= 1;
+        // Remove the column width entry
+        if idx < self.col_widths.len() {
+            self.col_widths.remove(idx);
+        }
+        Some(col)
     }
 
     /// Get a reference to a row (no cloning)
     #[inline]
     pub fn get_row(&self, idx: usize) -> Option<&[String]> {
-        self.cells.get(idx).map(|v| v.as_slice())
+        if idx >= self.total_rows {
+            return None;
+        }
+        self.get_chunk(idx)?
+            .get(Self::row_in_chunk(idx))
+            .map(|v| v.as_slice())
     }
 
     /// Get a cloned copy of a row (for transactions/clipboard)
     pub fn get_row_cloned(&self, idx: usize) -> Option<Vec<String>> {
-        self.cells.get(idx).cloned()
+        if idx >= self.total_rows {
+            return None;
+        }
+        self.get_chunk(idx)?
+            .get(Self::row_in_chunk(idx))
+            .cloned()
     }
 
     /// Get a cloned copy of a column (for transactions/clipboard)
     pub fn get_col_cloned(&self, idx: usize) -> Option<Vec<String>> {
-        if idx < self.col_count() {
-            Some(self.cells.iter().map(|r| r[idx].clone()).collect())
-        } else {
-            None
+        if idx >= self.col_count {
+            return None;
         }
+        Some(self.rows_iter().map(|r| r[idx].clone()).collect())
     }
 
     /// Iterate over column values without cloning
     pub fn col_iter(&self, idx: usize) -> impl Iterator<Item = &String> {
-        self.cells.iter().filter_map(move |r| r.get(idx))
+        self.rows_iter().filter_map(move |r| r.get(idx))
     }
 
     pub fn get_span(&self, start_row: usize, end_row: usize, start_col: usize, end_col: usize) -> Option<Vec<Vec<String>>> {
@@ -184,9 +360,7 @@ impl Table {
             let mut row = Vec::new();
             for col_iter in start_col..=end_col {
                 // Return empty string for out-of-bounds cells
-                let value = self.cells
-                    .get(row_iter)
-                    .and_then(|r| r.get(col_iter))
+                let value = self.get_cell(row_iter, col_iter)
                     .cloned()
                     .unwrap_or_default();
                 row.push(value);
@@ -200,46 +374,57 @@ impl Table {
     /// Ensure the table has at least the specified dimensions
     pub fn ensure_size(&mut self, rows: usize, cols: usize) {
         // Add rows if needed
-        while self.cells.len() < rows {
-            self.cells.push(vec![String::new(); self.col_count().max(cols)]);
+        while self.total_rows < rows {
+            self.insert_row_at(self.total_rows);
         }
         // Add columns if needed
-        for row in &mut self.cells {
-            while row.len() < cols {
-                row.push(String::new());
+        if cols > self.col_count {
+            for chunk in &mut self.chunks {
+                for row in chunk {
+                    while row.len() < cols {
+                        row.push(String::new());
+                    }
+                }
             }
-        }
-        // Extend col_widths if we added columns
-        while self.col_widths.len() < cols {
-            self.col_widths.push(3);
+            // Extend col_widths if we added columns
+            while self.col_widths.len() < cols {
+                self.col_widths.push(3);
+            }
+            self.col_count = cols;
         }
     }
 
     pub fn insert_row_with_data(&mut self, idx: usize, mut row: Vec<String>) {
-        row.resize(self.col_count(), String::new());
+        row.resize(self.col_count, String::new());
         // Update widths for new data
         for (col, val) in row.iter().enumerate() {
             self.update_col_width(col, val.len());
         }
-        self.cells.insert(idx, row);
+        self.insert_row_internal(idx, row);
     }
 
     pub fn fill_row_with_data(&mut self, idx: usize, row: Vec<String>) {
-        if row.len() != self.col_count() {
+        if row.len() != self.col_count {
             return;
         }
         // Mark dirty since we might shrink widths
         self.mark_widths_dirty();
-        self.cells[idx] = row;
+        if let Some(target) = self.get_row_mut(idx) {
+            *target = row;
+        }
     }
 
     pub fn insert_col_with_data(&mut self, idx: usize, col: Vec<String>) {
         let max_width = col.iter().map(|s| s.len()).max().unwrap_or(0).max(3);
-        for (row, value) in self.cells.iter_mut().zip(col.iter()) {
-            if idx <= row.len() {
-                row.insert(idx, value.clone());
+        let mut col_iter = col.into_iter();
+        for chunk in &mut self.chunks {
+            for row in chunk {
+                if idx <= row.len() {
+                    row.insert(idx, col_iter.next().unwrap_or_default());
+                }
             }
         }
+        self.col_count += 1;
         if idx <= self.col_widths.len() {
             self.col_widths.insert(idx, max_width);
         }
@@ -248,24 +433,26 @@ impl Table {
     pub fn fill_col_with_data(&mut self, idx: usize, col: Vec<String>) {
         // Mark dirty since widths might shrink
         self.mark_widths_dirty();
-        for (row, value) in self.cells.iter_mut().zip(col.iter()) {
-            if idx < row.len() {
-                row[idx] = value.clone();
+        let mut col_iter = col.into_iter();
+        for chunk in &mut self.chunks {
+            for row in chunk {
+                if idx < row.len() {
+                    row[idx] = col_iter.next().unwrap_or_default();
+                }
             }
         }
     }
 
     pub fn fill_span_with_data(&mut self, row_idx: usize, col_idx: usize, span: Vec<Vec<String>>) {
-        for (dx, row) in span.iter().enumerate() {
-            if row_idx + dx >= self.cells.len() {
-                self.insert_row_at(row_idx+dx);
+        for (dx, span_row) in span.iter().enumerate() {
+            if row_idx + dx >= self.total_rows {
+                self.insert_row_at(row_idx + dx);
             }
-            for (dy, val) in row.iter().enumerate() {
-                if col_idx+dy >= self.cells[row_idx+dx].len() {
-                    self.insert_col_at(col_idx+dy);
+            for (dy, val) in span_row.iter().enumerate() {
+                if col_idx + dy >= self.col_count {
+                    self.insert_col_at(col_idx + dy);
                 }
-                self.cells[row_idx+dx][col_idx+dy] = val.clone();
-                self.update_col_width(col_idx+dy, val.len());
+                self.set_cell(row_idx + dx, col_idx + dy, val.clone());
             }
         }
     }
@@ -274,7 +461,9 @@ impl Table {
 impl Default for Table {
     fn default() -> Self {
         Table {
-            cells: vec![vec![String::new()]],
+            chunks: vec![vec![vec![String::new()]]],
+            total_rows: 1,
+            col_count: 1,
             col_widths: vec![3],
             col_widths_dirty: false,
         }
@@ -319,9 +508,12 @@ fn compare_cells(cell_a: &str, cell_b: &str, sort_type: SortType, direction: Sor
     }
 }
 
+/// Maximum cells to sample for type detection
+const TYPE_PROBE_SAMPLE_SIZE: usize = 20;
+
 impl Table {
     /// Probe a column to determine if it's numeric or text
-    /// Skips empty cells; if majority of non-empty cells are numeric, returns Numeric
+    /// Samples up to TYPE_PROBE_SAMPLE_SIZE non-empty cells for efficiency
     /// Recognizes formatted numbers (currency, percentages, etc.)
     pub fn probe_column_type(&self, col: usize, skip_header: bool) -> SortType {
         let start_row = if skip_header { 1 } else { 0 };
@@ -329,6 +521,9 @@ impl Table {
         let mut total_count = 0;
 
         for row_idx in start_row..self.row_count() {
+            if total_count >= TYPE_PROBE_SAMPLE_SIZE {
+                break;
+            }
             if let Some(cell) = self.get_cell(row_idx, col) {
                 let trimmed = cell.trim();
                 if !trimmed.is_empty() {
@@ -349,15 +544,19 @@ impl Table {
     }
 
     /// Probe a row to determine if it's numeric or text
+    /// Samples up to TYPE_PROBE_SAMPLE_SIZE non-empty cells for efficiency
     /// Recognizes formatted numbers (currency, percentages, etc.)
     pub fn probe_row_type(&self, row: usize, skip_first_col: bool) -> SortType {
         let start_col = if skip_first_col { 1 } else { 0 };
         let mut numeric_count = 0;
         let mut total_count = 0;
 
-        for col_idx in start_col..self.col_count() {
-            if let Some(cell) = self.get_cell(row, col_idx) {
-                let trimmed = cell.trim();
+        if let Some(row_data) = self.get_row(row) {
+            for col_idx in start_col..row_data.len() {
+                if total_count >= TYPE_PROBE_SAMPLE_SIZE {
+                    break;
+                }
+                let trimmed = row_data[col_idx].trim();
                 if !trimmed.is_empty() {
                     total_count += 1;
                     if crate::format::parse_numeric(trimmed).is_some() {
@@ -387,10 +586,10 @@ impl Table {
 
         let mut indices: Vec<usize> = (start_row..self.row_count()).collect();
 
-        // Use direct indexing - indices are guaranteed valid from the range above
+        // Use get_cell for chunked access
         indices.sort_by(|&a, &b| {
-            let cell_a = self.cells[a][sort_col].trim();
-            let cell_b = self.cells[b][sort_col].trim();
+            let cell_a = self.get_cell(a, sort_col).map(|s| s.trim()).unwrap_or("");
+            let cell_b = self.get_cell(b, sort_col).map(|s| s.trim()).unwrap_or("");
             compare_cells(cell_a, cell_b, sort_type, direction)
         });
 
@@ -416,13 +615,14 @@ impl Table {
 
         let mut indices: Vec<usize> = (start_col..self.col_count()).collect();
 
-        // Use direct indexing - indices are guaranteed valid from the range above
-        let row = &self.cells[sort_row];
-        indices.sort_by(|&a, &b| {
-            let cell_a = row[a].trim();
-            let cell_b = row[b].trim();
-            compare_cells(cell_a, cell_b, sort_type, direction)
-        });
+        // Use get_row for chunked access
+        if let Some(row) = self.get_row(sort_row) {
+            indices.sort_by(|&a, &b| {
+                let cell_a = row.get(a).map(|s| s.trim()).unwrap_or("");
+                let cell_b = row.get(b).map(|s| s.trim()).unwrap_or("");
+                compare_cells(cell_a, cell_b, sort_type, direction)
+            });
+        }
 
         if skip_first_col {
             let mut result = vec![0];
@@ -436,30 +636,52 @@ impl Table {
     /// Reorder rows according to the given indices
     /// Returns the old table state as Vec<Vec<String>> for undo
     pub fn reorder_rows(&mut self, new_order: &[usize]) -> Vec<Vec<String>> {
-        let old_cells = self.cells.clone();
-        let mut new_cells = Vec::with_capacity(new_order.len());
+        let old_cells = self.clone_all_rows();
+        let n = new_order.len().min(self.total_rows);
 
-        for &idx in new_order {
-            if idx < old_cells.len() {
-                new_cells.push(old_cells[idx].clone());
-            }
-        }
+        // Build new row order
+        let new_rows: Vec<Vec<String>> = new_order.iter()
+            .take(n)
+            .filter_map(|&idx| old_cells.get(idx).cloned())
+            .collect();
 
-        self.cells = new_cells;
+        // Restore with new order
+        self.restore_from_rows(new_rows);
+        self.mark_widths_dirty();
         old_cells
     }
 
     /// Reorder columns according to the given indices
     /// Returns the old table state as Vec<Vec<String>> for undo
     pub fn reorder_cols(&mut self, new_order: &[usize]) -> Vec<Vec<String>> {
-        let old_cells = self.cells.clone();
+        let old_cells = self.clone_all_rows();
+        let n = new_order.len();
 
-        for row in &mut self.cells {
-            let old_row = row.clone();
-            row.clear();
-            for &idx in new_order {
-                if idx < old_row.len() {
-                    row.push(old_row[idx].clone());
+        for chunk in &mut self.chunks {
+            for row in chunk {
+                if row.len() < n {
+                    continue;
+                }
+
+                // Use a temporary buffer for this row
+                let old_row: Vec<String> = new_order.iter()
+                    .filter_map(|&idx| row.get(idx).cloned())
+                    .collect();
+
+                for (i, val) in old_row.into_iter().enumerate() {
+                    if i < row.len() {
+                        row[i] = val;
+                    }
+                }
+            }
+        }
+
+        // Reorder column widths to match
+        if self.col_widths.len() >= n {
+            let old_widths = self.col_widths.clone();
+            for (i, &idx) in new_order.iter().enumerate() {
+                if i < self.col_widths.len() && idx < old_widths.len() {
+                    self.col_widths[i] = old_widths[idx];
                 }
             }
         }
@@ -682,8 +904,7 @@ impl TableView {
     // If in empty cell: jump to first occupied cell in direction
 
     fn is_cell_occupied(table: &Table, row: usize, col: usize) -> bool {
-        table.cells.get(row)
-            .and_then(|r| r.get(col))
+        table.get_cell(row, col)
             .map(|s| !s.is_empty())
             .unwrap_or(false)
     }
@@ -823,7 +1044,9 @@ impl TableView {
 
     /// Get mutable reference to current cell
     pub fn current_cell_mut<'a>(&self, table: &'a mut Table) -> &'a mut String {
-        &mut table.cells[self.cursor_row][self.cursor_col]
+        table.get_row_mut(self.cursor_row)
+            .and_then(|r| r.get_mut(self.cursor_col))
+            .expect("Cursor should be within bounds")
     }
 
     // Row operations that update cursor
@@ -889,25 +1112,27 @@ impl TableView {
         let (start_row, end_row, start_col, end_col) = self.get_selection_bounds();
         for row_idx in start_row..=end_row {
             for col_idx in start_col..=end_col {
-              table.cells[row_idx][col_idx] = String::new();
+                table.set_cell(row_idx, col_idx, String::new());
             }
         }
     }
 
     pub fn clear_row_span(&mut self, table: &mut Table) {
         let (start_row, end_row, _, _) = self.get_selection_bounds();
+        let col_count = table.col_count();
         for row_idx in start_row..=end_row {
-            for col_idx in 0..table.cells[0].len() {
-              table.cells[row_idx][col_idx] = String::new();
+            for col_idx in 0..col_count {
+                table.set_cell(row_idx, col_idx, String::new());
             }
         }
     }
 
     pub fn clear_col_span(&mut self, table: &mut Table) {
         let (_, _, start_col, end_col) = self.get_selection_bounds();
-        for row_idx in 0..table.cells.len() {
+        let row_count = table.row_count();
+        for row_idx in 0..row_count {
             for col_idx in start_col..=end_col {
-              table.cells[row_idx][col_idx] = String::new();
+                table.set_cell(row_idx, col_idx, String::new());
             }
         }
     }
@@ -915,14 +1140,16 @@ impl TableView {
     pub fn drag_down(&mut self, table: &mut Table, whole_row: bool) {
         let (start_row, end_row, sel_start_col, sel_end_col) = self.get_selection_bounds();
         let (start_col, end_col) = if whole_row {
-            (0, table.cells[0].len() - 1)
+            (0, table.col_count() - 1)
         } else {
             (sel_start_col, sel_end_col)
         };
 
         for row_idx in start_row+1..=end_row {
             for col_idx in start_col..=end_col {
-                table.cells[row_idx][col_idx] = translate_references(table.cells[start_row][col_idx].as_str(), (row_idx - start_row) as isize, 0isize);
+                let source = table.get_cell(start_row, col_idx).cloned().unwrap_or_default();
+                let new_val = translate_references(&source, (row_idx - start_row) as isize, 0isize);
+                table.set_cell(row_idx, col_idx, new_val);
             }
         }
     }
@@ -930,7 +1157,7 @@ impl TableView {
     pub fn drag_up(&mut self, table: &mut Table, whole_row: bool) {
         let (start_row, end_row, sel_start_col, sel_end_col) = self.get_selection_bounds();
         let (start_col, end_col) = if whole_row {
-            (0, table.cells[0].len() - 1)
+            (0, table.col_count() - 1)
         } else {
             (sel_start_col, sel_end_col)
         };
@@ -938,7 +1165,9 @@ impl TableView {
         for row_idx in start_row..end_row {
             let offset = row_idx as isize - end_row as isize;
             for col_idx in start_col..=end_col {
-                table.cells[row_idx][col_idx] = translate_references(table.cells[end_row][col_idx].as_str(), offset, 0isize);
+                let source = table.get_cell(end_row, col_idx).cloned().unwrap_or_default();
+                let new_val = translate_references(&source, offset, 0isize);
+                table.set_cell(row_idx, col_idx, new_val);
             }
         }
     }
@@ -946,14 +1175,16 @@ impl TableView {
     pub fn drag_right(&mut self, table: &mut Table, whole_col: bool) {
         let (sel_start_row, sel_end_row, start_col, end_col) = self.get_selection_bounds();
         let (start_row, end_row) = if whole_col {
-            (0, table.cells.len() - 1)
+            (0, table.row_count() - 1)
         } else {
             (sel_start_row, sel_end_row)
         };
 
         for row_idx in start_row..=end_row {
             for col_idx in start_col+1..=end_col {
-                table.cells[row_idx][col_idx] = translate_references(table.cells[row_idx][start_col].as_str(), 0isize, (col_idx - start_col) as isize);
+                let source = table.get_cell(row_idx, start_col).cloned().unwrap_or_default();
+                let new_val = translate_references(&source, 0isize, (col_idx - start_col) as isize);
+                table.set_cell(row_idx, col_idx, new_val);
             }
         }
     }
@@ -961,7 +1192,7 @@ impl TableView {
     pub fn drag_left(&mut self, table: &mut Table, whole_col: bool) {
         let (sel_start_row, sel_end_row, start_col, end_col) = self.get_selection_bounds();
         let (start_row, end_row) = if whole_col {
-            (0, table.cells.len() - 1)
+            (0, table.row_count() - 1)
         } else {
             (sel_start_row, sel_end_row)
         };
@@ -969,7 +1200,9 @@ impl TableView {
         for row_idx in start_row..=end_row {
             for col_idx in start_col..end_col {
                 let offset = col_idx as isize - end_col as isize;
-                table.cells[row_idx][col_idx] = translate_references(table.cells[row_idx][end_col].as_str(), 0isize, offset);
+                let source = table.get_cell(row_idx, end_col).cloned().unwrap_or_default();
+                let new_val = translate_references(&source, 0isize, offset);
+                table.set_cell(row_idx, col_idx, new_val);
             }
         }
     }
@@ -993,6 +1226,16 @@ mod tests {
         )
     }
 
+    /// Helper to get a row as Vec<String> for assertion comparisons
+    fn row(table: &Table, idx: usize) -> Vec<String> {
+        table.get_row(idx).unwrap().to_vec()
+    }
+
+    /// Helper to get a cell value as &str for assertion comparisons
+    fn cell(table: &Table, r: usize, c: usize) -> String {
+        table.get_cell(r, c).unwrap().clone()
+    }
+
     // === Table basic operations ===
 
     #[test]
@@ -1000,7 +1243,7 @@ mod tests {
         let table = Table::new(vec![vec!["".to_string()]]);
         assert_eq!(table.row_count(), 1);
         assert_eq!(table.col_count(), 1);
-        assert_eq!(table.cells[0][0], "");
+        assert_eq!(cell(&table, 0, 0), "");
     }
 
     #[test]
@@ -1026,7 +1269,7 @@ mod tests {
         ]);
 
         table.set_cell(0, 1, "x".to_string());
-        assert_eq!(table.cells[0][1], "x");
+        assert_eq!(cell(&table, 0, 1), "x");
 
         // Out of bounds should not panic
         table.set_cell(10, 10, "y".to_string());
@@ -1055,8 +1298,8 @@ mod tests {
         table.insert_row_at(0);
 
         assert_eq!(table.row_count(), 3);
-        assert_eq!(table.cells[0], vec!["", ""]);
-        assert_eq!(table.cells[1], vec!["a", "b"]);
+        assert_eq!(row(&table, 0), vec!["", ""]);
+        assert_eq!(row(&table, 1), vec!["a", "b"]);
     }
 
     #[test]
@@ -1069,9 +1312,9 @@ mod tests {
         table.insert_row_at(1);
 
         assert_eq!(table.row_count(), 3);
-        assert_eq!(table.cells[0], vec!["a", "b"]);
-        assert_eq!(table.cells[1], vec!["", ""]);
-        assert_eq!(table.cells[2], vec!["c", "d"]);
+        assert_eq!(row(&table, 0), vec!["a", "b"]);
+        assert_eq!(row(&table, 1), vec!["", ""]);
+        assert_eq!(row(&table, 2), vec!["c", "d"]);
     }
 
     #[test]
@@ -1084,7 +1327,7 @@ mod tests {
         table.insert_row_at(2);
 
         assert_eq!(table.row_count(), 3);
-        assert_eq!(table.cells[2], vec!["", ""]);
+        assert_eq!(row(&table, 2), vec!["", ""]);
     }
 
     #[test]
@@ -1099,8 +1342,8 @@ mod tests {
 
         assert_eq!(deleted, Some(vec!["c".to_string(), "d".to_string()]));
         assert_eq!(table.row_count(), 2);
-        assert_eq!(table.cells[0], vec!["a", "b"]);
-        assert_eq!(table.cells[1], vec!["e", "f"]);
+        assert_eq!(row(&table, 0), vec!["a", "b"]);
+        assert_eq!(row(&table, 1), vec!["e", "f"]);
     }
 
     #[test]
@@ -1113,7 +1356,7 @@ mod tests {
 
         assert_eq!(deleted, Some(vec!["a".to_string(), "b".to_string()]));
         assert_eq!(table.row_count(), 1);
-        assert_eq!(table.cells[0], vec!["", ""]);
+        assert_eq!(row(&table, 0), vec!["", ""]);
     }
 
     #[test]
@@ -1140,8 +1383,8 @@ mod tests {
         table.insert_col_at(0);
 
         assert_eq!(table.col_count(), 3);
-        assert_eq!(table.cells[0], vec!["", "a", "b"]);
-        assert_eq!(table.cells[1], vec!["", "c", "d"]);
+        assert_eq!(row(&table, 0), vec!["", "a", "b"]);
+        assert_eq!(row(&table, 1), vec!["", "c", "d"]);
     }
 
     #[test]
@@ -1154,8 +1397,8 @@ mod tests {
         table.insert_col_at(1);
 
         assert_eq!(table.col_count(), 3);
-        assert_eq!(table.cells[0], vec!["a", "", "b"]);
-        assert_eq!(table.cells[1], vec!["c", "", "d"]);
+        assert_eq!(row(&table, 0), vec!["a", "", "b"]);
+        assert_eq!(row(&table, 1), vec!["c", "", "d"]);
     }
 
     #[test]
@@ -1169,8 +1412,8 @@ mod tests {
 
         assert_eq!(deleted, Some(vec!["b".to_string(), "e".to_string()]));
         assert_eq!(table.col_count(), 2);
-        assert_eq!(table.cells[0], vec!["a", "c"]);
-        assert_eq!(table.cells[1], vec!["d", "f"]);
+        assert_eq!(row(&table, 0), vec!["a", "c"]);
+        assert_eq!(row(&table, 1), vec!["d", "f"]);
     }
 
     #[test]
@@ -1184,8 +1427,8 @@ mod tests {
 
         assert_eq!(deleted, Some(vec!["a".to_string(), "b".to_string()]));
         assert_eq!(table.col_count(), 1);
-        assert_eq!(table.cells[0], vec![""]);
-        assert_eq!(table.cells[1], vec![""]);
+        assert_eq!(row(&table, 0), vec![""]);
+        assert_eq!(row(&table, 1), vec![""]);
     }
 
     #[test]
@@ -1273,9 +1516,9 @@ mod tests {
 
         assert_eq!(table.row_count(), 3);
         assert_eq!(table.col_count(), 4);
-        assert_eq!(table.cells[0][0], "a");
-        assert_eq!(table.cells[0][3], "");
-        assert_eq!(table.cells[2][0], "");
+        assert_eq!(cell(&table, 0, 0), "a");
+        assert_eq!(cell(&table, 0, 3), "");
+        assert_eq!(cell(&table, 2, 0), "");
     }
 
     // === Insert with data ===
@@ -1290,7 +1533,7 @@ mod tests {
         table.insert_row_with_data(1, vec!["x".to_string(), "y".to_string()]);
 
         assert_eq!(table.row_count(), 3);
-        assert_eq!(table.cells[1], vec!["x", "y"]);
+        assert_eq!(row(&table, 1), vec!["x", "y"]);
     }
 
     #[test]
@@ -1301,7 +1544,7 @@ mod tests {
 
         table.insert_row_with_data(1, vec!["x".to_string()]);
 
-        assert_eq!(table.cells[1], vec!["x", "", ""]);
+        assert_eq!(row(&table, 1), vec!["x", "", ""]);
     }
 
     #[test]
@@ -1313,8 +1556,8 @@ mod tests {
 
         table.insert_col_with_data(1, vec!["x".to_string(), "y".to_string()]);
 
-        assert_eq!(table.cells[0], vec!["a", "x", "b"]);
-        assert_eq!(table.cells[1], vec!["c", "y", "d"]);
+        assert_eq!(row(&table, 0), vec!["a", "x", "b"]);
+        assert_eq!(row(&table, 1), vec!["c", "y", "d"]);
     }
 
     // === Fill operations ===
@@ -1328,8 +1571,8 @@ mod tests {
 
         table.fill_row_with_data(0, vec!["x".to_string(), "y".to_string()]);
 
-        assert_eq!(table.cells[0], vec!["x", "y"]);
-        assert_eq!(table.cells[1], vec!["c", "d"]);
+        assert_eq!(row(&table, 0), vec!["x", "y"]);
+        assert_eq!(row(&table, 1), vec!["c", "d"]);
     }
 
     #[test]
@@ -1340,7 +1583,7 @@ mod tests {
 
         table.fill_row_with_data(0, vec!["x".to_string()]); // Wrong size
 
-        assert_eq!(table.cells[0], vec!["a", "b"]); // Unchanged
+        assert_eq!(row(&table, 0), vec!["a", "b"]); // Unchanged
     }
 
     #[test]
@@ -1352,8 +1595,8 @@ mod tests {
 
         table.fill_col_with_data(0, vec!["x".to_string(), "y".to_string()]);
 
-        assert_eq!(table.cells[0], vec!["x", "b"]);
-        assert_eq!(table.cells[1], vec!["y", "d"]);
+        assert_eq!(row(&table, 0), vec!["x", "b"]);
+        assert_eq!(row(&table, 1), vec!["y", "d"]);
     }
 
     #[test]
@@ -1369,9 +1612,9 @@ mod tests {
             vec!["3".to_string(), "4".to_string()],
         ]);
 
-        assert_eq!(table.cells[0], vec!["1", "2", "c"]);
-        assert_eq!(table.cells[1], vec!["3", "4", "f"]);
-        assert_eq!(table.cells[2], vec!["g", "h", "i"]);
+        assert_eq!(row(&table, 0), vec!["1", "2", "c"]);
+        assert_eq!(row(&table, 1), vec!["3", "4", "f"]);
+        assert_eq!(row(&table, 2), vec!["g", "h", "i"]);
     }
 
     // === TableView tests ===
@@ -1818,9 +2061,9 @@ mod tests {
 
         let old = table.reorder_rows(&[2, 0, 1]);
 
-        assert_eq!(table.cells[0], vec!["c", "3"]);
-        assert_eq!(table.cells[1], vec!["a", "1"]);
-        assert_eq!(table.cells[2], vec!["b", "2"]);
+        assert_eq!(row(&table, 0), vec!["c", "3"]);
+        assert_eq!(row(&table, 1), vec!["a", "1"]);
+        assert_eq!(row(&table, 2), vec!["b", "2"]);
 
         // Old data should be preserved for undo
         assert_eq!(old[0], vec!["a", "1"]);
@@ -1837,8 +2080,8 @@ mod tests {
 
         let old = table.reorder_cols(&[2, 0, 1]);
 
-        assert_eq!(table.cells[0], vec!["c", "a", "b"]);
-        assert_eq!(table.cells[1], vec!["3", "1", "2"]);
+        assert_eq!(row(&table, 0), vec!["c", "a", "b"]);
+        assert_eq!(row(&table, 1), vec!["3", "1", "2"]);
 
         // Old data should be preserved
         assert_eq!(old[0], vec!["a", "b", "c"]);

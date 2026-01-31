@@ -406,18 +406,20 @@ mod tests {
     }
 
     // === translate_references tests ===
+    // Note: translate_references only works on formulas (strings starting with '=')
+    // Non-formula strings are returned unchanged.
 
     #[test]
     fn test_translate_references_simple() {
-        assert_eq!(translate_references("A1", 1, 0), "A2");
-        assert_eq!(translate_references("A1", 0, 1), "B1");
-        assert_eq!(translate_references("A1", 1, 1), "B2");
+        assert_eq!(translate_references("=A1", 1, 0), "=A2");
+        assert_eq!(translate_references("=A1", 0, 1), "=B1");
+        assert_eq!(translate_references("=A1", 1, 1), "=B2");
     }
 
     #[test]
     fn test_translate_references_multiple() {
-        assert_eq!(translate_references("A1+B2", 1, 0), "A2+B3");
-        assert_eq!(translate_references("A1*B1+C1", 0, 1), "B1*C1+D1");
+        assert_eq!(translate_references("=A1+B2", 1, 0), "=A2+B3");
+        assert_eq!(translate_references("=A1*B1+C1", 0, 1), "=B1*C1+D1");
     }
 
     #[test]
@@ -429,9 +431,9 @@ mod tests {
     #[test]
     fn test_translate_references_preserves_uppercase() {
         // Uppercase references work correctly
-        assert_eq!(translate_references("A1", 1, 0), "A2");
-        assert_eq!(translate_references("B1", 0, 1), "C1");
-        assert_eq!(translate_references("AA1", 1, 0), "AA2");
+        assert_eq!(translate_references("=A1", 1, 0), "=A2");
+        assert_eq!(translate_references("=B1", 0, 1), "=C1");
+        assert_eq!(translate_references("=AA1", 1, 0), "=AA2");
     }
 
     // Note: lowercase cell references have a known quirk in col_from_letters
@@ -439,56 +441,52 @@ mod tests {
 
     #[test]
     fn test_translate_references_negative_offset() {
-        assert_eq!(translate_references("B2", 0, -1), "A2");
-        assert_eq!(translate_references("A2", -1, 0), "A1");
-        assert_eq!(translate_references("C3", -1, -1), "B2");
+        assert_eq!(translate_references("=B2", 0, -1), "=A2");
+        assert_eq!(translate_references("=A2", -1, 0), "=A1");
+        assert_eq!(translate_references("=C3", -1, -1), "=B2");
     }
 
     #[test]
     fn test_translate_references_clamps_to_bounds() {
         // Column can't go below 0
-        assert_eq!(translate_references("A1", 0, -1), "A1");
+        assert_eq!(translate_references("=A1", 0, -1), "=A1");
         // Row can't go below 1 (1-based in references)
-        assert_eq!(translate_references("A1", -1, 0), "A1");
+        assert_eq!(translate_references("=A1", -1, 0), "=A1");
     }
 
     #[test]
     fn test_translate_references_large_refs() {
-        assert_eq!(translate_references("AA100", 1, 1), "AB101");
-        assert_eq!(translate_references("ZZ999", 1, 1), "AAA1000");
+        assert_eq!(translate_references("=AA100", 1, 1), "=AB101");
+        assert_eq!(translate_references("=ZZ999", 1, 1), "=AAA1000");
     }
 
     #[test]
     fn test_translate_references_no_refs() {
+        // Non-formula strings are returned unchanged
         assert_eq!(translate_references("hello world", 1, 1), "hello world");
         assert_eq!(translate_references("123", 1, 1), "123");
         assert_eq!(translate_references("", 1, 1), "");
+        // Even strings with cell-like patterns are unchanged if not a formula
+        assert_eq!(translate_references("A1", 1, 1), "A1");
     }
 
     #[test]
     fn test_translate_references_not_in_identifiers() {
-        // Note: Current implementation DOES translate references that appear
-        // after letters but before the end of a word, because the boundary
-        // check looks for alphanumeric after the reference, not before.
-        // "DATA1" -> "TA1" is found, prev is 'A' (alpha), but it still matches
-        // because the implementation checks if prev char is alnum, but the
-        // column parsing already consumed some letters.
-        //
-        // Testing actual behavior:
-        assert_eq!(translate_references("A1B", 1, 0), "A1B"); // A1B - 'B' after, not matched
+        // References followed by alphanumeric chars are not matched
+        assert_eq!(translate_references("=A1B", 1, 0), "=A1B"); // A1B - 'B' after, not matched
     }
 
     #[test]
     fn test_translate_references_standalone() {
-        // Standalone references should be translated
-        assert_eq!(translate_references(" A1 ", 1, 0), " A2 ");
-        assert_eq!(translate_references("(A1)", 1, 0), "(A2)");
+        // Standalone references in formulas should be translated
+        assert_eq!(translate_references("= A1 ", 1, 0), "= A2 ");
+        assert_eq!(translate_references("=(A1)", 1, 0), "=(A2)");
     }
 
     #[test]
     fn test_translate_references_with_symbols() {
-        assert_eq!(translate_references("(A1)", 1, 0), "(A2)");
-        assert_eq!(translate_references("[A1]", 1, 0), "[A2]");
-        assert_eq!(translate_references("A1,B2,C3", 1, 0), "A2,B3,C4");
+        assert_eq!(translate_references("=(A1)", 1, 0), "=(A2)");
+        assert_eq!(translate_references("=[A1]", 1, 0), "=[A2]");
+        assert_eq!(translate_references("=A1,B2,C3", 1, 0), "=A2,B3,C4");
     }
 }

@@ -358,8 +358,8 @@ mod tests {
         let mut table = table;
         txn.apply(&mut table);
 
-        assert_eq!(table.cells[0], vec!["x", "y"]);
-        assert_eq!(table.cells[1], vec!["c", "d"]);
+        assert_eq!(table.get_row(0).map(|r| r.to_vec()), Some(vec!["x".to_string(), "y".to_string()]));
+        assert_eq!(table.get_row(1).map(|r| r.to_vec()), Some(vec!["c".to_string(), "d".to_string()]));
     }
 
     #[test]
@@ -381,8 +381,8 @@ mod tests {
         let mut table = table;
         txn.apply(&mut table);
 
-        assert_eq!(table.cells[0], vec!["a", "x"]);
-        assert_eq!(table.cells[1], vec!["c", "y"]);
+        assert_eq!(table.get_row(0).map(|r| r.to_vec()), Some(vec!["a".to_string(), "x".to_string()]));
+        assert_eq!(table.get_row(1).map(|r| r.to_vec()), Some(vec!["c".to_string(), "y".to_string()]));
     }
 
     #[test]
@@ -408,9 +408,9 @@ mod tests {
         let mut table = table;
         txn.apply(&mut table);
 
-        assert_eq!(table.cells[0], vec!["1", "2", "c"]);
-        assert_eq!(table.cells[1], vec!["3", "4", "f"]);
-        assert_eq!(table.cells[2], vec!["g", "h", "i"]);
+        assert_eq!(table.get_row(0).map(|r| r.to_vec()), Some(vec!["1".to_string(), "2".to_string(), "c".to_string()]));
+        assert_eq!(table.get_row(1).map(|r| r.to_vec()), Some(vec!["3".to_string(), "4".to_string(), "f".to_string()]));
+        assert_eq!(table.get_row(2).map(|r| r.to_vec()), Some(vec!["g".to_string(), "h".to_string(), "i".to_string()]));
     }
 
     #[test]
@@ -431,8 +431,8 @@ mod tests {
         let mut table = table;
         txn.apply(&mut table);
 
-        assert_eq!(table.cells[0], vec!["a", "b", "c"]);
-        assert_eq!(table.cells[1], vec!["d", "e", "x"]);
+        assert_eq!(table.get_row(0).map(|r| r.to_vec()), Some(vec!["a".to_string(), "b".to_string(), "c".to_string()]));
+        assert_eq!(table.get_row(1).map(|r| r.to_vec()), Some(vec!["d".to_string(), "e".to_string(), "x".to_string()]));
     }
 
     #[test]
@@ -510,15 +510,15 @@ mod tests {
         assert!(table.col_count() >= 4); // cols 1,2,3 + original
 
         // Check pasted values
-        assert_eq!(table.cells[1][1], "1");
-        assert_eq!(table.cells[1][2], "2");
-        assert_eq!(table.cells[1][3], "3");
-        assert_eq!(table.cells[2][1], "4");
-        assert_eq!(table.cells[3][3], "9");
+        assert_eq!(table.get_cell(1,1), Some(&"1".to_string()));
+        assert_eq!(table.get_cell(1,2), Some(&"2".to_string()));
+        assert_eq!(table.get_cell(1,3), Some(&"3".to_string()));
+        assert_eq!(table.get_cell(2,1), Some(&"4".to_string()));
+        assert_eq!(table.get_cell(3,3), Some(&"9".to_string()));
 
         // Original values preserved where not overwritten
-        assert_eq!(table.cells[0][0], "a");
-        assert_eq!(table.cells[0][1], "b");
-        assert_eq!(table.cells[1][0], "c");
+        assert_eq!(table.get_cell(0,0), Some(&"a".to_string()));
+        assert_eq!(table.get_cell(0,1), Some(&"b".to_string()));
+        assert_eq!(table.get_cell(1,0), Some(&"c".to_string()));
     }
 }

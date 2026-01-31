@@ -742,13 +742,13 @@ impl App {
         }
 
         // Capture old state for undo
-        let old_data = self.table.cells.clone();
+        let old_data = self.table.clone_all_rows();
 
         // Perform the reorder
         self.table.reorder_rows(&new_order);
 
         // Create transaction for undo
-        let new_data = self.table.cells.clone();
+        let new_data = self.table.clone_all_rows();
         let txn = Transaction::SetSpan {
             row: 0,
             col: 0,
@@ -786,13 +786,13 @@ impl App {
         }
 
         // Capture old state for undo
-        let old_data = self.table.cells.clone();
+        let old_data = self.table.clone_all_rows();
 
         // Perform the reorder
         self.table.reorder_cols(&new_order);
 
         // Create transaction for undo
-        let new_data = self.table.cells.clone();
+        let new_data = self.table.clone_all_rows();
         let txn = Transaction::SetSpan {
             row: 0,
             col: 0,
