@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::table::Table;
-use crate::predicate::Predicate;
+use crate::predicate::{Predicate, ColumnType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FilterType {
@@ -92,6 +92,19 @@ impl RowManager {
         } else {
             self.active_rows = vec![0,1,1,2,3,5,8,13,21,35,56];
         }
+        self.active_row_set = HashSet::from_iter(self.active_rows.iter().cloned());
+        self.is_filtered = true;
+    }
+
+    pub fn predicate_filter(&mut self, table: &Table, col: usize, predicate: Predicate, col_type: ColumnType) {
+        let idxs: Box<dyn Iterator<Item = usize>> = if self.is_filtered {
+            Box::new(self.active_rows.iter().map(|&i| i))
+        } else {
+            Box::new((0usize..table.row_count()))
+        };
+
+        self.active_rows = idxs.filter(|&i| predicate.evaluate(table.get_cell(i, col).unwrap(), col_type)).collect();
+
         self.active_row_set = HashSet::from_iter(self.active_rows.iter().cloned());
         self.is_filtered = true;
     }
