@@ -37,6 +37,7 @@ pub enum Command {
     Replace(ReplaceCommand),
     NavigateRow(usize),
     NavigateCell(CellRef),
+    Fork,
     Clip,           // Copy yank to system clipboard
     SysPaste,       // Yank from system clipboard
     PluginList,     // List loaded plugins
@@ -95,6 +96,7 @@ impl Command {
             "header" => Some(Command::ToggleHeader),
             "calc" => Some(Command::Calc),
             "sort" => Some(Command::Sort),
+            "fork" => Some(Command::Fork),
             "sortd" | "sort!" => Some(Command::SortDesc),
             "sortr" => Some(Command::SortRow),
             "sortrd" | "sortr!" => Some(Command::SortRowDesc),

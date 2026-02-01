@@ -24,12 +24,10 @@ pub struct TableView {
     // Last visible row (set during render)
     pub viewport_height: usize,
     pub viewport_width: usize,
-
-    pub row_manager: Rc<RefCell<RowManager>>
 }
 
 impl TableView {
-    pub fn new(row_manager: Rc<RefCell<RowManager>>) -> Self {
+    pub fn new() -> Self {
         Self {
             cursor_row: 0,
             cursor_col: 0,
@@ -39,8 +37,6 @@ impl TableView {
             viewport_width: 10,
             support_row: 0,
             support_col: 0,
-
-            row_manager
         }
     }
 

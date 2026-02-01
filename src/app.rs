@@ -79,7 +79,7 @@ pub struct App {
 impl App {
     pub fn new(table: Table, file_io: FileIO) -> Self {
         let row_manager = Rc::new(RefCell::new(RowManager::new()));
-        let view = TableView::new(Rc::clone(&row_manager));
+        let view = TableView::new();
 
         let mut plugin_manager = PluginManager::new();
         let _ = plugin_manager.load_plugins();
@@ -826,6 +826,13 @@ impl App {
                     Ok(msg) => self.message = Some(msg),
                     Err(e) => self.message = Some(e),
                 }
+            }
+            Command::Fork => {
+                self.file_io = self.file_io.fork();
+
+                let fname = self.file_io.file_name();
+
+                self.message = Some(format!("File forked successfully, you are now editing: {}", fname));
             }
             Command::SysPaste => {
                 match self.clipboard.from_system() {

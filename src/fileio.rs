@@ -1,5 +1,6 @@
-use std::path::PathBuf;
-use std::fs::File;
+use std::path::{PathBuf, Path};
+use std::fs;
+use std::ffi::OsStr;
 use std::io::{self, BufRead, BufReader, BufWriter};
 
 use crate::table::{Table, CHUNK_SIZE};
@@ -28,7 +29,7 @@ const CANDIDATE_DELIMITERS: &[u8] = &[b',', b'\t', b';', b'|'];
 
 /// Detect the most likely delimiter by analyzing the first N lines
 fn detect_delimiter(path: &PathBuf, sample_lines: usize) -> Option<u8> {
-    let file = File::open(path).ok()?;
+    let file = fs::File::open(path).ok()?;
     let reader = BufReader::new(file);
 
     let mut counts: Vec<Vec<usize>> = vec![Vec::new(); CANDIDATE_DELIMITERS.len()];
@@ -87,6 +88,55 @@ fn detect_delimiter(path: &PathBuf, sample_lines: usize) -> Option<u8> {
     best_delim
 }
 
+/// determine the filename to write the fork() output to
+pub fn next_fork_filename_suffix_wins(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let file_name = path.file_name().unwrap_or(OsStr::new("tabular_fork.csv")).to_string_lossy();
+
+    let (stem, ext) = if let Some(s) = file_name.strip_suffix(".csv") {
+        (s, "csv")
+    } else if let Some(s) = file_name.strip_suffix(".tsv") {
+        (s, "tsv")
+    } else {
+        panic!("expected .csv or .tsv filename");
+    };
+
+    // Extract (header, start_n)
+    let (header, start_n) = match stem.rsplit_once('.') {
+        Some((h, n)) if n.chars().all(|c| c.is_ascii_digit()) => {
+            (h.to_string(), n.parse::<usize>().unwrap())
+        }
+        _ => (stem.to_string(), 0),
+    };
+
+    // Find maximum suffix among:
+    // - `header.csv` => suffix 0
+    // - `header.K.csv` => suffix K
+    let mut max_suffix = start_n;
+
+    for entry in fs::read_dir(parent).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        let Some(stem2) = name.strip_suffix(ext) else { continue; };
+
+        if stem2 == header {
+            max_suffix = max_suffix.max(0);
+            continue;
+        }
+
+        let Some((h, n)) = stem2.rsplit_once('.') else { continue; };
+        if h != header { continue; }
+        if !n.chars().all(|c| c.is_ascii_digit()) { continue; }
+
+        if let Ok(k) = n.parse::<usize>() {
+            max_suffix = max_suffix.max(k);
+        }
+    }
+
+    parent.join(format!("{}.{}.{}", header, max_suffix + 1, ext))
+}
+
 /// Result of loading a file, including any warnings
 pub struct LoadResult {
     pub table: Table,
@@ -132,6 +182,21 @@ impl FileIO {
 
         let max_dim = (50000000, 50000000);
         Ok(Self { file_path, format, delimiter, max_dim })
+    }
+
+    pub fn fork(&self) -> FileIO {
+        let default_fname = match self.delimiter {
+            b',' => "tabular_fork.csv",
+            b'\t' => "tabular_fork.tsv",
+            _  => "tabular_fork.csv"
+        };
+        let fpath = self.file_path.clone().unwrap_or_else(|| PathBuf::from(default_fname));
+        FileIO {
+            file_path: Some(next_fork_filename_suffix_wins(&fpath)),
+            format: self.format,
+            delimiter: self.delimiter,
+            max_dim: self.max_dim
+        }
     }
 
     /// Get the detected/configured delimiter
@@ -205,7 +270,7 @@ impl FileIO {
             });
         }
 
-        let file = File::open(path)?;
+        let file = fs::File::open(path)?;
         let reader = BufReader::with_capacity(1 << 20, file); // 1 MB
 
         let mut csv_reader = csv::ReaderBuilder::new()
@@ -290,7 +355,7 @@ impl FileIO {
         let path = self.file_path.as_ref().ok_or(io::ErrorKind::NotFound)?;
         let delim = self.delimiter;
 
-        let file = File::create(path)?;
+        let file = fs::File::create(path)?;
         let writer = BufWriter::new(file);
         let mut csv_writer = csv::WriterBuilder::new()
             .delimiter(delim)
