@@ -1,6 +1,8 @@
 use regex::Regex;
 use std::fmt;
 
+use crate::util::ColumnType;
+
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Op {
@@ -57,12 +59,6 @@ impl fmt::Display for Predicate {
     }
 }
 
-
-#[derive(Debug, Clone, Copy)]
-pub enum ColumnType {
-    Numeric,
-    Text,
-}
 
 impl Predicate {
     pub fn evaluate(&self, other: &str, col_type: ColumnType) -> bool {

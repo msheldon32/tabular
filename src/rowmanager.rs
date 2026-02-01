@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use crate::table::Table;
-use crate::predicate::{Predicate, ColumnType};
-use crate::util::letters_from_col;
+use crate::predicate::Predicate;
+use crate::util::{letters_from_col, ColumnType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FilterType {

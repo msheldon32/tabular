@@ -312,7 +312,8 @@ impl TableView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::table::{SortType, SortDirection};
+    use crate::table::SortDirection;
+    use crate::util::ColumnType;
     use crate::operations;
 
     // === Basic operations ===
@@ -588,9 +589,9 @@ mod tests {
         ]);
 
         // Column 0 is text (names)
-        assert_eq!(table.probe_column_type(0, true), SortType::Text);
+        assert_eq!(table.probe_column_type(0, true), ColumnType::Text);
         // Column 1 is numeric (scores)
-        assert_eq!(table.probe_column_type(1, true), SortType::Numeric);
+        assert_eq!(table.probe_column_type(1, true), ColumnType::Numeric);
     }
 
     #[test]
@@ -603,9 +604,9 @@ mod tests {
         ]);
 
         // Column 0 is numeric
-        assert_eq!(table.probe_column_type(0, true), SortType::Numeric);
+        assert_eq!(table.probe_column_type(0, true), ColumnType::Numeric);
         // Column 1 is mixed but majority numeric
-        assert_eq!(table.probe_column_type(1, true), SortType::Numeric);
+        assert_eq!(table.probe_column_type(1, true), ColumnType::Numeric);
     }
 
     #[test]
@@ -619,7 +620,7 @@ mod tests {
         ]);
 
         // Empty cells should be ignored; remaining are numeric
-        assert_eq!(table.probe_column_type(0, true), SortType::Numeric);
+        assert_eq!(table.probe_column_type(0, true), ColumnType::Numeric);
     }
 
     #[test]
@@ -631,7 +632,7 @@ mod tests {
             vec!["Carol"],
         ]);
 
-        assert_eq!(table.probe_column_type(0, true), SortType::Text);
+        assert_eq!(table.probe_column_type(0, true), ColumnType::Text);
     }
 
     #[test]
@@ -1370,8 +1371,8 @@ mod tests {
         ]);
 
         // Row 0 is text (names)
-        assert_eq!(table.probe_row_type(0, true), SortType::Text);
+        assert_eq!(table.probe_row_type(0, true), ColumnType::Text);
         // Row 1 is numeric (scores)
-        assert_eq!(table.probe_row_type(1, true), SortType::Numeric);
+        assert_eq!(table.probe_row_type(1, true), ColumnType::Numeric);
     }
 }

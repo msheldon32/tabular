@@ -18,7 +18,7 @@ use crate::input::{
 use crate::mode::Mode;
 use crate::operations;
 use crate::plugin::{PluginManager, PluginAction, CommandContext};
-use crate::table::{SortDirection, Table, SortType};
+use crate::table::{SortDirection, Table};
 use crate::tableview::TableView;
 use crate::transaction::{History, Transaction};
 use crate::ui;
@@ -26,14 +26,14 @@ use crate::fileio::FileIO;
 use crate::style::Style;
 use crate::progress::Progress;
 use crate::rowmanager::{FilterType, RowManager};
-use crate::predicate::ColumnType;
+use crate::util::ColumnType;
 
 /// Result from a background operation
 pub enum BackgroundResult {
     SortComplete {
         permutation: Vec<usize>,
         direction: SortDirection,
-        sort_type: SortType,
+        sort_type: ColumnType,
         is_column_sort: bool,
     },
 }
@@ -268,8 +268,8 @@ impl App {
                 self.dirty = true;
 
                 let type_str = match sort_type {
-                    SortType::Numeric => "numeric",
-                    SortType::Text => "text",
+                    ColumnType::Numeric => "numeric",
+                    ColumnType::Text => "text",
                 };
                 let dir_str = match direction {
                     SortDirection::Ascending => "ascending",
@@ -905,7 +905,8 @@ impl App {
                     self.message = Some("Fibonacci filter applied (why????)".to_string());
                 } else if let FilterType::PredicateFilter(pred) = filter_type {
                     let active_col = self.view.cursor_col;
-                    self.row_manager.borrow_mut().predicate_filter(&self.table, active_col, pred, ColumnType::Numeric, self.header_mode);
+                    let column_type = self.table.probe_column_type(active_col, self.header_mode);
+                    self.row_manager.borrow_mut().predicate_filter(&self.table, active_col, pred, column_type, self.header_mode);
                     self.message = Some("Numeric filter applied".to_string());
                 } else {
                     self.message = Some("Filter applied".to_string());
@@ -1094,12 +1095,12 @@ impl App {
 
             for (i, row) in (start_row..row_count).enumerate() {
                 let key = match sort_type {
-                    SortType::Numeric => {
+                    ColumnType::Numeric => {
                         let val = crate::format::parse_numeric(col_data[row].trim())
                             .unwrap_or(f64::NAN);
                         SortKey::Numeric(val)
                     }
-                    SortType::Text => {
+                    ColumnType::Text => {
                         SortKey::Text(col_data[row].to_lowercase())
                     }
                 };
@@ -1174,8 +1175,8 @@ impl App {
 
         let sort_type = self.table.probe_column_type(sort_col, skip_header);
         let type_str = match sort_type {
-            SortType::Numeric => "numeric",
-            SortType::Text => "text",
+            ColumnType::Numeric => "numeric",
+            ColumnType::Text => "text",
         };
         let dir_str = match direction {
             SortDirection::Ascending => "ascending",
@@ -1207,8 +1208,8 @@ impl App {
 
         let sort_type = self.table.probe_row_type(sort_row, skip_first);
         let type_str = match sort_type {
-            SortType::Numeric => "numeric",
-            SortType::Text => "text",
+            ColumnType::Numeric => "numeric",
+            ColumnType::Text => "text",
         };
         let dir_str = match direction {
             SortDirection::Ascending => "ascending",

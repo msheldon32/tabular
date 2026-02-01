@@ -1,5 +1,7 @@
 use rayon::prelude::*;
 
+use crate::util::ColumnType;
+
 /// Number of rows per chunk for memory-efficient storage
 pub const CHUNK_SIZE: usize = 1024;
 
@@ -805,13 +807,6 @@ impl Default for Table {
     }
 }
 
-/// Represents whether a column/row should be sorted as numbers or text
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SortType {
-    Numeric,
-    Text,
-}
-
 /// Sorting direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortDirection {
@@ -826,7 +821,7 @@ impl Table {
     /// Probe a column to determine if it's numeric or text
     /// Samples up to TYPE_PROBE_SAMPLE_SIZE non-empty cells for efficiency
     /// Recognizes formatted numbers (currency, percentages, etc.)
-    pub fn probe_column_type(&self, col: usize, skip_header: bool) -> SortType {
+    pub fn probe_column_type(&self, col: usize, skip_header: bool) -> ColumnType {
         let start_row = if skip_header { 1 } else { 0 };
         let mut numeric_count = 0;
         let mut total_count = 0;
@@ -848,16 +843,16 @@ impl Table {
 
         // If more than half are numeric (or all are numeric), treat as numeric
         if total_count > 0 && numeric_count * 2 >= total_count {
-            SortType::Numeric
+            ColumnType::Numeric
         } else {
-            SortType::Text
+            ColumnType::Text
         }
     }
 
     /// Probe a row to determine if it's numeric or text
     /// Samples up to TYPE_PROBE_SAMPLE_SIZE non-empty cells for efficiency
     /// Recognizes formatted numbers (currency, percentages, etc.)
-    pub fn probe_row_type(&self, row: usize, skip_first_col: bool) -> SortType {
+    pub fn probe_row_type(&self, row: usize, skip_first_col: bool) -> ColumnType {
         let start_col = if skip_first_col { 1 } else { 0 };
         let mut numeric_count = 0;
         let mut total_count = 0;
@@ -878,9 +873,9 @@ impl Table {
         }
 
         if total_count > 0 && numeric_count * 2 >= total_count {
-            SortType::Numeric
+            ColumnType::Numeric
         } else {
-            SortType::Text
+            ColumnType::Text
         }
     }
 
@@ -905,7 +900,7 @@ impl Table {
         };
 
         match sort_type {
-            SortType::Numeric => {
+            ColumnType::Numeric => {
                 // Build keyed vector (parallel for large tables)
                 let mut keyed: Vec<(usize, f64)> = if use_parallel {
                     // Need to collect cell references first for parallel access
@@ -956,7 +951,7 @@ impl Table {
 
                 indices.extend(keyed.into_iter().map(|(row, _)| row));
             }
-            SortType::Text => {
+            ColumnType::Text => {
                 // Build keyed vector (parallel for large tables)
                 let mut keyed: Vec<(usize, String)> = if use_parallel {
                     let cells: Vec<Option<&String>> = (start_row..row_count)
@@ -1024,7 +1019,7 @@ impl Table {
         };
 
         match sort_type {
-            SortType::Numeric => {
+            ColumnType::Numeric => {
                 let mut keyed: Vec<(usize, f64)> = if use_parallel {
                     let cells: Vec<Option<&String>> = (start_col..col_count)
                         .map(|col| self.get_cell(sort_row, col))
@@ -1072,7 +1067,7 @@ impl Table {
 
                 indices.extend(keyed.into_iter().map(|(col, _)| col));
             }
-            SortType::Text => {
+            ColumnType::Text => {
                 let mut keyed: Vec<(usize, String)> = if use_parallel {
                     let cells: Vec<Option<&String>> = (start_col..col_count)
                         .map(|col| self.get_cell(sort_row, col))

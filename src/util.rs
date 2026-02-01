@@ -15,6 +15,12 @@ pub enum CalcError {
     EvalError(String),
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ColumnType {
+    Numeric,
+    Text,
+}
+
 impl From<ParseIntError> for CalcError {
     fn from(e: ParseIntError) -> Self { CalcError::ParseError(e.to_string()) }
 }
