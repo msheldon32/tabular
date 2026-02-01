@@ -31,10 +31,12 @@ use fileio::FileIO;
 
 /// Parse command line arguments
 /// Returns (file_path, delimiter)
-fn parse_args() -> (Option<PathBuf>, Option<u8>) {
+fn parse_args() -> (Option<PathBuf>, Option<u8>, bool, bool) {
     let args: Vec<String> = std::env::args().collect();
     let mut file_path: Option<PathBuf> = None;
     let mut delimiter: Option<u8> = None;
+    let mut fork = false;
+    let mut read_only = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -52,6 +54,14 @@ fn parse_args() -> (Option<PathBuf>, Option<u8>) {
                 print_help();
                 std::process::exit(0);
             }
+            "-f" | "--fork" => {
+                fork = true;
+                i += 1;
+            }
+            "--read-only" => {
+                read_only = true;
+                i += 1;
+            }
             arg if arg.starts_with('-') => {
                 eprintln!("Unknown option: {}", arg);
                 std::process::exit(1);
@@ -63,7 +73,7 @@ fn parse_args() -> (Option<PathBuf>, Option<u8>) {
         }
     }
 
-    (file_path, delimiter)
+    (file_path, delimiter, fork, read_only)
 }
 
 /// Parse a delimiter string into a byte
@@ -89,15 +99,22 @@ fn print_help() {
     eprintln!();
     eprintln!("OPTIONS:");
     eprintln!("    -d, --delimiter <DELIM>  Set the field delimiter (comma, tab, semicolon, pipe, or char)");
+    eprintln!("    -f, --fork               Fork the file by default");
+    eprintln!("    --read-only              Read only mode");
     eprintln!("    -h, --help               Print this help message");
     eprintln!();
     eprintln!("If no delimiter is specified, it will be auto-detected from the file content.");
 }
 
 fn main() -> io::Result<()> {
-    let (file_path, delimiter) = parse_args();
+    let (file_path, delimiter, fork, read_only) = parse_args();
 
-    let file_io = FileIO::new(file_path, delimiter)?;
+    let file_io = if (fork) {
+        (FileIO::new(file_path, delimiter, read_only)?).fork()
+    } else {
+        FileIO::new(file_path, delimiter, read_only)?
+    };
+
     let load_result = file_io.load_table()?;
 
     enable_raw_mode()?;

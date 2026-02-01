@@ -147,13 +147,14 @@ pub struct FileIO {
     pub file_path: Option<PathBuf>,
     format: Option<FileFormat>,
     delimiter: u8,
-    max_dim: (usize, usize)
+    max_dim: (usize, usize),
+    read_only: bool
 }
 
 impl FileIO {
     /// Create a new FileIO with optional delimiter override
     /// If delimiter is None, auto-detect from file content (or fall back to extension/comma)
-    pub fn new(file_path: Option<PathBuf>, delimiter: Option<u8>) -> io::Result<Self> {
+    pub fn new(file_path: Option<PathBuf>, delimiter: Option<u8>, read_only: bool) -> io::Result<Self> {
         let format = file_path.as_ref().and_then(FileFormat::from_extension);
 
         // Determine delimiter: explicit > detected > extension-based > comma default
@@ -181,7 +182,7 @@ impl FileIO {
         };
 
         let max_dim = (50000000, 50000000);
-        Ok(Self { file_path, format, delimiter, max_dim })
+        Ok(Self { file_path, format, delimiter, max_dim, read_only })
     }
 
     pub fn fork(&self) -> FileIO {
@@ -195,7 +196,8 @@ impl FileIO {
             file_path: Some(next_fork_filename_suffix_wins(&fpath)),
             format: self.format,
             delimiter: self.delimiter,
-            max_dim: self.max_dim
+            max_dim: self.max_dim,
+            read_only: false
         }
     }
 
@@ -352,6 +354,9 @@ impl FileIO {
     }
 
     fn write_csv(&self, table: &Table) -> io::Result<()> {
+        if self.read_only {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "file opened in read-only mode (use ':fork' to save your work)"));
+        }
         let path = self.file_path.as_ref().ok_or(io::ErrorKind::NotFound)?;
         let delim = self.delimiter;
 
