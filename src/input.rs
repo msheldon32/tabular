@@ -576,13 +576,28 @@ impl VisualHandler {
         match self.visual_type {
             VisualType::Cell => {
                 if let Some(span) = table.get_span(start_row, end_row, start_col, end_col) {
-                    clipboard.yank_span(span);
+                    if clipboard.row_manager.borrow().is_filtered {
+                        let good_rows = (start_row..=end_row).filter(|&i| clipboard.row_manager.borrow().is_row_live(i))
+                                            .map(|i| span[i.saturating_sub(start_row)].clone()).collect();
+
+                        clipboard.yank_span(good_rows);
+                    } else {
+                        clipboard.yank_span(span);
+                    }
                 }
             }
             VisualType::Row => {
                 // Yank all selected rows using bulk get
                 let count = end_row - start_row + 1;
-                let rows = table.get_rows_cloned(start_row, count);
+                let rows = if clipboard.row_manager.borrow().is_filtered {
+                    let mut vec = Vec::new();
+                    for idx in (start_row..=end_row).filter(|&i| clipboard.row_manager.borrow().is_row_live(i)) {
+                        vec.push(table.get_row_cloned(idx).unwrap());
+                    }
+                    vec
+                } else {
+                    table.get_rows_cloned(start_row, count)
+                };
                 if !rows.is_empty() {
                     clipboard.yank_rows(rows);
                 }
@@ -605,6 +620,9 @@ impl VisualHandler {
     }
 
     fn handle_delete(&self, view: &TableView, table: &Table) -> KeyResult {
+        if view.row_manager.borrow().is_filtered {
+            return KeyResult::Message("Delete is forbidden in filtered views.".to_string());
+        }
         let (start_row, end_row, start_col, end_col) = view.get_selection_bounds();
 
         match self.visual_type {

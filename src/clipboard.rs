@@ -84,7 +84,7 @@ pub struct Clipboard {
     yank_register: Option<RegisterContent>,
     /// Currently selected register for next operation (None = unnamed)
     selected: Option<char>,
-    row_manager: Rc<RefCell<RowManager>>
+    pub row_manager: Rc<RefCell<RowManager>>
 }
 
 impl Clipboard {

@@ -364,17 +364,20 @@ impl App {
                     return;
                 }
 
-                // Store deleted rows (doesn't affect yank register)
-                let rows = self.table.get_rows_cloned(start_row, actual_count);
-                if !rows.is_empty() {
-                    self.clipboard.store_deleted(RegisterContent::from_rows(rows.clone()));
+                if self.row_manager.borrow().is_filtered {
+                    self.message = Some("Delete is forbidden in filtered views.".to_string());
+                    return;
+                } else {
+                    let rows = self.table.get_rows_cloned(start_row, actual_count);
+                    if !rows.is_empty() {
+                        self.clipboard.store_deleted(RegisterContent::from_rows(rows.clone()));
 
-                    // Delete rows using bulk operation
-                    let txn = Transaction::DeleteRowsBulk {
-                        idx: start_row,
-                        data: rows,
-                    };
-                    self.execute(txn);
+                        let txn = Transaction::DeleteRowsBulk {
+                            idx: start_row,
+                            data: rows,
+                        };
+                        self.execute(txn);
+                    }
                 }
                 self.view.clamp_cursor(&self.table);
                 let msg = if actual_count == 1 { "Row deleted".to_string() } else { format!("{} rows deleted", actual_count) };
