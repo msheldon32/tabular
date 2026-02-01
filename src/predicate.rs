@@ -33,6 +33,9 @@ pub enum Predicate {
         op: Op,
         val: String,
     },
+    Not(Box<Predicate>),
+    And(Box<Predicate>, Box<Predicate>),
+    Or(Box<Predicate>, Box<Predicate>)
 }
 
 impl fmt::Display for Predicate {
@@ -40,7 +43,16 @@ impl fmt::Display for Predicate {
         match self {
             Predicate::Comparator { op, val } => {
                 write!(f, "{} {}", op, val)
-            }
+            },
+            Predicate::Not(pred) => {
+                write!(f, "NOT({})", pred)
+            },
+            Predicate::And(lhs, rhs) => {
+                write!(f, "AND({},{})", lhs, rhs)
+            },
+            Predicate::Or(lhs, rhs) => {
+                write!(f, "OR({},{})", lhs, rhs)
+            },
         }
     }
 }
@@ -89,6 +101,15 @@ impl Predicate {
                         Op::Ge => lhs >= rhs,
                     }
                 },
+            },
+            Predicate::Not(pred) => {
+                !pred.evaluate(other, col_type)
+            },
+            Predicate::And(lhs, rhs) => {
+                lhs.evaluate(other, col_type) && rhs.evaluate(other, col_type)
+            },
+            Predicate::Or(lhs, rhs) => {
+                lhs.evaluate(other, col_type) || rhs.evaluate(other, col_type)
             },
         }
     }
