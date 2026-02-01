@@ -225,6 +225,10 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let dirty_indicator = if app.dirty { "[+]" } else { "" };
 
+    let row_manager = app.row_manager.borrow();
+
+    let filter_status = if row_manager.is_filtered { row_manager.filter_string.clone() } else { String::new() };
+
     let file_name = app
         .file_io
         .file_path
@@ -254,6 +258,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         ),
         Span::raw(" "),
         Span::raw(file_name),
+        Span::raw(" "),
+        Span::styled(filter_status, app.style.filter_status()),
         Span::raw(" "),
         Span::styled(dirty_indicator, app.style.message_error()),
         Span::raw(" ".repeat(

@@ -1,4 +1,5 @@
 use regex::Regex;
+use std::fmt;
 
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -11,6 +12,20 @@ pub enum Op {
     Ge,
 }
 
+impl fmt::Display for Op {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Op::Eq => "=",
+            Op::Ne => "!",
+            Op::Lt => "<",
+            Op::Le => "<=",
+            Op::Gt => ">",
+            Op::Ge => ">=",
+        };
+        write!(f, "{s}")
+    }
+}
+
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Predicate {
@@ -18,6 +33,16 @@ pub enum Predicate {
         op: Op,
         val: String,
     },
+}
+
+impl fmt::Display for Predicate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Predicate::Comparator { op, val } => {
+                write!(f, "{} {}", op, val)
+            }
+        }
+    }
 }
 
 

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use crate::table::Table;
 use crate::predicate::{Predicate, ColumnType};
+use crate::util::letters_from_col;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FilterType {
@@ -14,7 +15,8 @@ pub enum FilterType {
 pub struct RowManager {
     pub is_filtered: bool,
     pub active_rows: Vec<usize>,
-    pub active_row_set: HashSet<usize>
+    pub active_row_set: HashSet<usize>,
+    pub filter_string: String
 }
 
 impl RowManager {
@@ -22,7 +24,8 @@ impl RowManager {
         Self {
             is_filtered: false,
             active_rows: Vec::new(),
-            active_row_set: HashSet::new()
+            active_row_set: HashSet::new(),
+            filter_string: String::new()
         }
     }
 
@@ -94,9 +97,10 @@ impl RowManager {
         }
         self.active_row_set = HashSet::from_iter(self.active_rows.iter().cloned());
         self.is_filtered = true;
+        self.filter_string = String::from("Filtered (fibonacci)");
     }
 
-    pub fn predicate_filter(&mut self, table: &Table, col: usize, predicate: Predicate, col_type: ColumnType) {
+    pub fn predicate_filter(&mut self, table: &Table, col: usize, predicate: Predicate, col_type: ColumnType, keep_header: bool) {
         let idxs: Box<dyn Iterator<Item = usize>> = if self.is_filtered {
             Box::new(self.active_rows.iter().map(|&i| i))
         } else {
@@ -105,14 +109,21 @@ impl RowManager {
 
         self.active_rows = idxs.filter(|&i| predicate.evaluate(table.get_cell(i, col).unwrap(), col_type)).collect();
 
+        if keep_header && self.active_rows.first() != Some(&0usize) {
+            self.active_rows.insert(0, 0usize);
+        }
+
         self.active_row_set = HashSet::from_iter(self.active_rows.iter().cloned());
         self.is_filtered = true;
+        let col_letter = letters_from_col(col);
+        self.filter_string = format!("Filtered ({} {})", col_letter, predicate.to_string());
     }
 
     pub fn remove_filter(&mut self) {
         self.active_rows = Vec::new();
         self.active_row_set = HashSet::new();
         self.is_filtered = false;
+        self.filter_string = String::new();
     }
 }
 

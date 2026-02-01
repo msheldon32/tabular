@@ -180,6 +180,9 @@ pub struct Theme {
     pub message_warning: ElementStyle,
     pub message_error: ElementStyle,
 
+    // Filter status
+    pub filter_status: ElementStyle,
+
     // Command line
     pub command_line: ElementStyle,
     pub command_prompt: ElementStyle,
@@ -232,6 +235,7 @@ impl Theme {
             message_info: ElementStyle::fg(ThemeColor::Named(White)),
             message_warning: ElementStyle::fg(ThemeColor::Named(LightYellow)),
             message_error: ElementStyle::fg(ThemeColor::Named(LightRed)).with_bold(),
+            filter_status: ElementStyle::fg(ThemeColor::Named(Blue)).with_bold(),
             command_line: ElementStyle::fg(ThemeColor::Named(White)),
             command_prompt: ElementStyle::fg(ThemeColor::Named(LightCyan)),
             show_grid: false,
@@ -274,6 +278,7 @@ impl Theme {
             message_info: ElementStyle::fg(ThemeColor::Named(Black)),
             message_warning: ElementStyle::fg(ThemeColor::Named(Yellow)),
             message_error: ElementStyle::fg(ThemeColor::Named(Red)).with_bold(),
+            filter_status: ElementStyle::fg(ThemeColor::Named(Blue)).with_bold(),
             command_line: ElementStyle::fg(ThemeColor::Named(Black)),
             command_prompt: ElementStyle::fg(ThemeColor::Named(Blue)),
             show_grid: true,
@@ -316,6 +321,7 @@ impl Theme {
             message_info: ElementStyle::fg(base0),
             message_warning: ElementStyle::fg(orange),
             message_error: ElementStyle::fg(red).with_bold(),
+            filter_status: ElementStyle::fg(blue).with_bold(),
             command_line: ElementStyle::fg(base0),
             command_prompt: ElementStyle::fg(cyan),
             show_grid: false,
@@ -434,6 +440,10 @@ impl Style {
 
     pub fn message_error(&self) -> RatStyle {
         self.theme.message_error.to_ratatui()
+    }
+
+    pub fn filter_status(&self) -> RatStyle {
+        self.theme.filter_status.to_ratatui()
     }
 
     pub fn command_line(&self) -> RatStyle {

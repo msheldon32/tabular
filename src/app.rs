@@ -905,7 +905,7 @@ impl App {
                     self.message = Some("Fibonacci filter applied (why????)".to_string());
                 } else if let FilterType::PredicateFilter(pred) = filter_type {
                     let active_col = self.view.cursor_col;
-                    self.row_manager.borrow_mut().predicate_filter(&self.table, active_col, pred, ColumnType::Numeric);
+                    self.row_manager.borrow_mut().predicate_filter(&self.table, active_col, pred, ColumnType::Numeric, self.header_mode);
                     self.message = Some("Numeric filter applied".to_string());
                 } else {
                     self.message = Some("Filter applied".to_string());
