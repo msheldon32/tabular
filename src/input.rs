@@ -672,6 +672,9 @@ impl VisualHandler {
     }
 
     fn handle_drag_down(&self, view: &TableView, table: &Table) -> KeyResult {
+        if view.rowmanager.is_filtered {
+            return KeyResult::Message("Drag is forbidden in filtered views.".to_string());
+        }
         match self.visual_type {
             VisualType::Cell | VisualType::Row => {
                 let txn = create_drag_down_txn(view, table, self.visual_type == VisualType::Row);
@@ -682,6 +685,9 @@ impl VisualHandler {
     }
 
     fn handle_drag_right(&self, view: &TableView, table: &Table) -> KeyResult {
+        if view.rowmanager.is_filtered {
+            return KeyResult::Message("Drag is forbidden in filtered views.".to_string());
+        }
         match self.visual_type {
             VisualType::Cell | VisualType::Col => {
                 let txn = create_drag_right_txn(view, table, self.visual_type == VisualType::Col);
