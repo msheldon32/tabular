@@ -3,7 +3,8 @@ use regex::Regex;
 use rand::Rng;
 
 use crate::table::Table;
-use crate::util::{CellRef, parse_cell_ref, parse_range, parse_row_range, parse_col_range, CalcError};
+use crate::util::{CellRef, parse_cell_ref, parse_range, parse_row_range, 
+    parse_col_range, CalcError, letters_from_col };
 
 /// Format a numeric value for display, removing unnecessary trailing zeros
 fn format_number(value: f64) -> String {
@@ -18,22 +19,9 @@ fn format_number(value: f64) -> String {
     }
 }
 
-/// Convert column index to letters (0 -> A, 1 -> B, 26 -> AA, etc.)
-fn col_to_letters(mut col: usize) -> String {
-    let mut result = String::new();
-    loop {
-        result.insert(0, (b'A' + (col % 26) as u8) as char);
-        if col < 26 {
-            break;
-        }
-        col = col / 26 - 1;
-    }
-    result
-}
-
 /// Convert a cell reference to a human-readable name like "A1", "B2", etc.
 fn cell_ref_to_name(cell: &CellRef) -> String {
-    format!("{}{}", col_to_letters(cell.col), cell.row + 1)
+    format!("{}{}", letters_from_col(cell.col), cell.row + 1)
 }
 
 /// Find a function call in the expression, returning (start, end, arguments)

@@ -176,7 +176,7 @@ impl KeyBuffer {
             ['g', 'g'] => Some(SequenceAction::MoveToTop),
             ['d', 'r'] => Some(SequenceAction::DeleteRow),
             ['d', 'c'] => Some(SequenceAction::DeleteCol),
-            //['d', 'd'] => Some(SequenceAction::Delete),
+            ['d', 'd'] => Some(SequenceAction::Delete),
             ['y', 'r'] => Some(SequenceAction::YankRow),
             ['y', 'c'] => Some(SequenceAction::YankCol),
             ['y', 'y'] => Some(SequenceAction::Yank),
