@@ -367,17 +367,16 @@ impl App {
                 if self.row_manager.borrow().is_filtered {
                     self.message = Some("Delete is forbidden in filtered views.".to_string());
                     return;
-                } else {
-                    let rows = self.table.get_rows_cloned(start_row, actual_count);
-                    if !rows.is_empty() {
-                        self.clipboard.store_deleted(RegisterContent::from_rows(rows.clone()));
+                }
+                let rows = self.table.get_rows_cloned(start_row, actual_count);
+                if !rows.is_empty() {
+                    self.clipboard.store_deleted(RegisterContent::from_rows(rows.clone()));
 
-                        let txn = Transaction::DeleteRowsBulk {
-                            idx: start_row,
-                            data: rows,
-                        };
-                        self.execute(txn);
-                    }
+                    let txn = Transaction::DeleteRowsBulk {
+                        idx: start_row,
+                        data: rows,
+                    };
+                    self.execute(txn);
                 }
                 self.view.clamp_cursor(&self.table);
                 let msg = if actual_count == 1 { "Row deleted".to_string() } else { format!("{} rows deleted", actual_count) };
@@ -450,14 +449,16 @@ impl App {
                 self.message = Some(msg);
             }
             SequenceAction::Yank => {
-                // In normal mode, yy yanks current row (like yr)
                 if let Some(row) = self.table.get_row_cloned(self.view.cursor_row) {
                     self.clipboard.yank_span(vec![vec![row[self.view.cursor_col].clone()]]);
                     self.message = Some("Row yanked".to_string());
                 }
             }
             SequenceAction::Delete => {
-                // In normal mode, dd deletes current row (like dr)
+                if self.row_manager.borrow().is_filtered {
+                    self.message = Some("Adding rows is forbidden in filtered views.".to_string());
+                    return;
+                }
                 if let Some(row_data) = self.table.get_row_cloned(self.view.cursor_row) {
                     self.clipboard.store_deleted(RegisterContent::from_rows(vec![row_data.clone()]));
                     let txn = Transaction::DeleteRow {
@@ -524,6 +525,10 @@ impl App {
                 self.should_quit = true;
             }
             KeyCode::Char('o') => {
+                if self.row_manager.borrow().is_filtered {
+                    self.message = Some("Adding rows is forbidden in filtered views.".to_string());
+                    return;
+                }
                 let txn = Transaction::InsertRow { idx: self.view.cursor_row + 1 };
                 self.execute(txn);
                 self.view.cursor_row += 1;
@@ -531,6 +536,10 @@ impl App {
                 self.message = Some("Row added".to_string());
             }
             KeyCode::Char('O') => {
+                if self.row_manager.borrow().is_filtered {
+                    self.message = Some("Adding rows is forbidden in filtered views.".to_string());
+                    return;
+                }
                 let txn = Transaction::InsertRow { idx: self.view.cursor_row };
                 self.execute(txn);
                 self.view.scroll_to_cursor();
