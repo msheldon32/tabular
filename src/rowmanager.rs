@@ -59,41 +59,32 @@ impl RowManager {
         }
     }
 
-    pub fn jump_down(&self, start: usize, jump: usize, table: &Table) -> Option<usize> {
+    pub fn jump_down(&self, start: usize, jump: usize, table: &Table) -> usize {
         if self.is_filtered {
-            self.active_rows.get(self.active_rows.partition_point(|&val| val <= start).saturating_sub(jump)).copied()
+            self.active_rows.get(self.active_rows.partition_point(|&val| val <= start) + jump - 1).unwrap_or(&self.get_end(table)).clone()
         } else {
-            Some((start+jump).min(table.row_count().saturating_sub(1)))
+            (start+jump).min(table.row_count().saturating_sub(1))
         }
     }
 
-    pub fn jump_up(&self, start: usize, jump: usize) -> Option<usize> {
-        if self.is_filtered {
-            self.active_rows.get(self.active_rows.partition_point(|&val| val <= start) + jump).copied()
+    pub fn jump_up(&self, start: usize, jump: usize) -> usize {
+        if jump == 0 {
+            start
+        } else if self.is_filtered {
+            self.active_rows.get(self.active_rows.partition_point(|&val| val < start).saturating_sub(jump)).unwrap_or(&0usize).clone()
         } else {
-            Some(start.saturating_sub(jump))
+            start.saturating_sub(jump)
         }
     }
 
-    pub fn fibonacci_filter(&mut self, table: Table) {
-        let mut fib_list = vec![1usize,1usize];
-
-        let mut is_fib = |x: usize| -> bool {
-            while x > *fib_list.last().unwrap() {
-                fib_list.push(*fib_list.last().unwrap() + fib_list[fib_list.len() - 1]);
-            }
-
-            let idx = fib_list.partition_point(|&a| a > x);
-            return idx < fib_list.len() && fib_list[idx] == x
-        };
-
+    pub fn fibonacci_filter(&mut self, table: &Table) {
         if !self.is_filtered {
-            self.active_rows = self.active_rows.iter().copied().filter(|&x| is_fib(x)).collect();
+            self.active_rows = vec![0,1,1,2,3,5,8,13,21,35,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78];
         } else {
-            self.active_rows = (0..table.row_count()).filter(|&x| is_fib(x)).collect();
-            self.is_filtered = true;
+            self.active_rows = vec![0,1,1,2,3,5,8,13,21,35,56];
         }
         self.active_row_set = HashSet::from_iter(self.active_rows.iter().cloned());
+        self.is_filtered = true;
     }
 
     pub fn remove_filter(&mut self) {

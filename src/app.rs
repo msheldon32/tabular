@@ -202,7 +202,7 @@ impl App {
             // Check for completed background operations
             self.poll_background_result();
 
-            terminal.draw(|f| ui::render(f, self))?;
+            terminal.draw(|f| ui::render(f, self, self.row_manager.clone()))?;
 
             // Execute pending operation after render (so progress bar is visible)
             if let Some(op) = self.pending_op.take() {
@@ -879,7 +879,11 @@ impl App {
                 // This is necessary so the view doesn't go out of sync
                 self.view.move_to_top();
                 if filter_type == FilterType::Default {
+                    self.row_manager.borrow_mut().remove_filter();
                     self.message = Some("Filter removed".to_string());
+                } else if filter_type == FilterType::Fibonacci {
+                    self.row_manager.borrow_mut().fibonacci_filter(&self.table);
+                    self.message = Some("Fibonacci filter applied (why????)".to_string());
                 } else {
                     self.message = Some("Filter applied".to_string());
                 }

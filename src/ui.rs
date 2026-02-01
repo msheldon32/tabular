@@ -6,12 +6,16 @@ use ratatui::{
     Frame,
 };
 
+use std::rc::Rc;
+use std::cell::RefCell;
+
 use crate::app::App;
 use crate::format::format_display;
 use crate::mode::Mode;
 use crate::util::letters_from_col;
+use crate::rowmanager::RowManager;
 
-pub fn render(frame: &mut Frame, app: &mut App) {
+pub fn render(frame: &mut Frame, app: &mut App, row_manager: Rc<RefCell<RowManager>>) {
     // Apply background color if set
     if let Some(bg_color) = app.style.background() {
         let bg_style = Style::default().bg(bg_color);
@@ -28,12 +32,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         ])
         .split(frame.size());
 
-    render_table(frame, app, chunks[0]);
+    render_table(frame, app, chunks[0], row_manager);
     render_status_bar(frame, app, chunks[1]);
     render_command_line(frame, app, chunks[2]);
 }
 
-fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
+fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<RefCell<RowManager>>) {
     let col_count = app.table.col_count();
     let row_count = app.table.row_count();
     if col_count == 0 || row_count == 0 {
@@ -95,9 +99,10 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Selected row indices
     let selected_indices: Box<dyn Iterator<Item = usize>> = if app.header_mode && app.view.viewport_row > 0 {
-        Box::new((0..1).chain(app.view.viewport_row..).take(visible_rows))
+        // this hangs without the row count end, guess iters aren't that lazy after all
+        Box::new((0..1).chain(app.view.viewport_row..app.table.row_count()).filter(|&i| row_manager.borrow().is_row_live(i)).take(visible_rows))
     } else {
-        Box::new((app.view.viewport_row..).take(visible_rows))
+        Box::new((app.view.viewport_row..app.table.row_count()).filter(|&i| row_manager.borrow().is_row_live(i)).take(visible_rows))
     };
 
     let mut end_row = 0;
@@ -186,7 +191,7 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
         .collect();
     
     // update viewport
-    app.view.viewport_height = (end_row-app.view.viewport_row)+1;
+    app.view.viewport_height = visible_rows-1;
 
     // Build title with scroll indicator
     let title = if app.view.viewport_row > 0 || app.view.viewport_col > 0 {
