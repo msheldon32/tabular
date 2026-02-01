@@ -443,7 +443,7 @@ impl App {
             SequenceAction::Yank => {
                 // In normal mode, yy yanks current row (like yr)
                 if let Some(row) = self.table.get_row_cloned(self.view.cursor_row) {
-                    self.clipboard.yank_rows(vec![row]);
+                    self.clipboard.yank_span(vec![vec![row[self.view.cursor_col].clone()]]);
                     self.message = Some("Row yanked".to_string());
                 }
             }
@@ -644,6 +644,7 @@ impl App {
                 new_value: self.insert_handler.buffer.clone(),
             };
             self.execute_and_finish(txn);
+            self.table.recompute_col_widths();
             return;
         }
 

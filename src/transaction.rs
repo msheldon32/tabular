@@ -81,24 +81,29 @@ impl Transaction {
         match self {
             Transaction::SetCell { row, col, new_value, .. } => {
                 table.set_cell(*row, *col, new_value.clone());
+                table.recompute_col_widths();
             }
             Transaction::InsertRow { idx } => {
                 table.insert_row_at(*idx);
             }
             Transaction::InsertRowWithData { idx, data } => {
                 table.insert_row_with_data(*idx, data.clone());
+                table.recompute_col_widths();
             }
             Transaction::DeleteRow { idx, .. } => {
                 table.delete_row_at(*idx);
+                table.recompute_col_widths();
             }
             Transaction::InsertRowsBulk { idx, count } => {
                 table.insert_rows_bulk(*idx, *count);
             }
             Transaction::InsertRowsWithDataBulk { idx, data } => {
                 table.insert_rows_with_data_bulk(*idx, data.clone());
+                table.recompute_col_widths();
             }
             Transaction::DeleteRowsBulk { idx, data } => {
                 table.delete_rows_bulk(*idx, data.len());
+                table.recompute_col_widths();
             }
             Transaction::InsertCol { idx } => {
                 table.insert_col_at(*idx);
@@ -120,6 +125,7 @@ impl Transaction {
                         table.set_cell(row + dr, col + dc, value.clone());
                     }
                 }
+                table.recompute_col_widths();
             }
             Transaction::PermuteRows { permutation } => {
                 table.apply_row_permutation(permutation);
