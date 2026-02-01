@@ -51,8 +51,28 @@ impl RowManager {
         }
     }
 
-    pub fn get_end(&self) -> usize {
-        return self.active_rows.last().copied().unwrap_or(0usize);
+    pub fn get_end(&self, table: &Table) -> usize {
+        if self.is_filtered {
+            self.active_rows.last().copied().unwrap_or(0usize)
+        } else {
+            table.row_count()-1
+        }
+    }
+
+    pub fn jump_down(&self, start: usize, jump: usize, table: &Table) -> Option<usize> {
+        if self.is_filtered {
+            self.active_rows.get(self.active_rows.partition_point(|&val| val <= start).saturating_sub(jump)).copied()
+        } else {
+            Some((start+jump).min(table.row_count().saturating_sub(1)))
+        }
+    }
+
+    pub fn jump_up(&self, start: usize, jump: usize) -> Option<usize> {
+        if self.is_filtered {
+            self.active_rows.get(self.active_rows.partition_point(|&val| val <= start) + jump).copied()
+        } else {
+            Some(start.saturating_sub(jump))
+        }
     }
 
     pub fn fibonacci_filter(&mut self, table: Table) {

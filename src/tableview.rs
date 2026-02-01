@@ -90,7 +90,8 @@ impl TableView {
         if self.cursor_row < self.viewport_row {
             self.viewport_row = self.cursor_row;
         } else if self.cursor_row >= self.viewport_row + self.viewport_height {
-            self.viewport_row = self.cursor_row.saturating_sub(self.viewport_height - 1);
+            //self.viewport_row = self.cursor_row.saturating_sub(self.viewport_height - 1);
+            self.viewport_row = self.row_manager.borrow().jump_up(self.cursor_row, self.viewport_height-1).unwrap_or(0);
         }
 
         // Horizontal scrolling
@@ -118,14 +119,17 @@ impl TableView {
 
     pub fn move_up(&mut self) {
         if self.cursor_row > 0 {
-            self.cursor_row -= 1;
+            //self.cursor_row -= 1;
+            self.cursor_row = self.row_manager.borrow().get_predecessor(self.cursor_row).unwrap_or(0);
             self.scroll_to_cursor();
         }
     }
 
     pub fn move_down(&mut self, table: &Table) {
         if self.cursor_row + 1 < table.row_count() {
-            self.cursor_row += 1;
+            //self.cursor_row += 1;
+            let last_row = self.row_manager.borrow().get_end(table);
+            self.cursor_row = self.row_manager.borrow().get_successor(self.cursor_row).unwrap_or(last_row);
             self.scroll_to_cursor();
         }
     }
@@ -137,7 +141,7 @@ impl TableView {
 
     pub fn move_to_bottom(&mut self, table: &Table) {
         if table.row_count() > 0 {
-            self.cursor_row = table.row_count() - 1;
+            self.cursor_row = self.row_manager.borrow().get_end(table);
             self.scroll_to_cursor();
         }
     }
@@ -156,25 +160,29 @@ impl TableView {
 
     pub fn page_down(&mut self, table: &Table) {
         let jump = self.viewport_height.saturating_sub(1).max(1);
-        self.cursor_row = (self.cursor_row + jump).min(table.row_count().saturating_sub(1));
+        //self.cursor_row = (self.cursor_row + jump).min(table.row_count().saturating_sub(1));
+        self.cursor_row = self.row_manager.borrow().jump_down(self.cursor_row, jump, table).unwrap_or(table.row_count().saturating_sub(1));
         self.scroll_to_cursor();
     }
 
-    pub fn page_up(&mut self) {
+    pub fn page_up(&mut self, table: &Table) {
         let jump = self.viewport_height.saturating_sub(1).max(1);
-        self.cursor_row = self.cursor_row.saturating_sub(jump);
+        //self.cursor_row = self.cursor_row.saturating_sub(jump);
+        self.cursor_row = self.row_manager.borrow().jump_up(self.cursor_row, jump).unwrap_or(0);
         self.scroll_to_cursor();
     }
 
     pub fn half_page_down(&mut self, table: &Table) {
         let jump = self.viewport_height / 2;
-        self.cursor_row = (self.cursor_row + jump).min(table.row_count().saturating_sub(1));
+        //self.cursor_row = (self.cursor_row + jump).min(table.row_count().saturating_sub(1));
+        self.cursor_row = self.row_manager.borrow().jump_down(self.cursor_row, jump, table).unwrap_or(table.row_count().saturating_sub(1));
         self.scroll_to_cursor();
     }
 
-    pub fn half_page_up(&mut self) {
+    pub fn half_page_up(&mut self, table: &Table) {
         let jump = self.viewport_height / 2;
-        self.cursor_row = self.cursor_row.saturating_sub(jump);
+        //self.cursor_row = self.cursor_row.saturating_sub(jump);
+        self.cursor_row = self.row_manager.borrow().jump_up(self.cursor_row, jump).unwrap_or(0);
         self.scroll_to_cursor();
     }
 

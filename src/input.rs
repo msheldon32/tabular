@@ -261,13 +261,13 @@ impl NavigationHandler {
                 view.half_page_down(table); true
             }
             KeyCode::Char('u') if ctrl => {
-                view.half_page_up(); true
+                view.half_page_up(table); true
             }
             KeyCode::Char('f') if ctrl => {
                 view.page_down(table); true
             }
             KeyCode::Char('b') if ctrl => {
-                view.page_up(); true
+                view.page_up(table); true
             }
             _ => false
         }
