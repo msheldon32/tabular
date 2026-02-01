@@ -33,6 +33,14 @@ impl RowManager {
         }
     }
 
+    pub fn row_closure(self) -> impl Fn(usize) -> bool {
+        move |i| self.is_row_live(i)
+    }
+
+    pub fn row_closure_wf(self) -> impl Fn(&usize) -> bool {
+        move |&i| self.is_row_live(i)
+    }
+
     pub fn get_successor(&self, row: usize) -> Option<usize> {
         // note that this does *not* check the table size
         if self.is_filtered {

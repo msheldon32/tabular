@@ -1,7 +1,10 @@
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 use crate::table::Table;
 use crate::transaction::Transaction;
+use crate::rowmanager::RowManager;
 
 /// Where yanked data should be anchored when pasting
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -81,15 +84,17 @@ pub struct Clipboard {
     yank_register: Option<RegisterContent>,
     /// Currently selected register for next operation (None = unnamed)
     selected: Option<char>,
+    row_manager: Rc<RefCell<RowManager>>
 }
 
 impl Clipboard {
-    pub fn new() -> Self {
+    pub fn new(row_manager: Rc<RefCell<RowManager>>) -> Self {
         Self {
             registers: HashMap::new(),
             unnamed: None,
             yank_register: None,
             selected: None,
+            row_manager
         }
     }
 
@@ -449,9 +454,14 @@ mod tests {
         )
     }
 
+    fn row_manager() -> Rc<RefCell<RowManager>> {
+        Rc::new(RefCell::new(RowManager::new()))
+    }
+
+
     #[test]
     fn test_clipboard_new() {
-        let clipboard = Clipboard::new();
+        let clipboard = Clipboard::new(row_manager());
         assert!(clipboard.unnamed.is_none());
         assert!(clipboard.yank_register.is_none());
         assert!(clipboard.selected.is_none());
@@ -459,7 +469,7 @@ mod tests {
 
     #[test]
     fn test_yank_row_updates_unnamed_and_yank_register() {
-        let mut clipboard = Clipboard::new();
+        let mut clipboard = Clipboard::new(row_manager());
         clipboard.yank_row(vec!["a".to_string(), "b".to_string()]);
 
         assert!(clipboard.unnamed.is_some());
@@ -469,7 +479,7 @@ mod tests {
 
     #[test]
     fn test_black_hole_register_discards() {
-        let mut clipboard = Clipboard::new();
+        let mut clipboard = Clipboard::new(row_manager());
         clipboard.yank_row(vec!["original".to_string()]);
 
         // Select black hole and yank
@@ -491,7 +501,7 @@ mod tests {
 
     #[test]
     fn test_named_register() {
-        let mut clipboard = Clipboard::new();
+        let mut clipboard = Clipboard::new(row_manager());
 
         // Yank to register a
         clipboard.select_register('a').unwrap();
@@ -508,7 +518,7 @@ mod tests {
 
     #[test]
     fn test_yank_register_not_affected_by_delete() {
-        let mut clipboard = Clipboard::new();
+        let mut clipboard = Clipboard::new(row_manager());
 
         // Yank something
         clipboard.yank_row(vec!["yanked".to_string()]);
@@ -554,7 +564,7 @@ mod tests {
 
     #[test]
     fn test_paste_as_transaction_nothing() {
-        let mut clipboard = Clipboard::new();
+        let mut clipboard = Clipboard::new(row_manager());
         let table = make_table(vec![vec!["a"]]);
 
         let (msg, txn) = clipboard.paste_as_transaction(0, 0, &table);
@@ -565,7 +575,7 @@ mod tests {
 
     #[test]
     fn test_paste_as_transaction_row() {
-        let mut clipboard = Clipboard::new();
+        let mut clipboard = Clipboard::new(row_manager());
         clipboard.yank_row(vec!["x".to_string(), "y".to_string()]);
 
         let table = make_table(vec![
@@ -587,14 +597,14 @@ mod tests {
 
     #[test]
     fn test_select_invalid_register() {
-        let mut clipboard = Clipboard::new();
+        let mut clipboard = Clipboard::new(row_manager());
         assert!(clipboard.select_register('!').is_err());
         assert!(clipboard.select_register('1').is_err()); // Only 0 is valid number
     }
 
     #[test]
     fn test_select_valid_registers() {
-        let mut clipboard = Clipboard::new();
+        let mut clipboard = Clipboard::new(row_manager());
         assert!(clipboard.select_register('a').is_ok());
         assert!(clipboard.select_register('z').is_ok());
         assert!(clipboard.select_register('A').is_ok()); // Uppercase treated as lowercase
@@ -606,7 +616,7 @@ mod tests {
 
     #[test]
     fn test_list_registers() {
-        let mut clipboard = Clipboard::new();
+        let mut clipboard = Clipboard::new(row_manager());
         clipboard.yank_row(vec!["unnamed".to_string()]);
 
         clipboard.select_register('a').unwrap();

@@ -80,6 +80,7 @@ impl App {
     pub fn new(table: Table, file_io: FileIO) -> Self {
         let row_manager = Rc::new(RefCell::new(RowManager::new()));
         let view = TableView::new(row_manager.clone());
+        let clipboard = Clipboard::new(row_manager.clone());
 
         let mut plugin_manager = PluginManager::new();
         let _ = plugin_manager.load_plugins();
@@ -87,7 +88,7 @@ impl App {
         Self {
             table,
             view,
-            clipboard: Clipboard::new(),
+            clipboard,
             history: History::new(),
             style: Style::new(),
             mode: Mode::Normal,
@@ -414,8 +415,13 @@ impl App {
                 let start_row = self.view.cursor_row;
                 let actual_count = count.min(self.table.row_count().saturating_sub(start_row));
 
-                // Use bulk get for efficiency
-                let rows = self.table.get_rows_cloned(start_row, actual_count);
+                // Use bulk get for efficiency, if we can
+                let rows = if self.row_manager.borrow().is_filtered {
+                    let it = (start_row..self.table.row_count()).filter(|&i| self.row_manager.borrow().is_row_live(i)).take(actual_count);
+                    it.filter_map(|i| self.table.get_row_cloned(i)).collect()
+                } else {
+                    self.table.get_rows_cloned(start_row, actual_count)
+                };
                 if !rows.is_empty() {
                     self.clipboard.yank_rows(rows);
                 }
