@@ -79,7 +79,7 @@ pub struct App {
 impl App {
     pub fn new(table: Table, file_io: FileIO) -> Self {
         let row_manager = Rc::new(RefCell::new(RowManager::new()));
-        let view = TableView::new();
+        let view = TableView::new(row_manager.clone());
 
         let mut plugin_manager = PluginManager::new();
         let _ = plugin_manager.load_plugins();

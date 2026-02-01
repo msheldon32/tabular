@@ -51,6 +51,10 @@ impl RowManager {
         }
     }
 
+    pub fn get_end(&self) -> usize {
+        return self.active_rows.last().copied().unwrap_or(0usize);
+    }
+
     pub fn fibonacci_filter(&mut self, table: Table) {
         let mut fib_list = vec![1usize,1usize];
 

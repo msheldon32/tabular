@@ -401,7 +401,7 @@ mod tests {
         writeln!(file, "1,2").unwrap();  // Short row
         writeln!(file, "3,4,5").unwrap();
 
-        let file_io = FileIO::new(Some(file.path().to_path_buf()), None).unwrap();
+        let file_io = FileIO::new(Some(file.path().to_path_buf()), None, false).unwrap();
         let result = file_io.load_table().unwrap();
 
         assert_eq!(result.table.col_count(), 3);

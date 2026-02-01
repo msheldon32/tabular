@@ -24,10 +24,12 @@ pub struct TableView {
     // Last visible row (set during render)
     pub viewport_height: usize,
     pub viewport_width: usize,
+
+    pub row_manager: Rc<RefCell<RowManager>>
 }
 
 impl TableView {
-    pub fn new() -> Self {
+    pub fn new(row_manager: Rc<RefCell<RowManager>>) -> Self {
         Self {
             cursor_row: 0,
             cursor_col: 0,
@@ -37,6 +39,7 @@ impl TableView {
             viewport_width: 10,
             support_row: 0,
             support_col: 0,
+            row_manager
         }
     }
 
@@ -328,10 +331,14 @@ mod tests {
         table.get_cell(r, c).unwrap().clone()
     }
 
+    fn row_manager() -> Rc<RefCell<RowManager>> {
+        Rc::new(RefCell::new(RowManager::new()))
+    }
+
     // === TableView unit tests ===
     #[test]
     fn test_tableview_new() {
-        let view = TableView::new();
+        let view = TableView::new(row_manager());
         assert_eq!(view.cursor_row, 0);
         assert_eq!(view.cursor_col, 0);
         assert_eq!(view.viewport_row, 0);
@@ -340,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_tableview_navigation() {
-        let mut view = TableView::new();
+        let mut view = TableView::new(row_manager());
         let table = make_table(vec![
             vec!["a", "b", "c"],
             vec!["d", "e", "f"],
@@ -362,7 +369,7 @@ mod tests {
 
     #[test]
     fn test_tableview_navigation_bounds() {
-        let mut view = TableView::new();
+        let mut view = TableView::new(row_manager());
         let table = make_table(vec![
             vec!["a", "b"],
             vec!["c", "d"],
@@ -388,7 +395,7 @@ mod tests {
 
     #[test]
     fn test_tableview_move_to_edges() {
-        let mut view = TableView::new();
+        let mut view = TableView::new(row_manager());
         let table = make_table(vec![
             vec!["a", "b", "c"],
             vec!["d", "e", "f"],
@@ -413,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_tableview_clamp_cursor() {
-        let mut view = TableView::new();
+        let mut view = TableView::new(row_manager());
         view.cursor_row = 100;
         view.cursor_col = 100;
 
@@ -430,7 +437,7 @@ mod tests {
 
     #[test]
     fn test_tableview_current_cell() {
-        let view = TableView::new();
+        let view = TableView::new(row_manager());
         let table = make_table(vec![
             vec!["hello", "world"],
         ]);
@@ -440,7 +447,7 @@ mod tests {
 
     #[test]
     fn test_tableview_set_support() {
-        let mut view = TableView::new();
+        let mut view = TableView::new(row_manager());
         view.cursor_row = 5;
         view.cursor_col = 3;
 
@@ -452,7 +459,7 @@ mod tests {
 
     #[test]
     fn test_tableview_yank_row() {
-        let view = TableView::new();
+        let view = TableView::new(row_manager());
         let table = make_table(vec![
             vec!["a", "b", "c"],
             vec!["d", "e", "f"],
@@ -464,7 +471,7 @@ mod tests {
 
     #[test]
     fn test_tableview_yank_col() {
-        let view = TableView::new();
+        let view = TableView::new(row_manager());
         let table = make_table(vec![
             vec!["a", "b"],
             vec!["c", "d"],
@@ -477,7 +484,7 @@ mod tests {
 
     #[test]
     fn test_tableview_yank_span() {
-        let mut view = TableView::new();
+        let mut view = TableView::new(row_manager());
         view.cursor_row = 0;
         view.cursor_col = 0;
         view.support_row = 1;
@@ -498,7 +505,7 @@ mod tests {
 
     #[test]
     fn test_tableview_is_selected_visual() {
-        let mut view = TableView::new();
+        let mut view = TableView::new(row_manager());
         view.cursor_row = 0;
         view.cursor_col = 0;
         view.support_row = 2;
@@ -513,7 +520,7 @@ mod tests {
 
     #[test]
     fn test_tableview_is_selected_visual_row() {
-        let mut view = TableView::new();
+        let mut view = TableView::new(row_manager());
         view.cursor_row = 1;
         view.cursor_col = 1;
         view.support_row = 2;
@@ -529,7 +536,7 @@ mod tests {
 
     #[test]
     fn test_tableview_is_selected_visual_col() {
-        let mut view = TableView::new();
+        let mut view = TableView::new(row_manager());
         view.cursor_row = 1;
         view.cursor_col = 1;
         view.support_row = 1;
@@ -545,7 +552,7 @@ mod tests {
 
     #[test]
     fn test_tableview_page_navigation() {
-        let mut view = TableView::new();
+        let mut view = TableView::new(row_manager());
         view.viewport_height = 10;
 
         let table = make_table(vec![vec!["x"]; 100]); // 100 rows
