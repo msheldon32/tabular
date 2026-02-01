@@ -1,3 +1,5 @@
+use regex::Regex;
+
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Op {
@@ -65,4 +67,29 @@ impl Predicate {
             },
         }
     }
+}
+
+
+pub fn parse_predicate(pred_string: String) -> Predicate {
+    let pred_re = Regex::new(r"^\s*(!|=|<|<=|>|>=)\s*([0-9]+)\s*$")
+        .expect("invalid regex");
+
+    let caps = pred_re
+        .captures(&pred_string)
+        .expect("invalid predicate string");
+
+    let op_str = &caps[1];
+    let val = caps[2].to_string();
+
+    let op = match op_str {
+        "="  => Op::Eq,
+        "!"  => Op::Ne,
+        "<"  => Op::Lt,
+        "<=" => Op::Le,
+        ">"  => Op::Gt,
+        ">=" => Op::Ge,
+        _ => unreachable!(),
+    };
+
+    Predicate::Comparator { op, val }
 }

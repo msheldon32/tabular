@@ -26,6 +26,7 @@ use crate::fileio::FileIO;
 use crate::style::Style;
 use crate::progress::Progress;
 use crate::rowmanager::{FilterType, RowManager};
+use crate::predicate::ColumnType;
 
 /// Result from a background operation
 pub enum BackgroundResult {
@@ -902,6 +903,10 @@ impl App {
                 } else if filter_type == FilterType::Fibonacci {
                     self.row_manager.borrow_mut().fibonacci_filter(&self.table);
                     self.message = Some("Fibonacci filter applied (why????)".to_string());
+                } else if let FilterType::PredicateFilter(pred) = filter_type {
+                    let active_col = self.view.cursor_col;
+                    self.row_manager.borrow_mut().predicate_filter(&self.table, active_col, pred, ColumnType::Numeric);
+                    self.message = Some("Numeric filter applied".to_string());
                 } else {
                     self.message = Some("Filter applied".to_string());
                 }
