@@ -1,7 +1,10 @@
 use std::cmp;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 use crate::table::Table;
 use crate::mode::Mode;
+use crate::rowmanager::RowManager;
 
 /// View state for the table (cursor, viewport, selection)
 #[derive(Debug, Clone)]
@@ -21,10 +24,12 @@ pub struct TableView {
     // Last visible row (set during render)
     pub viewport_height: usize,
     pub viewport_width: usize,
+
+    pub row_manager: Rc<RefCell<RowManager>>
 }
 
 impl TableView {
-    pub fn new() -> Self {
+    pub fn new(row_manager: Rc<RefCell<RowManager>>) -> Self {
         Self {
             cursor_row: 0,
             cursor_col: 0,
@@ -34,6 +39,8 @@ impl TableView {
             viewport_width: 10,
             support_row: 0,
             support_col: 0,
+
+            row_manager
         }
     }
 
@@ -298,12 +305,6 @@ impl TableView {
         self.scroll_to_cursor();
     }
 
-}
-
-impl Default for TableView {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 #[cfg(test)]

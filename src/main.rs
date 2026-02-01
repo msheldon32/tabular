@@ -15,6 +15,7 @@ mod tableview;
 mod transaction;
 mod ui;
 mod util;
+mod rowmanager;
 
 use std::io;
 use std::path::PathBuf;

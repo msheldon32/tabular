@@ -2,6 +2,8 @@ use std::io;
 use std::time::Duration;
 use std::sync::mpsc::{self, Receiver};
 use std::thread::{self, JoinHandle};
+use std::rc::Rc;
+use std::cell::RefCell;
 
 use crossterm::event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -23,6 +25,7 @@ use crate::ui;
 use crate::fileio::FileIO;
 use crate::style::Style;
 use crate::progress::Progress;
+use crate::rowmanager::{FilterType, RowManager};
 
 /// Result from a background operation
 pub enum BackgroundResult {
@@ -50,6 +53,7 @@ pub struct App {
     pub style: Style,
     pub mode: Mode,
     pub file_io: FileIO,
+    pub row_manager: Rc<RefCell<RowManager>>,
     pub dirty: bool,
     pub calling_mode: Option<Mode>,
     pub message: Option<String>,
@@ -74,7 +78,8 @@ pub struct App {
 
 impl App {
     pub fn new(table: Table, file_io: FileIO) -> Self {
-        let view = TableView::new();
+        let row_manager = Rc::new(RefCell::new(RowManager::new()));
+        let view = TableView::new(Rc::clone(&row_manager));
 
         let mut plugin_manager = PluginManager::new();
         let _ = plugin_manager.load_plugins();
@@ -87,6 +92,7 @@ impl App {
             style: Style::new(),
             mode: Mode::Normal,
             file_io,
+            row_manager,
             dirty: false,
             calling_mode: None,
             message: None,
@@ -860,6 +866,15 @@ impl App {
                     }
                 }
                 self.message = Some(format!("Unknown command: {}", s));
+            }
+            Command::Filter(filter_type) => {
+                // This is necessary so the view doesn't go out of sync
+                self.view.move_to_top();
+                if filter_type == FilterType::Default {
+                    self.message = Some("Filter removed".to_string());
+                } else {
+                    self.message = Some("Filter applied".to_string());
+                }
             }
         }
         self.calling_mode = None;

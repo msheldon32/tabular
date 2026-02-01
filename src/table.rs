@@ -819,30 +819,6 @@ pub enum SortDirection {
     Descending,
 }
 
-/// Compare two cell values for sorting
-fn compare_cells(cell_a: &str, cell_b: &str, sort_type: SortType, direction: SortDirection) -> std::cmp::Ordering {
-    let cmp = match sort_type {
-        SortType::Numeric => {
-            // Use parse_numeric to handle currency, percentages, etc.
-            let num_a = crate::format::parse_numeric(cell_a).unwrap_or(f64::NAN);
-            let num_b = crate::format::parse_numeric(cell_b).unwrap_or(f64::NAN);
-            // Handle NaN: push non-parseable values to the end
-            match (num_a.is_nan(), num_b.is_nan()) {
-                (true, true) => cell_a.cmp(cell_b), // Both NaN, sort as text
-                (true, false) => std::cmp::Ordering::Greater, // NaN goes last
-                (false, true) => std::cmp::Ordering::Less,
-                (false, false) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
-            }
-        }
-        SortType::Text => cell_a.to_lowercase().cmp(&cell_b.to_lowercase()),
-    };
-
-    match direction {
-        SortDirection::Ascending => cmp,
-        SortDirection::Descending => cmp.reverse(),
-    }
-}
-
 /// Maximum cells to sample for type detection
 const TYPE_PROBE_SAMPLE_SIZE: usize = 20;
 

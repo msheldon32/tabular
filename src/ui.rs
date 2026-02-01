@@ -51,7 +51,6 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
     // Calculate how many columns fit in available width
     let mut total_width = 0u16;
     let mut visible_cols = 0usize;
-    let mut last_col = app.view.viewport_col;
     for col in app.view.viewport_col..col_count {
         let col_width = app.table.col_widths().get(col).copied().unwrap_or(3);
         let cell_width = col_width as u16 + 2; // padding
@@ -60,7 +59,6 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
         }
         total_width += cell_width;
         visible_cols += 1;
-        last_col = col;
     }
     app.view.viewport_width = visible_cols;
 
@@ -96,8 +94,8 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect) {
     let header_row = Row::new(header_cells);
 
     // Selected row indices
-    let selected_indices: Box<dyn Iterator<Item = usize>> = if (app.header_mode && app.view.viewport_row > 0) {
-        Box::new((0..1).chain((app.view.viewport_row..)).take(visible_rows))
+    let selected_indices: Box<dyn Iterator<Item = usize>> = if app.header_mode && app.view.viewport_row > 0 {
+        Box::new((0..1).chain(app.view.viewport_row..).take(visible_rows))
     } else {
         Box::new((app.view.viewport_row..).take(visible_rows))
     };

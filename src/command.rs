@@ -1,6 +1,7 @@
 
 use regex::Regex;
 use crate::util::{CellRef, parse_cell_ref};
+use crate::rowmanager::FilterType;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplaceScope {
@@ -41,6 +42,7 @@ pub enum Command {
     PluginList,     // List loaded plugins
     Precision(Option<usize>),  // Set display precision for numbers (None = auto)
     Custom { name: String, args: Vec<String> },
+    Filter(FilterType),
     Unknown(String),
 }
 
@@ -101,6 +103,8 @@ impl Command {
             "clip" | "cp" => Some(Command::Clip),
             "sp" | "syspaste" => Some(Command::SysPaste),
             "plugins" => Some(Command::PluginList),
+            "fibfilter" => Some(Command::Filter(FilterType::Fibonacci)),
+            "nofilter" => Some(Command::Filter(FilterType::Default)),
             _ => Some(Command::Unknown(trimmed.to_string())),
         }
     }

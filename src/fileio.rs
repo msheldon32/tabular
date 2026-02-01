@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter, Write};
+use std::io::{self, BufRead, BufReader, BufWriter};
 
 use crate::table::{Table, CHUNK_SIZE};
 
