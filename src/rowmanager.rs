@@ -1,12 +1,13 @@
 use std::collections::HashSet;
 
 use crate::table::Table;
-
+use crate::predicate::Predicate;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FilterType {
     Default,
-    Fibonacci
+    Fibonacci,
+    PredicateFilter(Predicate)
 }
 
 #[derive(Debug, Clone)]

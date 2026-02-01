@@ -16,6 +16,7 @@ mod transaction;
 mod ui;
 mod util;
 mod rowmanager;
+mod predicate;
 
 use std::io;
 use std::path::PathBuf;
