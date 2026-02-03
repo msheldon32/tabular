@@ -106,7 +106,7 @@ impl VisualHandler {
                 nav.handle(key, view, table);
 
                 match key.code {
-                    KeyCode::Char('x') => self.handle_delete(view, table, clipboard),
+                    KeyCode::Char('x') => self.handle_clear(view, table, clipboard),
                     KeyCode::Char(':') => KeyResult::SwitchMode(crate::mode::Mode::Command),
                     KeyCode::Char('q') => self.handle_drag_down(view, table),
                     KeyCode::Char('Q') => self.handle_drag_right(view, table),
@@ -214,7 +214,7 @@ impl VisualHandler {
                 let cols = table.get_cols_cloned(start_col, end_col);
                 clipboard.store_deleted(RegisterContent {
                     data: cols,
-                    anchor: PasteAnchor::RowStart
+                    anchor: PasteAnchor::ColStart
                 });
                 let txns: Vec<Transaction> = (start_col..=end_col)
                     .filter_map(|c| {
@@ -231,6 +231,68 @@ impl VisualHandler {
                 }
             }
         }
+    }
+
+    fn handle_clear(&self, view: &TableView, table: &Table, clipboard: &mut Clipboard) -> KeyResult {
+        if view.row_manager.borrow().is_filtered {
+            return KeyResult::Message("Deleting rows is forbidden in filtered views.".to_string());
+        }
+        let (start_row, end_row, start_col, end_col) = view.get_selection_bounds();
+
+        let mut new_data = Vec::new();
+        let mut old_data = Vec::new();
+
+        let mut grab_row = start_row;
+        let mut grab_col = start_col;
+
+        match self.visual_type {
+            VisualType::Cell => {
+                // Clear cell contents
+                old_data = table.get_span(start_row, end_row, start_col, end_col)
+                    .unwrap_or_default();
+
+                clipboard.store_deleted(RegisterContent {
+                    data: old_data.clone(),
+                    anchor: PasteAnchor::Cursor
+                });
+
+                new_data = vec![vec![String::new(); end_col - start_col + 1]; end_row - start_row + 1];
+            }
+            VisualType::Row => {
+                // Delete entire rows using bulk operation
+                let count = end_row - start_row + 1;
+                let old_data = table.get_rows_cloned(start_row, count);
+
+                clipboard.store_deleted(RegisterContent {
+                    data: old_data.clone(),
+                    anchor: PasteAnchor::RowStart
+                });
+
+                grab_col = 0;
+
+                let new_data = vec![vec![String::new(); table.col_count()]; table.row_count()];
+            }
+            VisualType::Col => {
+                // Delete entire columns
+                let old_data = table.get_cols_cloned(start_col, end_col);
+
+                clipboard.store_deleted(RegisterContent {
+                    data: old_data.clone(),
+                    anchor: PasteAnchor::ColStart
+                });
+
+                grab_row = 0;
+
+                let new_data = vec![vec![String::new(); end_col - start_col + 1]; table.row_count()];
+            }
+        };
+        let txn = Transaction::SetSpan {
+            row: grab_row,
+            col: grab_col,
+            old_data,
+            new_data,
+        };
+        KeyResult::ExecuteAndFinish(txn)
     }
 
     fn handle_drag_down(&self, view: &TableView, table: &Table) -> KeyResult {
