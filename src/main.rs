@@ -10,6 +10,7 @@ mod transaction;
 mod ui;
 mod util;
 mod numeric;
+mod config;
 
 use std::io;
 use std::path::PathBuf;

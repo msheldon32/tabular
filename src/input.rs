@@ -5,6 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::table::table::Table;
 use crate::table::tableview::TableView;
 use crate::transaction::Transaction;
+use crate::config::AppConfig;
 
 /// Result of handling a key event
 #[allow(dead_code)]
@@ -34,7 +35,7 @@ pub fn is_escape(key: KeyEvent) -> bool {
 }
 
 /// Actions resulting from key sequences
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Copy)]
 pub enum SequenceAction {
     MoveToTop,   // gg
     DeleteRow,   // dr
@@ -86,6 +87,7 @@ pub struct KeyBuffer {
     count: Option<usize>,
     last_key_time: Instant,
     timeout: Duration,
+    config: AppConfig
 }
 
 impl KeyBuffer {
@@ -95,6 +97,7 @@ impl KeyBuffer {
             count: None,
             last_key_time: Instant::now(),
             timeout: Duration::from_millis(1000),
+            config: AppConfig::new()
         }
     }
 
@@ -172,7 +175,7 @@ impl KeyBuffer {
     }
 
     fn match_sequence(&self) -> Option<SequenceAction> {
-        match self.keys.as_slice() {
+        /*match self.keys.as_slice() {
             ['g', 'g'] => Some(SequenceAction::MoveToTop),
             ['d', 'r'] => Some(SequenceAction::DeleteRow),
             ['d', 'c'] => Some(SequenceAction::DeleteCol),
@@ -195,7 +198,8 @@ impl KeyBuffer {
                 Some(SequenceAction::SelectRegister(*c))
             }
             _ => None,
-        }
+        }*/
+        self.config.commands.match_sequence(self.keys.clone())
     }
 
     fn is_valid_prefix(&self) -> bool {
