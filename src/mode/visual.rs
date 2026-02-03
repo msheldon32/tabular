@@ -271,7 +271,7 @@ impl VisualHandler {
 
                 grab_col = 0;
 
-                new_data = vec![vec![String::new(); table.col_count()]; table.row_count()];
+                new_data = vec![vec![String::new(); table.col_count()]; count];
             }
             VisualType::Col => {
                 // Clear and yank column
