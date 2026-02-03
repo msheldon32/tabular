@@ -5,8 +5,8 @@ use crate::util::{CellRef, CalcError, col_from_letters, letters_from_col};
 use crate::numeric::parser::{self, Expr, BinOp, ParseError};
 use crate::numeric::formula::{self as formula, ExprEvaluator};
 
-#[derive(Debug)]
-enum CalcType {
+#[derive(Debug, Clone)]
+pub enum CalcType {
     Int(i64),
     Str(String),
     Float(f64),
@@ -93,13 +93,13 @@ impl<'a> Calculator<'a> {
         let order = self.topological_sort(&formulas, &dependencies)?;
 
         // Evaluate in order
-        let mut results: HashMap<CellRef, f64> = HashMap::new();
+        let mut results: HashMap<CellRef, CalcType> = HashMap::new();
         let mut updates: Vec<(usize, usize, String)> = Vec::new();
 
         for cell_ref in order {
             let expr = &formulas[&cell_ref];
             let value = self.evaluate_expr(expr, &results)?;
-            results.insert(cell_ref.clone(), value);
+            results.insert(cell_ref.clone(), CalcType::Float(value));
             updates.push((cell_ref.row, cell_ref.col, format_number(value)));
         }
 
@@ -236,26 +236,47 @@ impl<'a> Calculator<'a> {
         Ok(())
     }
 
-    /// Get cell value as f64
-    fn get_cell_value(&self, cell: &CellRef, results: &HashMap<CellRef, f64>) -> Result<f64, CalcError> {
-        if let Some(&val) = results.get(cell) {
-            return Ok(val);
+    /// Get cell value as CalcType
+    fn get_cell_value(
+        &self,
+        cell: &CellRef,
+        results: &HashMap<CellRef, CalcType>,
+    ) -> CalcType {
+        if let Some(val) = results.get(cell) {
+            return val.clone();
         }
 
-        let cell_content = self.table.get_cell(cell.row, cell.col)
-            .ok_or_else(|| CalcError::InvalidReference(cell_ref_to_name(cell)))?;
+        let empty_str = String::new();
 
-        if cell_content.trim().is_empty() {
-            return Ok(0.0);
+        let cell_content = self
+            .table
+            .get_cell(cell.row, cell.col).unwrap_or(&empty_str);
+
+        let trimmed = cell_content.trim();
+
+        if trimmed.is_empty() {
+            return CalcType::Float(0.0);
         }
 
-        crate::numeric::format::parse_numeric(cell_content)
-            .ok_or_else(|| CalcError::EvalError(format!("{} is not a number", cell_ref_to_name(cell))))
+        // this is put before i64 for debugging, move it afterwards!
+        if let Ok(f) = trimmed.parse::<f64>() {
+            return CalcType::Float(f);
+        }
+
+        if let Ok(i) = trimmed.parse::<i64>() {
+            return CalcType::Int(i);
+        }
+
+        if let Ok(b) = trimmed.to_lowercase().parse::<bool>() {
+            return CalcType::Bool(b);
+        }
+
+        CalcType::Str(trimmed.to_string())
     }
 
     /// Evaluate an expression to f64
     /// Booleans are represented as 1.0 (true) and 0.0 (false)
-    fn evaluate_expr(&self, expr: &Expr, results: &HashMap<CellRef, f64>) -> Result<f64, CalcError> {
+    fn evaluate_expr(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<f64, CalcError> {
         match expr {
             Expr::Number(n) => Ok(*n),
 
@@ -264,7 +285,7 @@ impl<'a> Calculator<'a> {
             Expr::CellRef { col, row } => {
                 let col_idx = col_from_letters(col);
                 let cell = CellRef { row: *row - 1, col: col_idx };
-                self.get_cell_value(&cell, results)
+                self.get_cell_value(&cell, results).use_float().ok_or_else(|| CalcError::ParseError("Not a number".to_string()))
             }
 
             Expr::Neg(inner) => {
@@ -331,7 +352,7 @@ impl<'a> Calculator<'a> {
     }
 
     /// Expand a range expression to a Vec of f64 values
-    pub fn expand_range(&self, expr: &Expr, results: &HashMap<CellRef, f64>) -> Result<Vec<f64>, CalcError> {
+    pub fn expand_range(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<Vec<f64>, CalcError> {
         match expr {
             Expr::Range { start, end } => {
                 if let (Expr::CellRef { col: start_col, row: start_row },
@@ -347,7 +368,8 @@ impl<'a> Calculator<'a> {
                     for r in row_min..=row_max {
                         for c in col_min..=col_max {
                             let cell = CellRef { row: r - 1, col: c };
-                            values.push(self.get_cell_value(&cell, results)?);
+                            let val = self.get_cell_value(&cell, results).use_float().ok_or_else(|| CalcError::ParseError("Not a number".to_string()))?;
+                            values.push(val);
                         }
                     }
                     Ok(values)
@@ -362,7 +384,8 @@ impl<'a> Calculator<'a> {
                 for r in row_min..=row_max {
                     for c in 0..self.table.col_count() {
                         let cell = CellRef { row: r - 1, col: c };
-                        values.push(self.get_cell_value(&cell, results)?);
+                        let val = self.get_cell_value(&cell, results).use_float().ok_or_else(|| CalcError::ParseError("Not a number".to_string()))?;
+                        values.push(val)
                     }
                 }
                 Ok(values)
@@ -377,7 +400,8 @@ impl<'a> Calculator<'a> {
                 for r in row_start..self.table.row_count() {
                     for c in col_min..=col_max {
                         let cell = CellRef { row: r, col: c };
-                        values.push(self.get_cell_value(&cell, results)?);
+                        let val = self.get_cell_value(&cell, results).use_float().ok_or_else(|| CalcError::ParseError("Not a number".to_string()))?;
+                        values.push(val);
                     }
                 }
                 Ok(values)
@@ -390,11 +414,11 @@ impl<'a> Calculator<'a> {
 }
 
 impl ExprEvaluator for Calculator<'_> {
-    fn eval(&self, expr: &Expr, results: &HashMap<CellRef, f64>) -> Result<f64, CalcError> {
+    fn eval(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<f64, CalcError> {
         self.evaluate_expr(expr, results)
     }
 
-    fn expand(&self, expr: &Expr, results: &HashMap<CellRef, f64>) -> Result<Vec<f64>, CalcError> {
+    fn expand(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<Vec<f64>, CalcError> {
         self.expand_range(expr, results)
     }
 }

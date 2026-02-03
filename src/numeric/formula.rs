@@ -6,12 +6,13 @@ use std::collections::HashMap;
 use rand::Rng;
 
 use crate::util::{CellRef, CalcError};
+use crate::numeric::calculator::CalcType;
 
 /// Trait for types that can evaluate expressions and expand ranges
 /// This allows the function evaluator to delegate back to the calculator
 pub trait ExprEvaluator {
-    fn eval(&self, expr: &super::parser::Expr, results: &HashMap<CellRef, f64>) -> Result<f64, CalcError>;
-    fn expand(&self, expr: &super::parser::Expr, results: &HashMap<CellRef, f64>) -> Result<Vec<f64>, CalcError>;
+    fn eval(&self, expr: &super::parser::Expr, results: &HashMap<CellRef, CalcType>) -> Result<f64, CalcError>;
+    fn expand(&self, expr: &super::parser::Expr, results: &HashMap<CellRef, CalcType>) -> Result<Vec<f64>, CalcError>;
 }
 
 /// Evaluate a function call
@@ -19,7 +20,7 @@ pub fn evaluate_function<E: ExprEvaluator>(
     evaluator: &E,
     name: &str,
     args: &[super::parser::Expr],
-    results: &HashMap<CellRef, f64>,
+    results: &HashMap<CellRef, CalcType>,
 ) -> Result<f64, CalcError> {
     match name {
         // === Aggregate functions ===
