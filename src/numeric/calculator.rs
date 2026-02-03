@@ -5,6 +5,29 @@ use crate::util::{CellRef, CalcError, col_from_letters, letters_from_col};
 use crate::numeric::parser::{self, Expr, BinOp, ParseError};
 use crate::numeric::formula::{self as formula, ExprEvaluator};
 
+#[derive(Debug)]
+enum CalcType {
+    Int(i64),
+    Str(String),
+    Float(f64),
+    Bool(bool)
+}
+
+impl CalcType {
+    fn use_int(&self) -> Option<i64> {
+        if let CalcType::Int(i) = self { Some(*i) } else { None }
+    }
+    fn use_string(&self) -> Option<String> {
+        if let CalcType::Str(s) = self { Some(s.to_string()) } else { None }
+    }
+    fn use_float(&self) -> Option<f64> {
+        if let CalcType::Float(x) = self { Some(*x) } else { None }
+    }
+    fn use_bool(&self) -> Option<bool> {
+        if let CalcType::Bool(x) = self { Some(*x) } else { None }
+    }
+}
+
 /// Format a numeric value for display, removing unnecessary trailing zeros
 fn format_number(value: f64) -> String {
     if value.fract() == 0.0 && value.abs() < 1e15 {
