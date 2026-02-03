@@ -1,5 +1,6 @@
 use regex::Regex;
 use std::num::ParseIntError;
+use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CellRef {
@@ -13,6 +14,17 @@ pub enum CalcError {
     InvalidReference(String),
     ParseError(String),
     EvalError(String),
+}
+
+impl fmt::Display for CalcError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CalcError::CircularReference(s) => write!(f, "Circular reference: {}", s),
+            CalcError::InvalidReference(s) => write!(f, "Invalid reference: {}", s),
+            CalcError::ParseError(s) => write!(f, "Parse error: {}", s),
+            CalcError::EvalError(s) => write!(f, "Evaluation error: {}", s),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

@@ -568,6 +568,25 @@ impl Parser {
         match self.peek().clone() {
             Token::Number(n) => {
                 self.advance();
+                // Check if this is a row range like 1:5
+                if matches!(self.peek(), Token::Colon) {
+                    if n.fract() == 0.0 && n >= 1.0 {
+                        self.advance();
+                        if let Token::Number(end) = self.peek().clone() {
+                            if end.fract() == 0.0 && end >= 1.0 {
+                                self.advance();
+                                return Ok(Expr::RowRange {
+                                    start: n as usize,
+                                    end: end as usize,
+                                });
+                            }
+                        }
+                        return Err(ParseError::UnexpectedToken {
+                            expected: "row number".to_string(),
+                            found: self.peek().clone(),
+                        });
+                    }
+                }
                 Ok(Expr::Number(n))
             }
 
@@ -602,29 +621,6 @@ impl Parser {
                 let expr = self.parse_expr()?;
                 self.expect(Token::RParen)?;
                 Ok(expr)
-            }
-
-            // Row range starting with a number: 1:5
-            Token::Number(n) if n.fract() == 0.0 && n >= 1.0 => {
-                self.advance();
-                if matches!(self.peek(), Token::Colon) {
-                    self.advance();
-                    if let Token::Number(end) = self.peek().clone() {
-                        if end.fract() == 0.0 && end >= 1.0 {
-                            self.advance();
-                            return Ok(Expr::RowRange {
-                                start: n as usize,
-                                end: end as usize,
-                            });
-                        }
-                    }
-                    Err(ParseError::UnexpectedToken {
-                        expected: "row number".to_string(),
-                        found: self.peek().clone(),
-                    })
-                } else {
-                    Ok(Expr::Number(n))
-                }
             }
 
             Token::Eof => Err(ParseError::UnexpectedEof),
