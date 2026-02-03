@@ -12,12 +12,12 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use crate::calculator::Calculator;
 use crate::canvas::Canvas;
 use crate::clipboard::{Clipboard, RegisterContent};
-use crate::command::{Command, ReplaceCommand, CommandHandler};
-use crate::insert::InsertHandler;
+use crate::mode::command::{Command, ReplaceCommand, CommandHandler};
+use crate::mode::insert::InsertHandler;
 use crate::input::{
     is_escape, KeyBuffer, KeyBufferResult, KeyResult, NavigationHandler, SequenceAction
 };
-use crate::search::SearchHandler;
+use crate::mode::search::SearchHandler;
 use crate::mode::Mode;
 use crate::operations;
 use crate::plugin::{PluginManager, PluginAction, CommandContext};
@@ -30,7 +30,7 @@ use crate::style::Style;
 use crate::progress::Progress;
 use crate::rowmanager::{FilterType, RowManager};
 use crate::util::ColumnType;
-use crate::visual::{SelectionInfo, VisualType, VisualHandler};
+use crate::mode::visual::{SelectionInfo, VisualType, VisualHandler};
 
 /// Result from a background operation
 pub enum BackgroundResult {
@@ -1117,7 +1117,7 @@ impl App {
     }
 
     fn execute_replace(&mut self, cmd: ReplaceCommand) {
-        use crate::command::ReplaceScope;
+        use crate::mode::command::ReplaceScope;
 
         // Determine which cells to search
         let (row_range, col_range) = match cmd.scope {

@@ -6,7 +6,6 @@ use crate::clipboard::Clipboard;
 use crate::table::Table;
 use crate::tableview::TableView;
 use crate::transaction::Transaction;
-use crate::visual::{VisualType, VisualHandler};
 
 /// Result of handling a key event
 #[allow(dead_code)]

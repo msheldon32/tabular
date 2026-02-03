@@ -1,3 +1,8 @@
+pub mod command;
+pub mod insert;
+pub mod visual;
+pub mod search;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Normal,

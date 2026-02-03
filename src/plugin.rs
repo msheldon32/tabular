@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::mode::Mode;
-use crate::visual::SelectionInfo;
+use crate::mode::visual::SelectionInfo;
 use crate::canvas::CanvasColor;
 
 pub struct PluginManager {
