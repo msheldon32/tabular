@@ -480,7 +480,7 @@ impl Table {
 
     /// Get multiple contiguous rows as cloned data (for clipboard/undo)
     pub fn get_rows_cloned(&self, start_idx: usize, count: usize) -> Vec<Vec<String>> {
-        if start_idx >= self.total_rows || count == 0 {
+        if start_idx + count > self.total_rows || count == 0 {
             return Vec::new();
         }
 
@@ -515,6 +515,22 @@ impl Table {
         }
 
         result
+    }
+
+    /// Get a cloned copy of a column (for transactions/clipboard)
+    pub fn get_cols_cloned(&self, start_idx: usize, count: usize) -> Vec<Vec<String>> {
+        if start_idx + count > self.col_count || count == 0 {
+            return Vec::new();
+        }
+
+        let end_idx = cmp::min(start_idx+count, self.col_count).saturating_sub(1);
+
+        (0..self.total_rows)
+            .map(|r| {
+                (start_idx..=end_idx)
+                    .map(|c| self.get_cell(r,c).cloned().unwrap_or_default())
+                    .collect()
+            }).collect()
     }
 
     pub fn insert_col_at(&mut self, idx: usize) {

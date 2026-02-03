@@ -5,7 +5,7 @@ use crate::transaction::Transaction;
 use crate::input::{KeyResult, KeyBufferResult, SequenceAction, is_escape, NavigationHandler, KeyBuffer};
 use crate::table::table::Table;
 use crate::table::tableview::TableView;
-use crate::clipboard::Clipboard;
+use crate::clipboard::{Clipboard, RegisterContent, PasteAnchor};
 use crate::numeric::format::{format_scientific, format_percentage, format_currency, format_commas, format_default, parse_numeric};
 
 /// Selection information for visual mode
@@ -71,7 +71,7 @@ impl VisualHandler {
                     SequenceAction::MoveLeft => view.move_left_n(count),
                     SequenceAction::MoveRight => view.move_right_n(count, table),
                     SequenceAction::Yank => return self.handle_yank(view, table, clipboard),
-                    SequenceAction::Delete => return self.handle_delete(view, table),
+                    SequenceAction::Delete => return self.handle_delete(view, table, clipboard),
                     // Format actions
                     SequenceAction::FormatDefault => {
                         return self.handle_format(view, table, FormatOp::Default);
@@ -106,7 +106,7 @@ impl VisualHandler {
                 nav.handle(key, view, table);
 
                 match key.code {
-                    KeyCode::Char('x') => self.handle_delete(view, table),
+                    KeyCode::Char('x') => self.handle_delete(view, table, clipboard),
                     KeyCode::Char(':') => KeyResult::SwitchMode(crate::mode::Mode::Command),
                     KeyCode::Char('q') => self.handle_drag_down(view, table),
                     KeyCode::Char('Q') => self.handle_drag_right(view, table),
@@ -165,7 +165,7 @@ impl VisualHandler {
         KeyResult::Finish
     }
 
-    fn handle_delete(&self, view: &TableView, table: &Table) -> KeyResult {
+    fn handle_delete(&self, view: &TableView, table: &Table, clipboard: &mut Clipboard) -> KeyResult {
         if view.row_manager.borrow().is_filtered {
             return KeyResult::Message("Deleting rows is forbidden in filtered views.".to_string());
         }
@@ -176,6 +176,12 @@ impl VisualHandler {
                 // Clear cell contents
                 let old_data = table.get_span(start_row, end_row, start_col, end_col)
                     .unwrap_or_default();
+
+                clipboard.store_deleted(RegisterContent {
+                    data: old_data.clone(),
+                    anchor: PasteAnchor::Cursor
+                });
+
                 let new_data = vec![vec![String::new(); end_col - start_col + 1]; end_row - start_row + 1];
                 let txn = Transaction::SetSpan {
                     row: start_row,
@@ -189,6 +195,11 @@ impl VisualHandler {
                 // Delete entire rows using bulk operation
                 let count = end_row - start_row + 1;
                 let rows = table.get_rows_cloned(start_row, count);
+
+                clipboard.store_deleted(RegisterContent {
+                    data: rows.clone(),
+                    anchor: PasteAnchor::RowStart
+                });
                 if rows.is_empty() {
                     KeyResult::Finish
                 } else {
@@ -200,6 +211,11 @@ impl VisualHandler {
             }
             VisualType::Col => {
                 // Delete entire columns
+                let cols = table.get_cols_cloned(start_col, end_col);
+                clipboard.store_deleted(RegisterContent {
+                    data: cols,
+                    anchor: PasteAnchor::RowStart
+                });
                 let txns: Vec<Transaction> = (start_col..=end_col)
                     .filter_map(|c| {
                         table.get_col_cloned(c).map(|data| Transaction::DeleteCol {
