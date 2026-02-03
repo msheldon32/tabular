@@ -487,6 +487,11 @@ impl App {
             }
             KeyCode::Char('x') => {
                 let old_value = operations::current_cell(&self.view, &self.table).clone();
+                self.clipboard.store_deleted(crate::clipboard::RegisterContent{
+                    data: vec![vec![old_value.clone()]],
+                    anchor: crate::clipboard::PasteAnchor::Cursor
+                });
+
                 let txn = Transaction::SetCell {
                     row: self.view.cursor_row,
                     col: self.view.cursor_col,
