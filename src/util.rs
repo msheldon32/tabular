@@ -270,22 +270,6 @@ pub fn byte_index_of_char(s: &str, char_idx: usize) -> usize {
         .unwrap_or(s.len())
 }
 
-/// Get the character index for a byte index
-/// Finds the character that contains or starts at the given byte position
-pub fn char_index_of_byte(s: &str, byte_idx: usize) -> usize {
-    s.char_indices()
-        .take_while(|(idx, _)| *idx < byte_idx)
-        .count()
-}
-
-/// Safely slice a string by character indices (not byte indices)
-/// Returns the substring from char_start to char_end (exclusive)
-pub fn slice_by_chars(s: &str, char_start: usize, char_end: usize) -> &str {
-    let start_byte = byte_index_of_char(s, char_start);
-    let end_byte = byte_index_of_char(s, char_end);
-    &s[start_byte..end_byte]
-}
-
 /// Get the character at a given character index, if it exists
 pub fn char_at(s: &str, char_idx: usize) -> Option<char> {
     s.chars().nth(char_idx)

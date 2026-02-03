@@ -3,9 +3,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+use crate::mode::Mode;
+use crate::visual::SelectionInfo;
+
 pub struct PluginManager {
     lua: Lua,
     commands: HashMap<String, String>, // command_name -> script content
+    prompt_results: HashMap<String, String>, // question -> answer for deferred prompts
 }
 
 pub struct CommandContext {
@@ -13,6 +17,7 @@ pub struct CommandContext {
     pub cursor_col: usize,
     pub row_count: usize,
     pub col_count: usize,
+    pub selection: SelectionInfo,
 }
 
 /// Color representation for canvas
@@ -79,6 +84,8 @@ pub enum PluginAction {
     CanvasAddBlank,
     CanvasAddStyledText { text: String, fg: Option<CanvasColor>, bg: Option<CanvasColor>, bold: bool },
     CanvasAddImage { rows: Vec<String>, title: Option<String> },
+    // Prompt action - requests user input
+    PromptRequest { question: String, default: String },
 }
 
 pub struct PluginResult {
@@ -92,7 +99,18 @@ impl PluginManager {
         Self {
             lua,
             commands: HashMap::new(),
+            prompt_results: HashMap::new(),
         }
+    }
+
+    /// Store a prompt result for use in the next plugin execution
+    pub fn set_prompt_result(&mut self, question: &str, answer: String) {
+        self.prompt_results.insert(question.to_string(), answer);
+    }
+
+    /// Clear all prompt results
+    pub fn clear_prompt_results(&mut self) {
+        self.prompt_results.clear();
     }
 
     pub fn load_plugins(&mut self) -> LuaResult<Vec<String>> {
@@ -167,6 +185,22 @@ impl PluginManager {
         ctx_table.set("row_count", ctx.row_count)?;
         ctx_table.set("col_count", ctx.col_count)?;
 
+        // Add selection info (1-indexed for Lua)
+        if ctx.selection.mode.is_visual() {
+            let sel_table = self.lua.create_table()?;
+            sel_table.set("start_row", ctx.selection.start_row + 1)?;
+            sel_table.set("start_col", ctx.selection.start_col + 1)?;
+            sel_table.set("end_row", ctx.selection.end_row + 1)?;
+            sel_table.set("end_col", ctx.selection.end_col + 1)?;
+            sel_table.set("mode", match &ctx.selection.mode {
+                Mode::Visual => "visual",
+                Mode::VisualRow => "visual_row",
+                Mode::VisualCol => "visual_col",
+                other => "none",
+            })?;
+            ctx_table.set("selection", sel_table)?;
+        }
+
         // Create args table
         let args_table = self.lua.create_table()?;
         for (i, arg) in args.iter().enumerate() {
@@ -183,6 +217,8 @@ impl PluginManager {
                 }
             }
         }
+        let mut cell_cache_for_range = cell_cache.clone();
+        let mut cell_cache_for_type = cell_cache.clone();
 
         // Create an overlay table to hold pending writes (visible to Lua, not to actual data)
         let overlay = self.lua.create_table()?;
@@ -348,6 +384,138 @@ impl PluginManager {
             let len = actions_ref13.len()? + 1;
             actions_ref13.set(len, action)?;
             Ok(())
+        })?;
+
+        // canvas.add_styled_text(text, fg, bg, bold) function
+        let actions_ref14 = actions_table.clone();
+        let canvas_add_styled_text_fn = self.lua.create_function(move |lua, (text, fg, bg, bold): (String, Option<String>, Option<String>, Option<bool>)| {
+            let action = lua.create_table()?;
+            action.set("type", "canvas_add_styled_text")?;
+            action.set("text", text)?;
+            if let Some(fg_color) = fg {
+                action.set("fg", fg_color)?;
+            }
+            if let Some(bg_color) = bg {
+                action.set("bg", bg_color)?;
+            }
+            action.set("bold", bold.unwrap_or(false))?;
+            let len = actions_ref14.len()? + 1;
+            actions_ref14.set(len, action)?;
+            Ok(())
+        })?;
+
+        // get_selection() function - returns selection bounds or nil
+        let sel_start_row = ctx.selection.start_row;
+        let sel_start_col = ctx.selection.start_col;
+        let sel_end_row = ctx.selection.end_row;
+        let sel_end_col = ctx.selection.end_col;
+        let sel_is_visual = ctx.selection.mode.is_visual();
+        let sel_mode = ctx.selection.mode.clone();
+        let get_selection_fn = self.lua.create_function(move |lua, ()| {
+            if !sel_is_visual {
+                return Ok(Value::Nil);
+            }
+            let result = lua.create_table()?;
+            result.set("start_row", sel_start_row + 1)?;
+            result.set("start_col", sel_start_col + 1)?;
+            result.set("end_row", sel_end_row + 1)?;
+            result.set("end_col", sel_end_col + 1)?;
+            result.set("mode", match &sel_mode {
+                Mode::Visual => "visual",
+                Mode::VisualRow => "visual_row",
+                Mode::VisualCol => "visual_col",
+                other => "none",
+            })?;
+            Ok(Value::Table(result))
+        })?;
+
+        // get_range(r1, c1, r2, c2) function - returns 2D table of values
+        let get_range_fn = self.lua.create_function(move |lua, (r1, c1, r2, c2): (usize, usize, usize, usize)| {
+            let result = lua.create_table()?;
+            let start_row = r1.saturating_sub(1);
+            let start_col = c1.saturating_sub(1);
+            let end_row = r2.saturating_sub(1);
+            let end_col = c2.saturating_sub(1);
+
+            for (i, row) in (start_row..=end_row).enumerate() {
+                let row_table = lua.create_table()?;
+                for (j, col) in (start_col..=end_col).enumerate() {
+                    let value = cell_cache_for_range.get(&(row, col)).cloned().unwrap_or_default();
+                    row_table.set(j + 1, value)?;
+                }
+                result.set(i + 1, row_table)?;
+            }
+            Ok(result)
+        })?;
+
+        // get_column_type(col) function - returns "numeric" or "text"
+        let type_row_count = ctx.row_count;
+        let get_column_type_fn = self.lua.create_function(move |_, col: usize| {
+            let col_idx = col.saturating_sub(1);
+            let mut numeric_count = 0usize;
+            let mut total_count = 0usize;
+
+            for row in 0..type_row_count {
+                if let Some(value) = cell_cache_for_type.get(&(row, col_idx)) {
+                    if !value.is_empty() {
+                        total_count += 1;
+                        if value.parse::<f64>().is_ok() {
+                            numeric_count += 1;
+                        }
+                    }
+                }
+            }
+
+            // If more than half are numeric, consider it numeric
+            if total_count > 0 && numeric_count * 2 >= total_count {
+                Ok("numeric".to_string())
+            } else {
+                Ok("text".to_string())
+            }
+        })?;
+
+        // prompt(question, default) function - requests user input
+        let prompt_results = self.prompt_results.clone();
+        let actions_ref15 = actions_table.clone();
+        let prompt_fn = self.lua.create_function(move |lua, (question, default): (String, Option<String>)| {
+            // Check if we have a stored result for this question
+            if let Some(answer) = prompt_results.get(&question) {
+                return Ok(Value::String(lua.create_string(answer)?));
+            }
+
+            // No result yet, queue a prompt request and return nil
+            let action = lua.create_table()?;
+            action.set("type", "prompt_request")?;
+            action.set("question", question)?;
+            action.set("default", default.unwrap_or_default())?;
+            let len = actions_ref15.len()? + 1;
+            actions_ref15.set(len, action)?;
+            Ok(Value::Nil)
+        })?;
+
+        // save_data(key, value) function - persistent plugin storage
+        let actions_ref16 = actions_table.clone();
+        let save_data_fn = self.lua.create_function(move |lua, (key, value): (String, String)| {
+            let action = lua.create_table()?;
+            action.set("type", "save_data")?;
+            action.set("key", key)?;
+            action.set("value", value)?;
+            let len = actions_ref16.len()? + 1;
+            actions_ref16.set(len, action)?;
+            Ok(())
+        })?;
+
+        fn load_plugin_data(key: &String) -> Option<String> {
+            None
+        }
+
+        // load_data(key) function - load from persistent storage
+        let load_data_fn = self.lua.create_function(move |lua, key: String| {
+            let data = load_plugin_data(&key);
+            match data {
+                Some(value) => Ok(Value::String(lua.create_string(&value)?)),
+                None => Ok(Value::Nil),
+            }
         })?;
 
         // Create canvas sub-API

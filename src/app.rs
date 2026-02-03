@@ -1,4 +1,5 @@
 use std::io;
+use std::cmp;
 use std::time::Duration;
 use std::sync::mpsc::{self, Receiver};
 use std::thread::{self, JoinHandle};
@@ -28,6 +29,7 @@ use crate::style::Style;
 use crate::progress::Progress;
 use crate::rowmanager::{FilterType, RowManager};
 use crate::util::ColumnType;
+use crate::visual::SelectionInfo;
 
 /// Result from a background operation
 pub enum BackgroundResult {
@@ -1005,12 +1007,23 @@ impl App {
         self.calling_mode = None;
     }
 
+    fn get_selection_info(&self) -> SelectionInfo {
+        SelectionInfo {
+            mode: self.mode,
+            start_row: cmp::min(self.view.support_row, self.view.cursor_row),
+            end_row: cmp::max(self.view.support_row, self.view.cursor_row),
+            start_col: cmp::min(self.view.support_col, self.view.cursor_col),
+            end_col: cmp::max(self.view.support_col, self.view.cursor_col),
+        }
+    }
+
     fn execute_plugin(&mut self, name: &str, args: &[String]) {
         let ctx = CommandContext {
             cursor_row: self.view.cursor_row,
             cursor_col: self.view.cursor_col,
             row_count: self.table.row_count(),
             col_count: self.table.col_count(),
+            selection: self.get_selection_info()
         };
 
         // Create a closure to get cell values
@@ -1084,6 +1097,9 @@ impl App {
                         }
                         PluginAction::CanvasAddImage { rows, title } => {
                             self.canvas.add_image(rows, title);
+                        }
+                        PluginAction::PromptRequest { question, default } => {
+
                         }
                     }
                 }
