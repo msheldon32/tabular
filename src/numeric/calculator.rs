@@ -400,9 +400,7 @@ impl<'a> Calculator<'a> {
         }
 
         if let Ok(b) = trimmed.to_lowercase().parse::<bool>() {
-            // another unfortunate change to keep the test cases consistent
-            //return CalcType::Bool(b);
-            return CalcType::Float(if b { 1.0} else {0.0});
+            return CalcType::Bool(b);
         }
 
         CalcType::Str(trimmed.to_string())
@@ -410,37 +408,33 @@ impl<'a> Calculator<'a> {
 
     /// Evaluate an expression to f64
     /// Booleans are represented as 1.0 (true) and 0.0 (false)
-    fn evaluate_expr(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<f64, CalcError> {
+    fn evaluate_expr(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<CalcType, CalcError> {
         match expr {
-            Expr::Number(n) => Ok(*n),
+            Expr::Float(n) => Ok(CalcType::Float(n)),
+            Expr::Int(n) => Ok(CalcType::Int(n)),
 
-            Expr::Boolean(b) => Ok(if *b { 1.0 } else { 0.0 }),
+            Expr::Boolean(b) => Ok(CalcType::Bool(b)),
 
             Expr::CellRef { col, row } => {
                 let col_idx = col_from_letters(col);
                 let cell = CellRef { row: *row - 1, col: col_idx };
-                self.get_cell_value(&cell, results).use_float().ok_or_else(|| CalcError::ParseError("Not a number".to_string()))
+                self.get_cell_value(&cell, results)
             }
 
             Expr::Neg(inner) => {
                 let val = self.evaluate_expr(inner, results)?;
-                Ok(-val)
+                CalcType::negate(val)
             }
 
             Expr::Not(inner) => {
                 let val = self.evaluate_expr(inner, results)?;
-                // 0 is false, anything else is true
-                Ok(if val == 0.0 { 1.0 } else { 0.0 })
+                CalcType::not(val)
             }
 
             Expr::BinOp { op, left, right } => {
                 let a = self.evaluate_expr(left, results)?;
                 let b = self.evaluate_expr(right, results)?;
-                if let Ok(CalcType::Float(f)) = CalcType::bin_op(*op, CalcType::Float(a), CalcType::Float(b)) {
-                    Ok(f)
-                } else {
-                    Err(CalcError::EvalError("".to_string()))
-                }
+                CalcType::bin_op(*op, CalcType::Float(a), CalcType::Float(b))
             }
 
             Expr::FnCall { name, args } => {

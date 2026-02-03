@@ -99,7 +99,9 @@ impl fmt::Display for Token {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     /// A numeric literal
-    Number(f64),
+    Float(f64),
+    /// An integer
+    Int(i64),
     /// A boolean literal
     Boolean(bool),
     /// A cell reference (col letters, row number 1-indexed)
