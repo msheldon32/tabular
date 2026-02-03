@@ -6,6 +6,8 @@
 //! - Function calls: SUM(A1:A10), AVG(B1:B5)
 //! - Arithmetic: A1 + B1 * 2
 //! - Nested expressions: SUM(A1:A5) + SQRT(B1)
+//! - Boolean expressions: TRUE, FALSE, AND, OR, NOT
+//! - Ternary: IF(condition, true_value, false_value)
 
 use std::fmt;
 
@@ -18,6 +20,9 @@ use std::fmt;
 pub enum Token {
     /// A number literal (integer or float)
     Number(f64),
+    /// Boolean literal
+    True,
+    False,
     /// An identifier (function name or could be part of cell ref)
     Ident(String),
     /// A cell reference like A1, AA123
@@ -38,6 +43,10 @@ pub enum Token {
     Le,
     Gt,
     Ge,
+    /// Logical operators
+    And,  // && or AND
+    Or,   // || or OR
+    Not,  // ! or NOT
     /// Parentheses
     LParen,
     RParen,
@@ -51,6 +60,8 @@ impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Token::Number(n) => write!(f, "{}", n),
+            Token::True => write!(f, "TRUE"),
+            Token::False => write!(f, "FALSE"),
             Token::Ident(s) => write!(f, "{}", s),
             Token::CellRef { col, row } => write!(f, "{}{}", col, row),
             Token::Colon => write!(f, ":"),
@@ -66,6 +77,9 @@ impl fmt::Display for Token {
             Token::Le => write!(f, "<="),
             Token::Gt => write!(f, ">"),
             Token::Ge => write!(f, ">="),
+            Token::And => write!(f, "AND"),
+            Token::Or => write!(f, "OR"),
+            Token::Not => write!(f, "NOT"),
             Token::LParen => write!(f, "("),
             Token::RParen => write!(f, ")"),
             Token::Comma => write!(f, ","),
@@ -83,6 +97,8 @@ impl fmt::Display for Token {
 pub enum Expr {
     /// A numeric literal
     Number(f64),
+    /// A boolean literal
+    Boolean(bool),
     /// A cell reference (col letters, row number 1-indexed)
     CellRef { col: String, row: usize },
     /// A range between two cell references
@@ -97,23 +113,30 @@ pub enum Expr {
     BinOp { op: BinOp, left: Box<Expr>, right: Box<Expr> },
     /// Unary negation
     Neg(Box<Expr>),
+    /// Logical NOT
+    Not(Box<Expr>),
 }
 
 /// Binary operators
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
+    // Arithmetic
     Add,
     Sub,
     Mul,
     Div,
     Pow,
     Mod,
+    // Comparison
     Eq,
     Ne,
     Lt,
     Le,
     Gt,
     Ge,
+    // Logical
+    And,
+    Or,
 }
 
 impl fmt::Display for BinOp {
@@ -131,6 +154,8 @@ impl fmt::Display for BinOp {
             BinOp::Le => write!(f, "<="),
             BinOp::Gt => write!(f, ">"),
             BinOp::Ge => write!(f, ">="),
+            BinOp::And => write!(f, "AND"),
+            BinOp::Or => write!(f, "OR"),
         }
     }
 }
@@ -256,7 +281,8 @@ impl<'a> Lexer<'a> {
                     self.next_char();
                     Ok(Token::Ne)
                 } else {
-                    Err(ParseError::UnexpectedChar('!', pos))
+                    // Standalone ! is NOT
+                    Ok(Token::Not)
                 }
             }
             '<' => {
@@ -276,6 +302,26 @@ impl<'a> Lexer<'a> {
                     Ok(Token::Ge)
                 } else {
                     Ok(Token::Gt)
+                }
+            }
+
+            // Logical operators
+            '&' => {
+                if self.peek_char() == Some('&') {
+                    self.next_char();
+                    Ok(Token::And)
+                } else {
+                    // Single & could be used as AND in some spreadsheets
+                    Ok(Token::And)
+                }
+            }
+            '|' => {
+                if self.peek_char() == Some('|') {
+                    self.next_char();
+                    Ok(Token::Or)
+                } else {
+                    // Single | could be used as OR
+                    Ok(Token::Or)
                 }
             }
 
@@ -350,6 +396,17 @@ impl<'a> Lexer<'a> {
             } else {
                 break;
             }
+        }
+
+        // Check for keywords (case-insensitive)
+        let upper = s.to_uppercase();
+        match upper.as_str() {
+            "TRUE" => return Ok(Token::True),
+            "FALSE" => return Ok(Token::False),
+            "AND" => return Ok(Token::And),
+            "OR" => return Ok(Token::Or),
+            "NOT" => return Ok(Token::Not),
+            _ => {}
         }
 
         // Check if this looks like a cell reference (letters followed by digits)
@@ -461,10 +518,50 @@ impl Parser {
 
     /// Parse an expression (entry point)
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_comparison()
+        self.parse_or()
     }
 
-    /// Parse comparison operators (lowest precedence)
+    /// Parse OR operator (lowest precedence)
+    fn parse_or(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_and()?;
+
+        loop {
+            if !matches!(self.peek(), Token::Or) {
+                break;
+            }
+            self.advance();
+            let right = self.parse_and()?;
+            left = Expr::BinOp {
+                op: BinOp::Or,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parse AND operator
+    fn parse_and(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_comparison()?;
+
+        loop {
+            if !matches!(self.peek(), Token::And) {
+                break;
+            }
+            self.advance();
+            let right = self.parse_comparison()?;
+            left = Expr::BinOp {
+                op: BinOp::And,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parse comparison operators
     fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_additive()?;
 
@@ -552,12 +649,16 @@ impl Parser {
         }
     }
 
-    /// Parse unary operators (-)
+    /// Parse unary operators (-, NOT, !)
     fn parse_unary(&mut self) -> Result<Expr, ParseError> {
         if matches!(self.peek(), Token::Minus) {
             self.advance();
             let expr = self.parse_unary()?;
             Ok(Expr::Neg(Box::new(expr)))
+        } else if matches!(self.peek(), Token::Not) {
+            self.advance();
+            let expr = self.parse_unary()?;
+            Ok(Expr::Not(Box::new(expr)))
         } else {
             self.parse_primary()
         }
@@ -623,10 +724,57 @@ impl Parser {
                 Ok(expr)
             }
 
+            Token::True => {
+                self.advance();
+                Ok(Expr::Boolean(true))
+            }
+
+            Token::False => {
+                self.advance();
+                Ok(Expr::Boolean(false))
+            }
+
+            // AND/OR/NOT can also be function names when followed by (
+            Token::And => {
+                self.advance();
+                if matches!(self.peek(), Token::LParen) {
+                    self.parse_function_call("AND".to_string())
+                } else {
+                    Err(ParseError::UnexpectedToken {
+                        expected: "( after AND".to_string(),
+                        found: self.peek().clone(),
+                    })
+                }
+            }
+
+            Token::Or => {
+                self.advance();
+                if matches!(self.peek(), Token::LParen) {
+                    self.parse_function_call("OR".to_string())
+                } else {
+                    Err(ParseError::UnexpectedToken {
+                        expected: "( after OR".to_string(),
+                        found: self.peek().clone(),
+                    })
+                }
+            }
+
+            Token::Not => {
+                self.advance();
+                if matches!(self.peek(), Token::LParen) {
+                    self.parse_function_call("NOT".to_string())
+                } else {
+                    // NOT as unary operator - but we already handle this in parse_unary
+                    // This shouldn't be reached normally
+                    let expr = self.parse_unary()?;
+                    Ok(Expr::Not(Box::new(expr)))
+                }
+            }
+
             Token::Eof => Err(ParseError::UnexpectedEof),
 
             other => Err(ParseError::UnexpectedToken {
-                expected: "number, cell reference, or function".to_string(),
+                expected: "number, boolean, cell reference, or function".to_string(),
                 found: other,
             }),
         }
@@ -733,10 +881,10 @@ fn collect_cell_refs(expr: &Expr, refs: &mut Vec<(String, usize)>) {
             collect_cell_refs(left, refs);
             collect_cell_refs(right, refs);
         }
-        Expr::Neg(inner) => {
+        Expr::Neg(inner) | Expr::Not(inner) => {
             collect_cell_refs(inner, refs);
         }
-        Expr::Number(_) | Expr::RowRange { .. } | Expr::ColRange { .. } => {}
+        Expr::Number(_) | Expr::Boolean(_) | Expr::RowRange { .. } | Expr::ColRange { .. } => {}
     }
 }
 
@@ -746,8 +894,8 @@ pub fn has_ranges(expr: &Expr) -> bool {
         Expr::Range { .. } | Expr::RowRange { .. } | Expr::ColRange { .. } => true,
         Expr::FnCall { args, .. } => args.iter().any(has_ranges),
         Expr::BinOp { left, right, .. } => has_ranges(left) || has_ranges(right),
-        Expr::Neg(inner) => has_ranges(inner),
-        Expr::Number(_) | Expr::CellRef { .. } => false,
+        Expr::Neg(inner) | Expr::Not(inner) => has_ranges(inner),
+        Expr::Number(_) | Expr::Boolean(_) | Expr::CellRef { .. } => false,
     }
 }
 
@@ -940,5 +1088,111 @@ mod tests {
 
         let expr = parse("A1 <= B1").unwrap();
         assert!(matches!(expr, Expr::BinOp { op: BinOp::Le, .. }));
+    }
+
+    // === Boolean expression tests ===
+
+    #[test]
+    fn test_lex_boolean_literals() {
+        let lexer = Lexer::new("TRUE FALSE true false True False");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0], Token::True);
+        assert_eq!(tokens[1], Token::False);
+        assert_eq!(tokens[2], Token::True);
+        assert_eq!(tokens[3], Token::False);
+        assert_eq!(tokens[4], Token::True);
+        assert_eq!(tokens[5], Token::False);
+    }
+
+    #[test]
+    fn test_lex_logical_operators() {
+        let lexer = Lexer::new("AND OR NOT && || !");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0], Token::And);
+        assert_eq!(tokens[1], Token::Or);
+        assert_eq!(tokens[2], Token::Not);
+        assert_eq!(tokens[3], Token::And);
+        assert_eq!(tokens[4], Token::Or);
+        assert_eq!(tokens[5], Token::Not);
+    }
+
+    #[test]
+    fn test_parse_boolean_literals() {
+        let expr = parse("TRUE").unwrap();
+        assert_eq!(expr, Expr::Boolean(true));
+
+        let expr = parse("FALSE").unwrap();
+        assert_eq!(expr, Expr::Boolean(false));
+
+        let expr = parse("true").unwrap();
+        assert_eq!(expr, Expr::Boolean(true));
+    }
+
+    #[test]
+    fn test_parse_not_operator() {
+        let expr = parse("NOT TRUE").unwrap();
+        assert!(matches!(expr, Expr::Not(_)));
+
+        let expr = parse("!FALSE").unwrap();
+        assert!(matches!(expr, Expr::Not(_)));
+
+        let expr = parse("NOT A1").unwrap();
+        assert!(matches!(expr, Expr::Not(_)));
+    }
+
+    #[test]
+    fn test_parse_and_operator() {
+        let expr = parse("TRUE AND FALSE").unwrap();
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::And, .. }));
+
+        let expr = parse("A1 && B1").unwrap();
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::And, .. }));
+    }
+
+    #[test]
+    fn test_parse_or_operator() {
+        let expr = parse("TRUE OR FALSE").unwrap();
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::Or, .. }));
+
+        let expr = parse("A1 || B1").unwrap();
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::Or, .. }));
+    }
+
+    #[test]
+    fn test_boolean_precedence() {
+        // OR has lower precedence than AND
+        // A OR B AND C should be A OR (B AND C)
+        let expr = parse("TRUE OR FALSE AND TRUE").unwrap();
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::Or, .. }));
+
+        // AND has lower precedence than comparison
+        // A > B AND C < D should be (A > B) AND (C < D)
+        let expr = parse("A1 > 5 AND B1 < 10").unwrap();
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::And, .. }));
+    }
+
+    #[test]
+    fn test_parse_if_function() {
+        let expr = parse("IF(A1>5, TRUE, FALSE)").unwrap();
+        assert!(matches!(expr, Expr::FnCall { name, args } if name == "IF" && args.len() == 3));
+    }
+
+    #[test]
+    fn test_complex_boolean_expression() {
+        // (A1 > 5 AND B1 < 10) OR C1 = 0
+        let expr = parse("(A1 > 5 AND B1 < 10) OR C1 = 0").unwrap();
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::Or, .. }));
+    }
+
+    #[test]
+    fn test_nested_not() {
+        let expr = parse("NOT NOT TRUE").unwrap();
+        assert!(matches!(expr, Expr::Not(_)));
+    }
+
+    #[test]
+    fn test_not_with_comparison() {
+        let expr = parse("NOT (A1 > 5)").unwrap();
+        assert!(matches!(expr, Expr::Not(_)));
     }
 }

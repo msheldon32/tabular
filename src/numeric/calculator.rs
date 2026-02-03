@@ -145,9 +145,10 @@ impl<'a> Calculator<'a> {
                 self.collect_refs(left, refs)?;
                 self.collect_refs(right, refs)?;
             }
-            Expr::Neg(inner) => {
+            Expr::Neg(inner) | Expr::Not(inner) => {
                 self.collect_refs(inner, refs)?;
             }
+            Expr::Boolean(_) => {}
         }
         Ok(())
     }
@@ -230,9 +231,12 @@ impl<'a> Calculator<'a> {
     }
 
     /// Evaluate an expression to f64
+    /// Booleans are represented as 1.0 (true) and 0.0 (false)
     fn evaluate_expr(&self, expr: &Expr, results: &HashMap<CellRef, f64>) -> Result<f64, CalcError> {
         match expr {
             Expr::Number(n) => Ok(*n),
+
+            Expr::Boolean(b) => Ok(if *b { 1.0 } else { 0.0 }),
 
             Expr::CellRef { col, row } => {
                 let col_idx = col_from_letters(col);
@@ -245,23 +249,51 @@ impl<'a> Calculator<'a> {
                 Ok(-val)
             }
 
+            Expr::Not(inner) => {
+                let val = self.evaluate_expr(inner, results)?;
+                // 0 is false, anything else is true
+                Ok(if val == 0.0 { 1.0 } else { 0.0 })
+            }
+
             Expr::BinOp { op, left, right } => {
-                let l = self.evaluate_expr(left, results)?;
-                let r = self.evaluate_expr(right, results)?;
-                Ok(match op {
-                    BinOp::Add => l + r,
-                    BinOp::Sub => l - r,
-                    BinOp::Mul => l * r,
-                    BinOp::Div => l / r,
-                    BinOp::Pow => l.powf(r),
-                    BinOp::Mod => l % r,
-                    BinOp::Eq => if (l - r).abs() < f64::EPSILON { 1.0 } else { 0.0 },
-                    BinOp::Ne => if (l - r).abs() >= f64::EPSILON { 1.0 } else { 0.0 },
-                    BinOp::Lt => if l < r { 1.0 } else { 0.0 },
-                    BinOp::Le => if l <= r { 1.0 } else { 0.0 },
-                    BinOp::Gt => if l > r { 1.0 } else { 0.0 },
-                    BinOp::Ge => if l >= r { 1.0 } else { 0.0 },
-                })
+                // Short-circuit evaluation for AND/OR
+                match op {
+                    BinOp::And => {
+                        let l = self.evaluate_expr(left, results)?;
+                        if l == 0.0 {
+                            return Ok(0.0); // Short-circuit
+                        }
+                        let r = self.evaluate_expr(right, results)?;
+                        Ok(if r != 0.0 { 1.0 } else { 0.0 })
+                    }
+                    BinOp::Or => {
+                        let l = self.evaluate_expr(left, results)?;
+                        if l != 0.0 {
+                            return Ok(1.0); // Short-circuit
+                        }
+                        let r = self.evaluate_expr(right, results)?;
+                        Ok(if r != 0.0 { 1.0 } else { 0.0 })
+                    }
+                    _ => {
+                        let l = self.evaluate_expr(left, results)?;
+                        let r = self.evaluate_expr(right, results)?;
+                        Ok(match op {
+                            BinOp::Add => l + r,
+                            BinOp::Sub => l - r,
+                            BinOp::Mul => l * r,
+                            BinOp::Div => l / r,
+                            BinOp::Pow => l.powf(r),
+                            BinOp::Mod => l % r,
+                            BinOp::Eq => if (l - r).abs() < f64::EPSILON { 1.0 } else { 0.0 },
+                            BinOp::Ne => if (l - r).abs() >= f64::EPSILON { 1.0 } else { 0.0 },
+                            BinOp::Lt => if l < r { 1.0 } else { 0.0 },
+                            BinOp::Le => if l <= r { 1.0 } else { 0.0 },
+                            BinOp::Gt => if l > r { 1.0 } else { 0.0 },
+                            BinOp::Ge => if l >= r { 1.0 } else { 0.0 },
+                            BinOp::And | BinOp::Or => unreachable!(),
+                        })
+                    }
+                }
             }
 
             Expr::FnCall { name, args } => {
@@ -659,6 +691,62 @@ impl<'a> Calculator<'a> {
                 Ok(rand::thread_rng().gen())
             }
 
+            // === Boolean/Logical functions ===
+            "IF" => {
+                self.require_args(name, args, 3)?;
+                let condition = self.evaluate_expr(&args[0], results)?;
+                // Non-zero is true
+                if condition != 0.0 {
+                    self.evaluate_expr(&args[1], results)
+                } else {
+                    self.evaluate_expr(&args[2], results)
+                }
+            }
+            "AND" => {
+                if args.is_empty() {
+                    return Err(CalcError::EvalError("AND requires at least 1 argument".to_string()));
+                }
+                for arg in args {
+                    let val = self.evaluate_expr(arg, results)?;
+                    if val == 0.0 {
+                        return Ok(0.0); // Short-circuit on first false
+                    }
+                }
+                Ok(1.0)
+            }
+            "OR" => {
+                if args.is_empty() {
+                    return Err(CalcError::EvalError("OR requires at least 1 argument".to_string()));
+                }
+                for arg in args {
+                    let val = self.evaluate_expr(arg, results)?;
+                    if val != 0.0 {
+                        return Ok(1.0); // Short-circuit on first true
+                    }
+                }
+                Ok(0.0)
+            }
+            "NOT" => {
+                self.require_args(name, args, 1)?;
+                let val = self.evaluate_expr(&args[0], results)?;
+                Ok(if val == 0.0 { 1.0 } else { 0.0 })
+            }
+            "TRUE" => {
+                self.require_args(name, args, 0)?;
+                Ok(1.0)
+            }
+            "FALSE" => {
+                self.require_args(name, args, 0)?;
+                Ok(0.0)
+            }
+            "IFERROR" => {
+                self.require_args(name, args, 2)?;
+                match self.evaluate_expr(&args[0], results) {
+                    Ok(val) if !val.is_nan() && !val.is_infinite() => Ok(val),
+                    _ => self.evaluate_expr(&args[1], results),
+                }
+            }
+
             _ => Err(CalcError::EvalError(format!("Unknown function: {}", name)))
         }
     }
@@ -925,5 +1013,179 @@ mod tests {
         let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
         assert_eq!(results[0].2, "8");
+    }
+
+    // === Boolean expression tests ===
+
+    #[test]
+    fn test_boolean_literals() {
+        let table = make_table(vec![
+            vec!["=TRUE", "=FALSE"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "1");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "0");
+    }
+
+    #[test]
+    fn test_not_operator() {
+        let table = make_table(vec![
+            vec!["=NOT TRUE", "=NOT FALSE", "=!TRUE"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "0");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "1");
+        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "0");
+    }
+
+    #[test]
+    fn test_and_operator() {
+        let table = make_table(vec![
+            vec!["=TRUE AND TRUE", "=TRUE AND FALSE", "=FALSE AND TRUE", "=FALSE AND FALSE"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "1");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "0");
+        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "0");
+        assert_eq!(results.iter().find(|r| r.1 == 3).unwrap().2, "0");
+    }
+
+    #[test]
+    fn test_or_operator() {
+        let table = make_table(vec![
+            vec!["=TRUE OR TRUE", "=TRUE OR FALSE", "=FALSE OR TRUE", "=FALSE OR FALSE"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "1");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "1");
+        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "1");
+        assert_eq!(results.iter().find(|r| r.1 == 3).unwrap().2, "0");
+    }
+
+    #[test]
+    fn test_symbolic_boolean_operators() {
+        let table = make_table(vec![
+            vec!["=TRUE && FALSE", "=TRUE || FALSE"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "0");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "1");
+    }
+
+    #[test]
+    fn test_if_function() {
+        let table = make_table(vec![
+            vec!["=IF(TRUE, 10, 20)", "=IF(FALSE, 10, 20)"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "10");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "20");
+    }
+
+    #[test]
+    fn test_if_with_comparison() {
+        let table = make_table(vec![
+            vec!["10", "=IF(A1>5, 100, 200)", "=IF(A1<5, 100, 200)"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "100");
+        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "200");
+    }
+
+    #[test]
+    fn test_nested_if() {
+        let table = make_table(vec![
+            vec!["5", "=IF(A1>10, 1, IF(A1>3, 2, 3))"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results[0].2, "2");
+    }
+
+    #[test]
+    fn test_and_function() {
+        let table = make_table(vec![
+            vec!["=AND(TRUE, TRUE)", "=AND(TRUE, FALSE)", "=AND(TRUE, TRUE, TRUE)"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "1");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "0");
+        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "1");
+    }
+
+    #[test]
+    fn test_or_function() {
+        let table = make_table(vec![
+            vec!["=OR(FALSE, FALSE)", "=OR(FALSE, TRUE)", "=OR(FALSE, FALSE, TRUE)"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "0");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "1");
+        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "1");
+    }
+
+    #[test]
+    fn test_not_function() {
+        let table = make_table(vec![
+            vec!["=NOT(TRUE)", "=NOT(FALSE)", "=NOT(1)", "=NOT(0)"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "0");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "1");
+        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "0");
+        assert_eq!(results.iter().find(|r| r.1 == 3).unwrap().2, "1");
+    }
+
+    #[test]
+    fn test_complex_boolean_formula() {
+        let table = make_table(vec![
+            vec!["10", "5", "=IF(A1>5 AND B1<10, 1, 0)"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results[0].2, "1");
+    }
+
+    #[test]
+    fn test_boolean_with_cell_refs() {
+        let table = make_table(vec![
+            vec!["1", "0", "=A1 AND B1", "=A1 OR B1"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "0");
+        assert_eq!(results.iter().find(|r| r.1 == 3).unwrap().2, "1");
+    }
+
+    #[test]
+    fn test_iferror() {
+        let table = make_table(vec![
+            vec!["=IFERROR(1/0, 999)", "=IFERROR(10, 999)"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "999");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "10");
+    }
+
+    #[test]
+    fn test_true_false_functions() {
+        let table = make_table(vec![
+            vec!["=TRUE()", "=FALSE()"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "1");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "0");
     }
 }
