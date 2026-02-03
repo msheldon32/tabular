@@ -9,3 +9,11 @@ pub struct SelectionInfo {
     pub end_row: usize,
     pub end_col: usize,
 }
+
+/// Visual selection mode types
+#[derive(Clone, Copy, PartialEq)]
+pub enum VisualType {
+    Cell,
+    Row,
+    Col,
+}

@@ -15,7 +15,7 @@ use crate::clipboard::{Clipboard, RegisterContent};
 use crate::command::{Command, ReplaceCommand};
 use crate::input::{
     is_escape, CommandHandler, InsertHandler, KeyBuffer, KeyBufferResult, KeyResult,
-    NavigationHandler, SearchHandler, SequenceAction, VisualHandler, VisualType,
+    NavigationHandler, SearchHandler, SequenceAction, VisualHandler
 };
 use crate::mode::Mode;
 use crate::operations;
@@ -29,7 +29,7 @@ use crate::style::Style;
 use crate::progress::Progress;
 use crate::rowmanager::{FilterType, RowManager};
 use crate::util::ColumnType;
-use crate::visual::SelectionInfo;
+use crate::visual::{SelectionInfo, VisualType};
 
 /// Result from a background operation
 pub enum BackgroundResult {
@@ -958,16 +958,13 @@ impl App {
                 if filter_type == FilterType::Default {
                     self.row_manager.borrow_mut().remove_filter();
                     self.message = Some("Filter removed".to_string());
-                } else if filter_type == FilterType::Fibonacci {
-                    self.row_manager.borrow_mut().fibonacci_filter(&self.table);
-                    self.message = Some("Fibonacci filter applied (why????)".to_string());
                 } else if let FilterType::PredicateFilter(pred) = filter_type {
                     let active_col = self.view.cursor_col;
                     let column_type = self.table.probe_column_type(active_col, self.header_mode);
                     self.row_manager.borrow_mut().predicate_filter(&self.table, active_col, pred, column_type, self.header_mode);
                     self.message = Some("Filter applied".to_string());
                 } else {
-                    self.message = Some("Filter applied".to_string());
+                    self.message = Some("Filter not recognized".to_string());
                 }
 
                 // Capture new state and record transaction

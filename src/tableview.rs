@@ -161,7 +161,7 @@ impl TableView {
         self.scroll_to_cursor();
     }
 
-    pub fn page_up(&mut self, table: &Table) {
+    pub fn page_up(&mut self) {
         let jump = self.viewport_height.saturating_sub(1).max(1);
         self.cursor_row = self.row_manager.borrow().jump_up(self.cursor_row, jump);
         self.scroll_to_cursor();
@@ -173,7 +173,7 @@ impl TableView {
         self.scroll_to_cursor();
     }
 
-    pub fn half_page_up(&mut self, table: &Table) {
+    pub fn half_page_up(&mut self) {
         let jump = self.viewport_height / 2;
         self.cursor_row = self.row_manager.borrow().jump_up(self.cursor_row, jump);
         self.scroll_to_cursor();
@@ -301,12 +301,6 @@ impl TableView {
 
         self.scroll_to_cursor();
     }
-
-    pub fn goto_row(&mut self, row: usize, table: &Table) {
-        self.cursor_row = row.min(table.row_count().saturating_sub(1));
-        self.scroll_to_cursor();
-    }
-
 }
 
 #[cfg(test)]

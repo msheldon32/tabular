@@ -6,6 +6,7 @@ use crate::clipboard::Clipboard;
 use crate::table::Table;
 use crate::tableview::TableView;
 use crate::transaction::Transaction;
+use crate::visual::VisualType;
 
 /// Result of handling a key event
 #[allow(dead_code)]
@@ -60,6 +61,7 @@ pub enum SequenceAction {
 }
 
 impl SequenceAction {
+    #[allow(dead_code)]
     pub fn is_navigation(&self) -> bool {
         matches!(self, 
                  SequenceAction::MoveToTop |
@@ -261,13 +263,13 @@ impl NavigationHandler {
                 view.half_page_down(table); true
             }
             KeyCode::Char('u') if ctrl => {
-                view.half_page_up(table); true
+                view.half_page_up(); true
             }
             KeyCode::Char('f') if ctrl => {
                 view.page_down(table); true
             }
             KeyCode::Char('b') if ctrl => {
-                view.page_up(table); true
+                view.page_up(); true
             }
             _ => false
         }
@@ -427,11 +429,6 @@ impl InsertHandler {
         self.cursor = crate::util::char_count(&self.buffer);
     }
 
-    /// Get the byte index for the current cursor position
-    pub fn cursor_byte_index(&self) -> usize {
-        crate::util::byte_index_of_char(&self.buffer, self.cursor)
-    }
-
     pub fn handle_key(&mut self, key: KeyEvent, view: &TableView) -> (KeyResult, Option<Transaction>) {
         if is_escape(key) || key.code == KeyCode::Enter {
             let txn = Transaction::SetCell {
@@ -470,14 +467,6 @@ impl InsertHandler {
 
         (KeyResult::Continue, None)
     }
-}
-
-/// Visual selection mode types
-#[derive(Clone, Copy, PartialEq)]
-pub enum VisualType {
-    Cell,
-    Row,
-    Col,
 }
 
 /// Format operation types for visual mode formatting

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use crate::mode::Mode;
 use crate::visual::SelectionInfo;
+use crate::canvas::CanvasColor;
 
 pub struct PluginManager {
     lua: Lua,
@@ -20,53 +21,8 @@ pub struct CommandContext {
     pub selection: SelectionInfo,
 }
 
-/// Color representation for canvas
-#[derive(Clone, Debug)]
-pub enum CanvasColor {
-    Black,
-    Red,
-    Green,
-    Yellow,
-    Blue,
-    Magenta,
-    Cyan,
-    White,
-    Gray,
-}
-
-impl CanvasColor {
-    pub fn to_ratatui(&self) -> ratatui::style::Color {
-        use ratatui::style::Color;
-        match self {
-            CanvasColor::Black => Color::Black,
-            CanvasColor::Red => Color::Red,
-            CanvasColor::Green => Color::Green,
-            CanvasColor::Yellow => Color::Yellow,
-            CanvasColor::Blue => Color::Blue,
-            CanvasColor::Magenta => Color::Magenta,
-            CanvasColor::Cyan => Color::Cyan,
-            CanvasColor::White => Color::White,
-            CanvasColor::Gray => Color::Gray,
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "black" => Some(CanvasColor::Black),
-            "red" => Some(CanvasColor::Red),
-            "green" => Some(CanvasColor::Green),
-            "yellow" => Some(CanvasColor::Yellow),
-            "blue" => Some(CanvasColor::Blue),
-            "magenta" => Some(CanvasColor::Magenta),
-            "cyan" => Some(CanvasColor::Cyan),
-            "white" => Some(CanvasColor::White),
-            "gray" | "grey" => Some(CanvasColor::Gray),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Clone)]
+#[allow(dead_code)]
 pub enum PluginAction {
     SetCell { row: usize, col: usize, value: String },
     InsertRow { at: usize },
@@ -104,11 +60,13 @@ impl PluginManager {
     }
 
     /// Store a prompt result for use in the next plugin execution
+    #[allow(dead_code)]
     pub fn set_prompt_result(&mut self, question: &str, answer: String) {
         self.prompt_results.insert(question.to_string(), answer);
     }
 
     /// Clear all prompt results
+    #[allow(dead_code)]
     pub fn clear_prompt_results(&mut self) {
         self.prompt_results.clear();
     }
@@ -196,7 +154,7 @@ impl PluginManager {
                 Mode::Visual => "visual",
                 Mode::VisualRow => "visual_row",
                 Mode::VisualCol => "visual_col",
-                other => "none",
+                _other => "none",
             })?;
             ctx_table.set("selection", sel_table)?;
         }
@@ -217,8 +175,8 @@ impl PluginManager {
                 }
             }
         }
-        let mut cell_cache_for_range = cell_cache.clone();
-        let mut cell_cache_for_type = cell_cache.clone();
+        let cell_cache_for_range = cell_cache.clone();
+        let cell_cache_for_type = cell_cache.clone();
 
         // Create an overlay table to hold pending writes (visible to Lua, not to actual data)
         let overlay = self.lua.create_table()?;
@@ -388,6 +346,7 @@ impl PluginManager {
 
         // canvas.add_styled_text(text, fg, bg, bold) function
         let actions_ref14 = actions_table.clone();
+        
         let canvas_add_styled_text_fn = self.lua.create_function(move |lua, (text, fg, bg, bold): (String, Option<String>, Option<String>, Option<bool>)| {
             let action = lua.create_table()?;
             action.set("type", "canvas_add_styled_text")?;
@@ -424,7 +383,7 @@ impl PluginManager {
                 Mode::Visual => "visual",
                 Mode::VisualRow => "visual_row",
                 Mode::VisualCol => "visual_col",
-                other => "none",
+                _other => "none",
             })?;
             Ok(Value::Table(result))
         })?;
@@ -505,6 +464,7 @@ impl PluginManager {
             Ok(())
         })?;
 
+        #[allow(dead_code)]
         fn load_plugin_data(key: &String) -> Option<String> {
             None
         }

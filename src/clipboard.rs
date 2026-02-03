@@ -1,10 +1,7 @@
 use std::collections::HashMap;
-use std::rc::Rc;
-use std::cell::RefCell;
 
 use crate::table::Table;
 use crate::transaction::Transaction;
-use crate::rowmanager::RowManager;
 
 /// Where yanked data should be anchored when pasting
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -31,24 +28,10 @@ impl RegisterContent {
         Self { data, anchor }
     }
 
-    pub fn from_row(row: Vec<String>) -> Self {
-        Self {
-            data: vec![row],
-            anchor: PasteAnchor::RowStart,
-        }
-    }
-
     pub fn from_rows(rows: Vec<Vec<String>>) -> Self {
         Self {
             data: rows,
             anchor: PasteAnchor::RowStart,
-        }
-    }
-
-    pub fn from_col(col: Vec<String>) -> Self {
-        Self {
-            data: col.into_iter().map(|c| vec![c]).collect(),
-            anchor: PasteAnchor::ColStart,
         }
     }
 
@@ -109,21 +92,12 @@ impl Clipboard {
     }
 
     /// Get the currently selected register name (for display)
+    #[allow(dead_code)]
     pub fn selected_register_name(&self) -> String {
         match self.selected {
             None => "\"".to_string(),
             Some(c) => format!("\"{}", c),
         }
-    }
-
-    /// Clear the register selection (back to unnamed)
-    pub fn clear_selection(&mut self) {
-        self.selected = None;
-    }
-
-    /// Check if black hole register is selected
-    pub fn is_black_hole(&self) -> bool {
-        self.selected == Some('_')
     }
 
     /// Store content in the appropriate register
@@ -192,19 +166,9 @@ impl Clipboard {
         }
     }
 
-    /// Convenience: yank a single row
-    pub fn yank_row(&mut self, row: Vec<String>) {
-        self.store(RegisterContent::from_row(row), true);
-    }
-
     /// Convenience: yank multiple rows
     pub fn yank_rows(&mut self, rows: Vec<Vec<String>>) {
         self.store(RegisterContent::from_rows(rows), true);
-    }
-
-    /// Convenience: yank a single column
-    pub fn yank_col(&mut self, col: Vec<String>) {
-        self.store(RegisterContent::from_col(col), true);
     }
 
     /// Convenience: yank multiple columns
@@ -314,6 +278,7 @@ impl Clipboard {
     }
 
     /// List non-empty registers (for :registers command)
+    #[allow(dead_code)]
     pub fn list_registers(&self) -> Vec<(String, String)> {
         let mut result = Vec::new();
 

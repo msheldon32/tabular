@@ -6,6 +6,55 @@ use ratatui::{
     Frame,
 };
 
+/// Color representation for canvas
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub enum CanvasColor {
+    Black,
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+    White,
+    Gray,
+}
+
+impl CanvasColor {
+    pub fn to_ratatui(&self) -> ratatui::style::Color {
+        use ratatui::style::Color;
+        match self {
+            CanvasColor::Black => Color::Black,
+            CanvasColor::Red => Color::Red,
+            CanvasColor::Green => Color::Green,
+            CanvasColor::Yellow => Color::Yellow,
+            CanvasColor::Blue => Color::Blue,
+            CanvasColor::Magenta => Color::Magenta,
+            CanvasColor::Cyan => Color::Cyan,
+            CanvasColor::White => Color::White,
+            CanvasColor::Gray => Color::Gray,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "black" => Some(CanvasColor::Black),
+            "red" => Some(CanvasColor::Red),
+            "green" => Some(CanvasColor::Green),
+            "yellow" => Some(CanvasColor::Yellow),
+            "blue" => Some(CanvasColor::Blue),
+            "magenta" => Some(CanvasColor::Magenta),
+            "cyan" => Some(CanvasColor::Cyan),
+            "white" => Some(CanvasColor::White),
+            "gray" | "grey" => Some(CanvasColor::Gray),
+            _ => None,
+        }
+    }
+}
+
+
 /// A single item that can be displayed on the canvas
 #[derive(Debug, Clone)]
 pub enum CanvasItem {
@@ -69,11 +118,6 @@ impl Canvas {
     /// Hide the canvas
     pub fn hide(&mut self) {
         self.visible = false;
-    }
-
-    /// Toggle visibility
-    pub fn toggle(&mut self) {
-        self.visible = !self.visible;
     }
 
     /// Clear all content
@@ -154,19 +198,6 @@ impl Canvas {
     /// Scroll down
     pub fn scroll_down(&mut self, amount: usize) {
         self.scroll = self.scroll.saturating_add(amount);
-    }
-
-    /// Get total line count for scrolling
-    fn total_lines(&self) -> usize {
-        self.items
-            .iter()
-            .map(|item| match item {
-                CanvasItem::Image { rows, title } => {
-                    rows.len() + if title.is_some() { 1 } else { 0 }
-                }
-                _ => 1,
-            })
-            .sum()
     }
 
     /// Render the canvas as an overlay

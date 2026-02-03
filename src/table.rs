@@ -51,53 +51,9 @@ impl Table {
         self.chunks.get_mut(Self::chunk_idx(row))
     }
 
-    /// Get a mutable reference to a row
-    pub fn get_row_mut(&mut self, idx: usize) -> Option<&mut Vec<String>> {
-        if idx >= self.total_rows {
-            return None;
-        }
-        let chunk = self.get_chunk_mut(idx)?;
-        chunk.get_mut(Self::row_in_chunk(idx))
-    }
-
-    /// Swap two rows in the table
-    pub fn swap_rows(&mut self, i: usize, j: usize) {
-        if i == j || i >= self.total_rows || j >= self.total_rows {
-            return;
-        }
-
-        let chunk_i = Self::chunk_idx(i);
-        let chunk_j = Self::chunk_idx(j);
-        let row_in_i = Self::row_in_chunk(i);
-        let row_in_j = Self::row_in_chunk(j);
-
-        if chunk_i == chunk_j {
-            // Same chunk - simple swap
-            self.chunks[chunk_i].swap(row_in_i, row_in_j);
-        } else {
-            // Different chunks - need to swap between chunks
-            // Use a temporary to avoid borrow conflicts
-            let row_i = std::mem::take(&mut self.chunks[chunk_i][row_in_i]);
-            let row_j = std::mem::take(&mut self.chunks[chunk_j][row_in_j]);
-            self.chunks[chunk_i][row_in_i] = row_j;
-            self.chunks[chunk_j][row_in_j] = row_i;
-        }
-    }
-
     /// Clone all rows into a flat Vec (for undo/redo operations)
     pub fn clone_all_rows(&self) -> Vec<Vec<String>> {
         self.chunks.iter().flat_map(|chunk| chunk.iter().cloned()).collect()
-    }
-
-    /// Restore table from a flat Vec of rows
-    pub fn restore_from_rows(&mut self, rows: Vec<Vec<String>>) {
-        self.total_rows = rows.len();
-        self.col_count = rows.first().map(|r| r.len()).unwrap_or(0);
-        self.chunks = rows
-            .chunks(CHUNK_SIZE)
-            .map(|chunk| chunk.to_vec())
-            .collect();
-        self.mark_widths_dirty();
     }
 
     /// Iterator over all rows
@@ -143,6 +99,7 @@ impl Table {
 
     /// Create a table from pre-chunked data, deferring column width computation
     /// until first render. Use this for faster file loading.
+    #[allow(dead_code)]
     pub fn from_chunks_lazy(chunks: Vec<Vec<Vec<String>>>, col_count: usize) -> Self {
         let total_rows: usize = chunks.iter().map(|c| c.len()).sum();
         Self {
@@ -160,11 +117,6 @@ impl Table {
         if self.col_widths_dirty {
             self.recompute_col_widths();
         }
-        &self.col_widths
-    }
-
-    /// Get column widths without mutable borrow (may be stale)
-    pub fn col_widths_cached(&self) -> &[usize] {
         &self.col_widths
     }
 
@@ -528,56 +480,6 @@ impl Table {
         self.total_rows += count;
     }
 
-    /// Fill/paste multiple contiguous rows with data, expanding table if needed
-    pub fn fill_rows_with_data_bulk(&mut self, start_idx: usize, rows: Vec<Vec<String>>) {
-        if rows.is_empty() {
-            return;
-        }
-
-        let count = rows.len();
-
-        // Ensure table is large enough
-        let needed_rows = start_idx + count;
-        if needed_rows > self.total_rows {
-            self.insert_rows_bulk(self.total_rows, needed_rows - self.total_rows);
-        }
-
-        self.mark_widths_dirty();
-
-        // Fill rows, handling cross-chunk boundaries efficiently
-        let start_chunk = Self::chunk_idx(start_idx);
-        let end_chunk = Self::chunk_idx(start_idx + count - 1);
-
-        let mut row_iter = rows.into_iter();
-
-        for chunk_idx in start_chunk..=end_chunk {
-            if chunk_idx >= self.chunks.len() {
-                break;
-            }
-
-            let first_row_in_chunk = if chunk_idx == start_chunk {
-                Self::row_in_chunk(start_idx)
-            } else {
-                0
-            };
-
-            let last_row_in_chunk = if chunk_idx == end_chunk {
-                Self::row_in_chunk(start_idx + count - 1) + 1
-            } else {
-                self.chunks[chunk_idx].len()
-            };
-
-            for row_in_chunk in first_row_in_chunk..last_row_in_chunk {
-                if let Some(mut new_row) = row_iter.next() {
-                    new_row.resize(self.col_count, String::new());
-                    if row_in_chunk < self.chunks[chunk_idx].len() {
-                        self.chunks[chunk_idx][row_in_chunk] = new_row;
-                    }
-                }
-            }
-        }
-    }
-
     /// Get multiple contiguous rows as cloned data (for clipboard/undo)
     pub fn get_rows_cloned(&self, start_idx: usize, count: usize) -> Vec<Vec<String>> {
         if start_idx >= self.total_rows || count == 0 {
@@ -693,11 +595,6 @@ impl Table {
         Some(self.rows_iter().map(|r| r[idx].clone()).collect())
     }
 
-    /// Iterate over column values without cloning
-    pub fn col_iter(&self, idx: usize) -> impl Iterator<Item = &String> {
-        self.rows_iter().filter_map(move |r| r.get(idx))
-    }
-
     pub fn get_span(&self, start_row: usize, end_row: usize, start_col: usize, end_col: usize) -> Option<Vec<Vec<String>>> {
         let mut out_vec = Vec::new();
 
@@ -748,17 +645,6 @@ impl Table {
         self.insert_row_internal(idx, row);
     }
 
-    pub fn fill_row_with_data(&mut self, idx: usize, row: Vec<String>) {
-        if row.len() != self.col_count {
-            return;
-        }
-        // Mark dirty since we might shrink widths
-        self.mark_widths_dirty();
-        if let Some(target) = self.get_row_mut(idx) {
-            *target = row;
-        }
-    }
-
     pub fn insert_col_with_data(&mut self, idx: usize, col: Vec<String>) {
         let max_width = col.iter().map(|s| crate::util::display_width(s)).max().unwrap_or(0).max(3);
         let mut col_iter = col.into_iter();
@@ -772,33 +658,6 @@ impl Table {
         self.col_count += 1;
         if idx <= self.col_widths.len() {
             self.col_widths.insert(idx, max_width);
-        }
-    }
-
-    pub fn fill_col_with_data(&mut self, idx: usize, col: Vec<String>) {
-        // Mark dirty since widths might shrink
-        self.mark_widths_dirty();
-        let mut col_iter = col.into_iter();
-        for chunk in &mut self.chunks {
-            for row in chunk {
-                if idx < row.len() {
-                    row[idx] = col_iter.next().unwrap_or_default();
-                }
-            }
-        }
-    }
-
-    pub fn fill_span_with_data(&mut self, row_idx: usize, col_idx: usize, span: Vec<Vec<String>>) {
-        for (dx, span_row) in span.iter().enumerate() {
-            if row_idx + dx >= self.total_rows {
-                self.insert_row_at(row_idx + dx);
-            }
-            for (dy, val) in span_row.iter().enumerate() {
-                if col_idx + dy >= self.col_count {
-                    self.insert_col_at(col_idx + dy);
-                }
-                self.set_cell(row_idx + dx, col_idx + dy, val.clone());
-            }
         }
     }
 }
@@ -1122,99 +981,6 @@ impl Table {
         indices
     }
 
-    /// Reorder rows according to the given indices
-    /// Returns the old table state as Vec<Vec<String>> for undo
-    pub fn reorder_rows(&mut self, new_order: &[usize]) -> Vec<Vec<String>> {
-        let old_cells = self.clone_all_rows();
-        let n = new_order.len().min(self.total_rows);
-
-        // Build new row order
-        let new_rows: Vec<Vec<String>> = new_order.iter()
-            .take(n)
-            .filter_map(|&idx| old_cells.get(idx).cloned())
-            .collect();
-
-        // Restore with new order
-        self.restore_from_rows(new_rows);
-        self.mark_widths_dirty();
-        old_cells
-    }
-
-    /// Efficiently reorder rows in-place using the given indices
-    /// Optimized for large tables - only clones once and works chunk-aware
-    /// Returns the old table state for undo
-    pub fn reorder_rows_bulk(&mut self, new_order: &[usize]) -> Vec<Vec<String>> {
-        if new_order.len() != self.total_rows {
-            return self.reorder_rows(new_order);
-        }
-
-        // Take ownership of chunks to avoid double-cloning
-        let old_chunks = std::mem::take(&mut self.chunks);
-        let old_total = self.total_rows;
-
-        // Flatten into a single vec (we need random access by index)
-        let mut flat_rows: Vec<Vec<String>> = old_chunks.into_iter().flatten().collect();
-
-        // Build old_cells for undo by cloning (we need to return this)
-        let old_cells = flat_rows.clone();
-
-        // Reorder in-place using a permutation cycle approach for efficiency
-        // This avoids creating a second full copy
-        let mut new_rows = Vec::with_capacity(old_total);
-        for &idx in new_order {
-            if idx < flat_rows.len() {
-                // Take the row, leaving an empty placeholder
-                new_rows.push(std::mem::take(&mut flat_rows[idx]));
-            }
-        }
-
-        // Rechunk the reordered rows
-        self.chunks = new_rows
-            .chunks(CHUNK_SIZE)
-            .map(|chunk| chunk.to_vec())
-            .collect();
-        self.total_rows = self.chunks.iter().map(|c| c.len()).sum();
-        self.mark_widths_dirty();
-
-        old_cells
-    }
-
-    /// Sort rows by a column and apply the sort in-place
-    /// Returns the old table state for undo
-    pub fn sort_rows_by_column(
-        &mut self,
-        sort_col: usize,
-        direction: SortDirection,
-        skip_header: bool,
-    ) -> Option<Vec<Vec<String>>> {
-        let new_order = self.get_sorted_row_indices(sort_col, direction, skip_header);
-
-        // Check if already sorted
-        if new_order.iter().enumerate().all(|(i, &idx)| i == idx) {
-            return None; // Already sorted
-        }
-
-        Some(self.reorder_rows_bulk(&new_order))
-    }
-
-    /// Sort columns by a row and apply the sort in-place
-    /// Returns the old table state for undo
-    pub fn sort_cols_by_row(
-        &mut self,
-        sort_row: usize,
-        direction: SortDirection,
-        skip_first_col: bool,
-    ) -> Option<Vec<Vec<String>>> {
-        let new_order = self.get_sorted_col_indices(sort_row, direction, skip_first_col);
-
-        // Check if already sorted
-        if new_order.iter().enumerate().all(|(i, &idx)| i == idx) {
-            return None; // Already sorted
-        }
-
-        Some(self.reorder_cols(&new_order))
-    }
-
     /// Apply a row permutation in-place (memory-efficient)
     /// permutation[i] = j means row i in new table comes from row j in old table
     pub fn apply_row_permutation(&mut self, permutation: &[usize]) {
@@ -1304,44 +1070,6 @@ impl Table {
         }
 
         Some(new_order)
-    }
-
-    /// Reorder columns according to the given indices
-    /// Returns the old table state as Vec<Vec<String>> for undo
-    pub fn reorder_cols(&mut self, new_order: &[usize]) -> Vec<Vec<String>> {
-        let old_cells = self.clone_all_rows();
-        let n = new_order.len();
-
-        for chunk in &mut self.chunks {
-            for row in chunk {
-                if row.len() < n {
-                    continue;
-                }
-
-                // Use a temporary buffer for this row
-                let old_row: Vec<String> = new_order.iter()
-                    .filter_map(|&idx| row.get(idx).cloned())
-                    .collect();
-
-                for (i, val) in old_row.into_iter().enumerate() {
-                    if i < row.len() {
-                        row[i] = val;
-                    }
-                }
-            }
-        }
-
-        // Reorder column widths to match
-        if self.col_widths.len() >= n {
-            let old_widths = self.col_widths.clone();
-            for (i, &idx) in new_order.iter().enumerate() {
-                if i < self.col_widths.len() && idx < old_widths.len() {
-                    self.col_widths[i] = old_widths[idx];
-                }
-            }
-        }
-
-        old_cells
     }
 }
 

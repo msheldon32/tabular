@@ -66,6 +66,7 @@ impl From<ThemeColor> for Color {
 
 /// Style definition for a single element
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct ElementStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fg: Option<ThemeColor>,
@@ -94,6 +95,7 @@ impl Default for ElementStyle {
     }
 }
 
+#[allow(dead_code)]
 impl ElementStyle {
     pub fn fg(color: ThemeColor) -> Self {
         Self { fg: Some(color), ..Default::default() }
@@ -330,6 +332,7 @@ impl Theme {
     }
 
     /// Load theme from TOML file
+    #[allow(dead_code)]
     pub fn from_file(path: &PathBuf) -> Result<Self, String> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read theme file: {}", e))?;
@@ -365,6 +368,7 @@ impl Style {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_theme(theme: Theme) -> Self {
         Self { theme }
     }
@@ -375,10 +379,6 @@ impl Style {
 
     pub fn toggle_grid(&mut self) {
         self.theme.show_grid = !self.theme.show_grid;
-    }
-
-    pub fn has_grid(&self) -> bool {
-        self.theme.show_grid
     }
 
     // Convenience accessors that return ratatui styles
@@ -434,6 +434,7 @@ impl Style {
         self.theme.message_info.to_ratatui()
     }
 
+    #[allow(dead_code)]
     pub fn message_warning(&self) -> RatStyle {
         self.theme.message_warning.to_ratatui()
     }
@@ -452,10 +453,6 @@ impl Style {
 
     pub fn command_prompt(&self) -> RatStyle {
         self.theme.command_prompt.to_ratatui()
-    }
-
-    pub fn grid(&self) -> RatStyle {
-        self.theme.grid.to_ratatui()
     }
 
     pub fn background(&self) -> Option<Color> {

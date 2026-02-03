@@ -3,6 +3,7 @@ use crate::rowmanager::FilterState;
 
 /// Represents a reversible operation on the table
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum Transaction {
     /// Set a single cell value
     SetCell {
@@ -280,10 +281,12 @@ impl History {
         })
     }
 
+    #[allow(dead_code)]
     pub fn can_undo(&self) -> bool {
         !self.undo_stack.is_empty()
     }
 
+    #[allow(dead_code)]
     pub fn can_redo(&self) -> bool {
         !self.redo_stack.is_empty()
     }
@@ -298,6 +301,7 @@ impl History {
         self.redo_stack.last()
     }
 
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.undo_stack.clear();
         self.redo_stack.clear();

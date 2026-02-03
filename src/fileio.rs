@@ -202,6 +202,7 @@ impl FileIO {
     }
 
     /// Get the detected/configured delimiter
+    #[allow(dead_code)]
     pub fn delimiter(&self) -> u8 {
         self.delimiter
     }
@@ -224,6 +225,7 @@ impl FileIO {
             .unwrap_or_default()
     }
 
+    #[allow(dead_code)]
     pub fn format(&self) -> Option<FileFormat> {
         self.format
     }

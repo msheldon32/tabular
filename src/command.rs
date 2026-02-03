@@ -21,6 +21,7 @@ pub struct ReplaceCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Command {
     Write,
     Quit,
@@ -121,7 +122,6 @@ impl Command {
             "clip" | "cp" => Some(Command::Clip),
             "sp" | "syspaste" => Some(Command::SysPaste),
             "plugins" => Some(Command::PluginList),
-            "fibfilter" => Some(Command::Filter(FilterType::Fibonacci)),
             "nofilter" => Some(Command::Filter(FilterType::Default)),
             "canvas" => Some(Command::Canvas),
             _ => Some(Command::Unknown(trimmed.to_string())),

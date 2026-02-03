@@ -30,6 +30,7 @@ impl fmt::Display for Op {
 
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[allow(dead_code)]
 pub enum Predicate {
     Comparator {
         op: Op,

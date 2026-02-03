@@ -270,11 +270,6 @@ pub fn byte_index_of_char(s: &str, char_idx: usize) -> usize {
         .unwrap_or(s.len())
 }
 
-/// Get the character at a given character index, if it exists
-pub fn char_at(s: &str, char_idx: usize) -> Option<char> {
-    s.chars().nth(char_idx)
-}
-
 /// Remove the character at the given character index
 /// Returns (new_string, removed_char) or None if index is out of bounds
 pub fn remove_char_at(s: &str, char_idx: usize) -> Option<(String, char)> {

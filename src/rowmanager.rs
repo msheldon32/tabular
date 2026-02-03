@@ -7,7 +7,6 @@ use crate::util::{letters_from_col, ColumnType};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FilterType {
     Default,
-    Fibonacci,
     PredicateFilter(Predicate)
 }
 
@@ -43,14 +42,6 @@ impl RowManager {
         } else {
             true
         }
-    }
-
-    pub fn row_closure(self) -> impl Fn(usize) -> bool {
-        move |i| self.is_row_live(i)
-    }
-
-    pub fn row_closure_wf(self) -> impl Fn(&usize) -> bool {
-        move |&i| self.is_row_live(i)
     }
 
     pub fn get_successor(&self, row: usize) -> Option<usize> {
@@ -97,22 +88,11 @@ impl RowManager {
         }
     }
 
-    pub fn fibonacci_filter(&mut self, table: &Table) {
-        if !self.is_filtered {
-            self.active_rows = vec![0,1,1,2,3,5,8,13,21,35,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78];
-        } else {
-            self.active_rows = vec![0,1,1,2,3,5,8,13,21,35,56];
-        }
-        self.active_row_set = HashSet::from_iter(self.active_rows.iter().cloned());
-        self.is_filtered = true;
-        self.filter_string = String::from("Filtered (fibonacci)");
-    }
-
     pub fn predicate_filter(&mut self, table: &Table, col: usize, predicate: Predicate, col_type: ColumnType, keep_header: bool) {
         let idxs: Box<dyn Iterator<Item = usize>> = if self.is_filtered {
             Box::new(self.active_rows.iter().map(|&i| i))
         } else {
-            Box::new((0usize..table.row_count()))
+            Box::new(0usize..table.row_count())
         };
 
         self.active_rows = idxs.filter(|&i| predicate.evaluate(table.get_cell(i, col).unwrap(), col_type)).collect();
