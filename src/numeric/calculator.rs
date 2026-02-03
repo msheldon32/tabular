@@ -26,6 +26,138 @@ impl CalcType {
     fn use_bool(&self) -> Option<bool> {
         if let CalcType::Bool(x) = self { Some(*x) } else { None }
     }
+
+    fn numeric_precedence(l: CalcType, r: CalcType) -> Result<(CalcType, CalcType), CalcError> {
+        match (l,r) {
+            (CalcType::Int(a), CalcType::Int(b)) => Ok((CalcType::Int(a), CalcType::Int(b))),
+            (CalcType::Int(a), CalcType::Float(b)) => Ok((CalcType::Float(a as f64), CalcType::Float(b))),
+            (CalcType::Float(a), CalcType::Int(b)) => Ok((CalcType::Float(a), CalcType::Float(b as f64))),
+            (CalcType::Float(a), CalcType::Float(b)) => Ok((CalcType::Float(a), CalcType::Float(b))),
+            _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+        }
+    }
+
+    fn bin_op(op: BinOp, l: CalcType, r: CalcType) -> Result<CalcType, CalcError> {
+        match op {
+            BinOp::And => {
+                match (l,r) {
+                    (CalcType::Bool(a), CalcType::Bool(b)) => {
+                        Ok(CalcType::Bool(a && b))
+                    }
+                    _default => {
+                        Err(CalcError::EvalError("Boolean operation on non-boolean expressions".to_string()))
+                    }
+                }
+            }
+            BinOp::Or => {
+                match (l,r) {
+                    (CalcType::Bool(a), CalcType::Bool(b)) => {
+                        Ok(CalcType::Bool(a || b))
+                    }
+                    _default => {
+                        Err(CalcError::EvalError("Boolean operation on non-boolean expressions".to_string()))
+                    }
+                }
+            }
+            BinOp::Add => {
+                match CalcType::numeric_precedence(l,r) {
+                    Ok((CalcType::Int(a), CalcType::Int(b))) => Ok(CalcType::Int(a+b)),
+                    Ok((CalcType::Float(a), CalcType::Float(b))) => Ok(CalcType::Float(a+b)),
+                    _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+                }
+            }
+            BinOp::Sub => {
+                match CalcType::numeric_precedence(l,r) {
+                    Ok((CalcType::Int(a), CalcType::Int(b))) => Ok(CalcType::Int(a-b)),
+                    Ok((CalcType::Float(a), CalcType::Float(b))) => Ok(CalcType::Float(a-b)),
+                    _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+                }
+            }
+            BinOp::Mul => {
+                match CalcType::numeric_precedence(l,r) {
+                    Ok((CalcType::Int(a), CalcType::Int(b))) => Ok(CalcType::Int(a*b)),
+                    Ok((CalcType::Float(a), CalcType::Float(b))) => Ok(CalcType::Float(a*b)),
+                    _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+                }
+            }
+            BinOp::Div => {
+                // making an exception here to the rule since integer division would be surprising
+                // for most
+                match CalcType::numeric_precedence(l,r) {
+                    Ok((CalcType::Int(a), CalcType::Int(b))) => Ok(CalcType::Float((a as f64)/(b as f64))),
+                    Ok((CalcType::Float(a), CalcType::Float(b))) => Ok(CalcType::Float(a/b)),
+                    _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+                }
+            }
+            BinOp::Pow => {
+                // continuing the exception here, since rust is picky about overflows and negative
+                // exponents
+                match CalcType::numeric_precedence(l,r) {
+                    Ok((CalcType::Int(a), CalcType::Int(b))) => Ok(CalcType::Float((a as f64).powf(b as f64))),
+                    Ok((CalcType::Float(a), CalcType::Float(b))) => Ok(CalcType::Float(a.powf(b))),
+                    _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+                }
+            }
+            BinOp::Mod => {
+                match CalcType::numeric_precedence(l,r) {
+                    Ok((CalcType::Int(a), CalcType::Int(b))) => Ok(CalcType::Int(a%b)),
+                    Ok((CalcType::Float(a), CalcType::Float(b))) => Ok(CalcType::Float(a%b)),
+                    _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+                }
+            }
+            BinOp::Lt => {
+                match CalcType::numeric_precedence(l,r) {
+                    Ok((CalcType::Int(a), CalcType::Int(b))) => Ok(CalcType::Bool(a < b)),
+                    Ok((CalcType::Float(a), CalcType::Float(b))) => Ok(CalcType::Bool(a < b)),
+                    _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+                }
+            }
+            BinOp::Le => {
+                match CalcType::numeric_precedence(l,r) {
+                    Ok((CalcType::Int(a), CalcType::Int(b))) => Ok(CalcType::Bool(a <= b)),
+                    Ok((CalcType::Float(a), CalcType::Float(b))) => Ok(CalcType::Bool(a <= b)),
+                    _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+                }
+            }
+            BinOp::Gt => {
+                match CalcType::numeric_precedence(l,r) {
+                    Ok((CalcType::Int(a), CalcType::Int(b))) => Ok(CalcType::Bool(a > b)),
+                    Ok((CalcType::Float(a), CalcType::Float(b))) => Ok(CalcType::Bool(a > b)),
+                    _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+                }
+            }
+            BinOp::Ge => {
+                match CalcType::numeric_precedence(l,r) {
+                    Ok((CalcType::Int(a), CalcType::Int(b))) => Ok(CalcType::Bool(a >= b)),
+                    Ok((CalcType::Float(a), CalcType::Float(b))) => Ok(CalcType::Bool(a >= b)),
+                    _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+                }
+            }
+
+            BinOp::Ne => {
+                match (l,r) {
+                    (CalcType::Int(a), CalcType::Int(b)) => Ok(CalcType::Bool(a != b)),
+                    (CalcType::Float(a), CalcType::Int(b)) => Ok(CalcType::Bool(a != (b as f64))),
+                    (CalcType::Int(a), CalcType::Float(b)) => Ok(CalcType::Bool((a as f64) != b)),
+                    (CalcType::Float(a), CalcType::Float(b)) => Ok(CalcType::Bool(a != b)),
+                    (CalcType::Str(a), CalcType::Str(b)) => Ok(CalcType::Bool(a != b)),
+                    (CalcType::Bool(a), CalcType::Bool(b)) => Ok(CalcType::Bool(a != b)),
+                    _default => Err(CalcError::EvalError("Incompatible types".to_string()))
+                }
+            }
+            BinOp::Eq => {
+                match (l,r) {
+                    (CalcType::Int(a), CalcType::Int(b)) => Ok(CalcType::Bool(a == b)),
+                    (CalcType::Float(a), CalcType::Int(b)) => Ok(CalcType::Bool(a == (b as f64))),
+                    (CalcType::Int(a), CalcType::Float(b)) => Ok(CalcType::Bool((a as f64) == b)),
+                    (CalcType::Float(a), CalcType::Float(b)) => Ok(CalcType::Bool(a == b)),
+                    (CalcType::Str(a), CalcType::Str(b)) => Ok(CalcType::Bool(a == b)),
+                    (CalcType::Bool(a), CalcType::Bool(b)) => Ok(CalcType::Bool(a == b)),
+                    _default => Err(CalcError::EvalError("Incompatible types".to_string()))
+                }
+            }
+        }
+    }
 }
 
 /// Format a numeric value for display, removing unnecessary trailing zeros
