@@ -20,6 +20,8 @@ use std::fmt;
 pub enum Token {
     /// A number literal (integer or float)
     Number(f64),
+    /// A string literal
+    Str(String),
     /// Boolean literal
     True,
     False,
@@ -60,6 +62,7 @@ impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Token::Number(n) => write!(f, "{}", n),
+            Token::Str(s) => write!(f, "{}", s),
             Token::True => write!(f, "TRUE"),
             Token::False => write!(f, "FALSE"),
             Token::Ident(s) => write!(f, "{}", s),
@@ -172,6 +175,7 @@ pub enum ParseError {
     InvalidNumber(String),
     InvalidCellRef(String),
     EmptyExpression,
+    UnclosedQuote,
 }
 
 impl fmt::Display for ParseError {
@@ -187,6 +191,7 @@ impl fmt::Display for ParseError {
             ParseError::InvalidNumber(s) => write!(f, "invalid number: {}", s),
             ParseError::InvalidCellRef(s) => write!(f, "invalid cell reference: {}", s),
             ParseError::EmptyExpression => write!(f, "empty expression"),
+            ParseError::UnclosedQuote => write!(f, "unclosed quotation"),
         }
     }
 }
@@ -268,6 +273,17 @@ impl<'a> Lexer<'a> {
             ')' => Ok(Token::RParen),
             ',' => Ok(Token::Comma),
             ':' => Ok(Token::Colon),
+
+            '"' => {
+                let mut buf = Vec::new();
+                while let Some((_,ch)) = self.next_char() {
+                    if ch == '"' {
+                        return Ok(Token::Str(buf.into_iter().collect()));
+                    }
+                    buf.push(ch);
+                }
+                Err(ParseError::UnclosedQuote)
+            }
 
             // Comparison operators
             '=' => {
