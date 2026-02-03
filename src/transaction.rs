@@ -48,6 +48,8 @@ pub enum Transaction {
     SetFilter { old_state: FilterState, new_state: FilterState },
     /// Multiple transactions grouped together
     Batch(Vec<Transaction>),
+    Undo,
+    Redo
 }
 
 impl Transaction {
@@ -76,6 +78,8 @@ impl Transaction {
             Transaction::PermuteCols { permutation } => permutation.len(),
             Transaction::SetFilter { .. } => 1, // Filter changes are instant
             Transaction::Batch(txns) => txns.iter().map(|t| t.estimated_size()).sum(),
+            Transaction::Undo => 1,
+            Transaction::Redo => 1
         }
     }
 
@@ -158,6 +162,12 @@ impl Transaction {
                     txn.apply(table);
                 }
             }
+            Transaction::Undo => {
+                // handled directly by app for now
+            }
+            Transaction::Redo => {
+                // handled directly by app for now
+            }
         }
     }
 
@@ -239,6 +249,10 @@ impl Transaction {
             Transaction::Batch(txns) => {
                 Transaction::Batch(txns.iter().rev().map(|t| t.inverse()).collect())
             }
+            // These are a bit nonsensical but I'm leaving these in. These cannot be assigned to
+            // history anyways
+            Transaction::Undo => { Transaction::Redo }
+            Transaction::Redo => { Transaction::Undo }
         }
     }
 }
@@ -260,6 +274,10 @@ impl History {
 
     /// Record a transaction (clears redo stack)
     pub fn record(&mut self, txn: Transaction) {
+        if matches!(txn, Transaction::Undo | Transaction::Redo) {
+            // cannot undo/redo these for obvious reasons
+            return;
+        }
         self.undo_stack.push(txn);
         self.redo_stack.clear();
     }

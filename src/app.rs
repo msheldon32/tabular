@@ -32,6 +32,7 @@ use crate::table::rowmanager::RowManager;
 use crate::util::ColumnType;
 use crate::mode::visual::{VisualType, VisualHandler};
 use crate::config::AppConfig;
+use crate::mode::normal::NormalHandler;
 
 /// Result from a background operation
 pub enum BackgroundResult {
@@ -77,9 +78,10 @@ pub struct App {
     // Mode handlers
     key_buffer: KeyBuffer,
     pub(crate) nav_handler: NavigationHandler,
-    search_handler: SearchHandler,
-    insert_handler: InsertHandler,
+    pub search_handler: SearchHandler,
+    pub insert_handler: InsertHandler,
     pub(crate) command_handler: CommandHandler,
+    normal_handler: NormalHandler,
     // Plugin system
     pub(crate) plugin_manager: PluginManager,
 }
@@ -122,6 +124,7 @@ impl App {
             search_handler: SearchHandler::new(),
             insert_handler: InsertHandler::new(),
             command_handler: CommandHandler::new(),
+            normal_handler: NormalHandler::new(),
             plugin_manager,
         }
     }
@@ -310,9 +313,49 @@ impl App {
 
     /// Execute a transaction, record it in history, and mark dirty
     pub(crate) fn execute(&mut self, txn: Transaction) {
-        txn.apply(&mut self.table);
-        self.history.record(txn);
-        self.dirty = true;
+        if matches!(txn, Transaction::Undo) {
+            // Check if undo is large before executing
+            if let Some(txn) = self.history.peek_undo() {
+                if txn.is_large() {
+                    let size = txn.estimated_size();
+                    self.start_progress("Undoing", size);
+                    self.pending_op = Some(PendingOp::Undo);
+                } else if let Some(inverse) = self.history.undo() {
+                    // Handle filter state if this is a SetFilter transaction
+                    if let Some(filter_state) = inverse.filter_state() {
+                        self.row_manager.borrow_mut().restore(filter_state.clone());
+                        self.view.move_to_top();
+                    }
+                    inverse.apply(&mut self.table);
+                    self.view.clamp_cursor(&self.table);
+                    self.message = Some("Undo".to_string());
+                }
+            }
+            self.message = Some(String::from("Cannot undo."));
+        } else if matches!(txn, Transaction::Redo) {
+            // Check if redo is large before executing
+            if let Some(txn) = self.history.peek_redo() {
+                if txn.is_large() {
+                    let size = txn.estimated_size();
+                    self.start_progress("Redoing", size);
+                    self.pending_op = Some(PendingOp::Redo);
+                } else if let Some(txn) = self.history.redo() {
+                    // Handle filter state if this is a SetFilter transaction
+                    if let Some(filter_state) = txn.filter_state() {
+                        self.row_manager.borrow_mut().restore(filter_state.clone());
+                        self.view.move_to_top();
+                    }
+                    txn.apply(&mut self.table);
+                    self.view.clamp_cursor(&self.table);
+                    self.message = Some("Redo".to_string());
+                }
+            }
+            self.message = Some(String::from("Cannot redo."));
+        } else {
+            txn.apply(&mut self.table);
+            self.history.record(txn);
+            self.dirty = true;
+        }
     }
 
     /// Execute and return to normal mode
@@ -396,169 +439,19 @@ impl App {
             }
             KeyBufferResult::Fallthrough(key, count) => {
                 // Process as single key
-                self.handle_normal_key(key, count);
+                //self.handle_normal_key(key, count);
+                let result = self.normal_handler.handle_key(key, 
+                                                            &mut self.view,
+                                                            &mut self.table,
+                                                            count,
+                                                            &self.nav_handler,
+                                                            self.row_manager.borrow().is_filtered,
+                                                            &mut self.clipboard,
+                                                            &mut self.history,
+                                                            &mut self.search_handler
+                                                            );
+                self.process_key_result(result);
             }
-        }
-    }
-
-    fn handle_normal_key(&mut self, key: KeyEvent, _count: usize) {
-        // Handle navigation (hjkl already handled by KeyBuffer with count)
-        self.nav_handler.handle(key, &mut self.view, &self.table);
-
-        match key.code {
-            KeyCode::Char('i') => {
-                self.mode = Mode::Insert;
-                let current = operations::current_cell(&self.view, &self.table).clone();
-                self.insert_handler.start_edit(current);
-            }
-            KeyCode::Char('V') => {
-                self.mode = Mode::VisualRow;
-                self.view.set_support();
-            }
-            KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.mode = Mode::VisualCol;
-                self.view.set_support();
-            }
-            KeyCode::Char('v') => {
-                self.mode = Mode::Visual;
-                self.view.set_support();
-            }
-            KeyCode::Char(':') => {
-                self.calling_mode = Some(self.mode);
-                self.mode = Mode::Command;
-                self.command_handler.start();
-            }
-            KeyCode::Char('q') => {
-                if self.dirty {
-                    self.message = Some("Unsaved changes! Use :q! to force quit".to_string());
-                } else {
-                    self.should_quit = true;
-                }
-            }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.should_quit = true;
-            }
-            KeyCode::Char('o') => {
-                if self.row_manager.borrow().is_filtered {
-                    self.message = Some("Adding rows is forbidden in filtered views.".to_string());
-                    return;
-                }
-                let txn = Transaction::InsertRow { idx: self.view.cursor_row + 1 };
-                self.execute(txn);
-                self.view.cursor_row += 1;
-                self.view.scroll_to_cursor();
-                self.message = Some("Row added".to_string());
-            }
-            KeyCode::Char('O') => {
-                if self.row_manager.borrow().is_filtered {
-                    self.message = Some("Adding rows is forbidden in filtered views.".to_string());
-                    return;
-                }
-                let txn = Transaction::InsertRow { idx: self.view.cursor_row };
-                self.execute(txn);
-                self.view.scroll_to_cursor();
-                self.message = Some("Row added".to_string());
-            }
-            KeyCode::Char('p') => {
-                let (message, txn_opt) = self.clipboard.paste_as_transaction(
-                    self.view.cursor_row,
-                    self.view.cursor_col,
-                    &self.table,
-                );
-                if let Some(txn) = txn_opt {
-                    self.execute(txn);
-                            }
-                self.message = Some(message);
-            }
-            KeyCode::Char('a') => {
-                let txn = Transaction::InsertCol { idx: self.view.cursor_col };
-                self.execute(txn);
-                        self.message = Some("Column added".to_string());
-            }
-            KeyCode::Char('A') => {
-                let txn = Transaction::InsertCol { idx: self.view.cursor_col + 1 };
-                self.execute(txn);
-                        self.message = Some("Column added".to_string());
-            }
-            KeyCode::Char('X') => {
-                if let Some(col_data) = self.table.get_col_cloned(self.view.cursor_col) {
-                    let txn = Transaction::DeleteCol {
-                        idx: self.view.cursor_col,
-                        data: col_data,
-                    };
-                    self.execute(txn);
-                    self.view.clamp_cursor(&self.table);
-                                self.message = Some("Column deleted".to_string());
-                }
-            }
-            KeyCode::Char('x') => {
-                let old_value = operations::current_cell(&self.view, &self.table).clone();
-                self.clipboard.store_deleted(crate::clipboard::RegisterContent{
-                    data: vec![vec![old_value.clone()]],
-                    anchor: crate::clipboard::PasteAnchor::Cursor
-                });
-
-                let txn = Transaction::SetCell {
-                    row: self.view.cursor_row,
-                    col: self.view.cursor_col,
-                    old_value,
-                    new_value: String::new(),
-                };
-                self.execute(txn);
-            }
-            KeyCode::Char('u') => {
-                // Check if undo is large before executing
-                if let Some(txn) = self.history.peek_undo() {
-                    if txn.is_large() {
-                        let size = txn.estimated_size();
-                        self.start_progress("Undoing", size);
-                        self.pending_op = Some(PendingOp::Undo);
-                    } else if let Some(inverse) = self.history.undo() {
-                        // Handle filter state if this is a SetFilter transaction
-                        if let Some(filter_state) = inverse.filter_state() {
-                            self.row_manager.borrow_mut().restore(filter_state.clone());
-                            self.view.move_to_top();
-                        }
-                        inverse.apply(&mut self.table);
-                        self.view.clamp_cursor(&self.table);
-                        self.message = Some("Undo".to_string());
-                    }
-                }
-            }
-            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                // Check if redo is large before executing
-                if let Some(txn) = self.history.peek_redo() {
-                    if txn.is_large() {
-                        let size = txn.estimated_size();
-                        self.start_progress("Redoing", size);
-                        self.pending_op = Some(PendingOp::Redo);
-                    } else if let Some(txn) = self.history.redo() {
-                        // Handle filter state if this is a SetFilter transaction
-                        if let Some(filter_state) = txn.filter_state() {
-                            self.row_manager.borrow_mut().restore(filter_state.clone());
-                            self.view.move_to_top();
-                        }
-                        txn.apply(&mut self.table);
-                        self.view.clamp_cursor(&self.table);
-                        self.message = Some("Redo".to_string());
-                    }
-                }
-            }
-            KeyCode::Char('/') => {
-                self.mode = Mode::Search;
-                self.search_handler.start_search();
-            }
-            KeyCode::Char('n') => {
-                if let Some(msg) = self.search_handler.goto_next(&mut self.view) {
-                    self.message = Some(msg);
-                }
-            }
-            KeyCode::Char('N') => {
-                if let Some(msg) = self.search_handler.goto_prev(&mut self.view) {
-                    self.message = Some(msg);
-                }
-            }
-            _ => {}
         }
     }
 

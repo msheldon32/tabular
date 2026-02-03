@@ -168,6 +168,11 @@ impl App {
                 if mode == Mode::Command {
                     self.calling_mode = prev_mode;
                     self.command_handler.start();
+                } else if mode == Mode::Insert {
+                    let current = crate::table::operations::current_cell(&self.view, &self.table).clone();
+                    self.insert_handler.start_edit(current);
+                } else if mode == Mode::Search {
+                    self.search_handler.start_search();
                 }
             }
             KeyResult::Execute(txn) => {
