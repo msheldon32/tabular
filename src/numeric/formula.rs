@@ -59,6 +59,20 @@ pub fn evaluate_function<E: ExprEvaluator>(
                 CalcType::max(acc, v.clone())
             })?)
         },
+        "COUNT" => {
+            require_args(name, args, 1)?;
+            let mut vals = evaluator.expand(&args[0], results)?;
+
+            Ok(CalcType::Int(vals.len()))
+        },
+        "PROD" => {
+            require_args(name, args, 1)?;
+            let mut vals = evaluator.expand(&args[0], results)?;
+
+            Ok(vals.iter().try_fold(CalcType::Int(0), |acc, v| {
+                CalcType::bin_op(BinOp::Mul, acc, v.clone())
+            })?)
+        },
         // I am just killing this function entirely for now, this will require substantial revision
         _default => Err(CalcError::EvalError("(Most) functions have been removed for now".to_string()))
     }
