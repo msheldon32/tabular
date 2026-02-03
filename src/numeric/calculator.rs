@@ -1,9 +1,8 @@
 use std::collections::{HashMap, HashSet};
-use std::cmp;
 
 use crate::table::table::Table;
 use crate::util::{CellRef, CalcError, col_from_letters, letters_from_col};
-use crate::numeric::parser::{self, Expr, BinOp, ParseError};
+use crate::numeric::parser::{self, Expr, ParseError};
 use crate::numeric::formula::{self as formula, ExprEvaluator};
 use crate::numeric::calctype::CalcType;
 
@@ -108,7 +107,7 @@ impl<'a> Calculator<'a> {
 
     fn collect_refs(&self, expr: &Expr, refs: &mut HashSet<CellRef>) -> Result<(), CalcError> {
         match expr {
-            Expr::Number(_) => {}
+            Expr::Literal(_) => {}
             Expr::CellRef { col, row } => {
                 let col_idx = col_from_letters(col);
                 refs.insert(CellRef { row: *row - 1, col: col_idx });
@@ -164,7 +163,6 @@ impl<'a> Calculator<'a> {
             Expr::Neg(inner) | Expr::Not(inner) => {
                 self.collect_refs(inner, refs)?;
             }
-            Expr::Boolean(_) => {}
         }
         Ok(())
     }
@@ -266,15 +264,10 @@ impl<'a> Calculator<'a> {
         CalcType::Str(trimmed.to_string())
     }
 
-    /// Evaluate an expression to f64
-    /// Booleans are represented as 1.0 (true) and 0.0 (false)
+    /// Evaluate an expression to CalcType
     fn evaluate_expr(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<CalcType, CalcError> {
         match expr {
-            /*Expr::Float(n) => Ok(CalcType::Float(n)),
-            Expr::Int(n) => Ok(CalcType::Int(n)),*/
-            Expr::Number(n) => Ok(CalcType::Float(*n)),
-
-            Expr::Boolean(b) => Ok(CalcType::Bool(*b)),
+            Expr::Literal(val) => Ok(val.clone()),
 
             Expr::CellRef { col, row } => {
                 let col_idx = col_from_letters(col);

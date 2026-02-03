@@ -3,7 +3,7 @@ use std::cmp;
 use crate::numeric::parser::BinOp;
 use crate::util::CalcError;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CalcType {
     Int(i64),
     Str(String),

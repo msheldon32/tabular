@@ -10,6 +10,7 @@
 //! - Ternary: IF(condition, true_value, false_value)
 
 use std::fmt;
+use super::calctype::CalcType;
 
 // ============================================================================
 // Tokens
@@ -18,13 +19,8 @@ use std::fmt;
 /// Token types produced by the lexer
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    /// A number literal (integer or float)
-    Number(f64),
-    /// A string literal
-    Str(String),
-    /// Boolean literal
-    True,
-    False,
+    /// A literal value (int, float, string, or bool)
+    Literal(CalcType),
     /// An identifier (function name or could be part of cell ref)
     Ident(String),
     /// A cell reference like A1, AA123
@@ -61,10 +57,11 @@ pub enum Token {
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Token::Number(n) => write!(f, "{}", n),
-            Token::Str(s) => write!(f, "{}", s),
-            Token::True => write!(f, "TRUE"),
-            Token::False => write!(f, "FALSE"),
+            Token::Literal(CalcType::Int(n)) => write!(f, "{}", n),
+            Token::Literal(CalcType::Float(n)) => write!(f, "{}", n),
+            Token::Literal(CalcType::Str(s)) => write!(f, "\"{}\"", s),
+            Token::Literal(CalcType::Bool(true)) => write!(f, "TRUE"),
+            Token::Literal(CalcType::Bool(false)) => write!(f, "FALSE"),
             Token::Ident(s) => write!(f, "{}", s),
             Token::CellRef { col, row } => write!(f, "{}{}", col, row),
             Token::Colon => write!(f, ":"),
@@ -98,13 +95,8 @@ impl fmt::Display for Token {
 /// Abstract Syntax Tree nodes for formulas
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    /// A numeric literal
-    //Float(f64),
-    /// An integer
-    //Int(i64),
-    Number (f64),
-    /// A boolean literal
-    Boolean(bool),
+    /// A literal value (int, float, string, or bool)
+    Literal(CalcType),
     /// A cell reference (col letters, row number 1-indexed)
     CellRef { col: String, row: usize },
     /// A range between two cell references
@@ -281,7 +273,7 @@ impl<'a> Lexer<'a> {
                 let mut buf = Vec::new();
                 while let Some((_,ch)) = self.next_char() {
                     if ch == '"' {
-                        return Ok(Token::Str(buf.into_iter().collect()));
+                        return Ok(Token::Literal(CalcType::Str(buf.into_iter().collect())));
                     } else if ch == '\\' {
                         if self.peek_char() == Some('\\') {
                             buf.push('\\');
@@ -383,8 +375,10 @@ impl<'a> Lexer<'a> {
         }
 
         // Check for scientific notation
+        let mut has_exp = false;
         if let Some(&(_, c)) = self.chars.peek() {
             if c == 'e' || c == 'E' {
+                has_exp = true;
                 s.push(c);
                 self.next_char();
 
@@ -408,8 +402,16 @@ impl<'a> Lexer<'a> {
             }
         }
 
+        // Parse as integer if possible (no dot, no exponent, fits in i64)
+        if !has_dot && !has_exp {
+            if let Ok(n) = s.parse::<i64>() {
+                return Ok(Token::Literal(CalcType::Int(n)));
+            }
+        }
+
+        // Otherwise parse as float
         let n: f64 = s.parse().map_err(|_| ParseError::InvalidNumber(s))?;
-        Ok(Token::Number(n))
+        Ok(Token::Literal(CalcType::Float(n)))
     }
 
     fn read_ident_or_cell(&mut self, first: char) -> Result<Token, ParseError> {
@@ -429,8 +431,8 @@ impl<'a> Lexer<'a> {
         // Check for keywords (case-insensitive)
         let upper = s.to_uppercase();
         match upper.as_str() {
-            "TRUE" => return Ok(Token::True),
-            "FALSE" => return Ok(Token::False),
+            "TRUE" => return Ok(Token::Literal(CalcType::Bool(true))),
+            "FALSE" => return Ok(Token::Literal(CalcType::Bool(false))),
             "AND" => return Ok(Token::And),
             "OR" => return Ok(Token::Or),
             "NOT" => return Ok(Token::Not),
@@ -695,14 +697,14 @@ impl Parser {
     /// Parse primary expressions (numbers, cell refs, function calls, parentheses)
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         match self.peek().clone() {
-            Token::Number(n) => {
+            Token::Literal(CalcType::Int(n)) => {
                 self.advance();
                 // Check if this is a row range like 1:5
                 if matches!(self.peek(), Token::Colon) {
-                    if n.fract() == 0.0 && n >= 1.0 {
+                    if n >= 1 {
                         self.advance();
-                        if let Token::Number(end) = self.peek().clone() {
-                            if end.fract() == 0.0 && end >= 1.0 {
+                        if let Token::Literal(CalcType::Int(end)) = self.peek().clone() {
+                            if end >= 1 {
                                 self.advance();
                                 return Ok(Expr::RowRange {
                                     start: n as usize,
@@ -716,7 +718,22 @@ impl Parser {
                         });
                     }
                 }
-                Ok(Expr::Number(n))
+                Ok(Expr::Literal(CalcType::Int(n)))
+            }
+
+            Token::Literal(CalcType::Float(n)) => {
+                self.advance();
+                Ok(Expr::Literal(CalcType::Float(n)))
+            }
+
+            Token::Literal(CalcType::Str(s)) => {
+                self.advance();
+                Ok(Expr::Literal(CalcType::Str(s)))
+            }
+
+            Token::Literal(CalcType::Bool(b)) => {
+                self.advance();
+                Ok(Expr::Literal(CalcType::Bool(b)))
             }
 
             Token::CellRef { col, row } => {
@@ -750,16 +767,6 @@ impl Parser {
                 let expr = self.parse_expr()?;
                 self.expect(Token::RParen)?;
                 Ok(expr)
-            }
-
-            Token::True => {
-                self.advance();
-                Ok(Expr::Boolean(true))
-            }
-
-            Token::False => {
-                self.advance();
-                Ok(Expr::Boolean(false))
             }
 
             // AND/OR/NOT can also be function names when followed by (
@@ -912,7 +919,7 @@ fn collect_cell_refs(expr: &Expr, refs: &mut Vec<(String, usize)>) {
         Expr::Neg(inner) | Expr::Not(inner) => {
             collect_cell_refs(inner, refs);
         }
-        Expr::Number(_) | Expr::Boolean(_) | Expr::RowRange { .. } | Expr::ColRange { .. } => {}
+        Expr::Literal(_) | Expr::RowRange { .. } | Expr::ColRange { .. } => {}
     }
 }
 
@@ -923,7 +930,7 @@ pub fn has_ranges(expr: &Expr) -> bool {
         Expr::FnCall { args, .. } => args.iter().any(has_ranges),
         Expr::BinOp { left, right, .. } => has_ranges(left) || has_ranges(right),
         Expr::Neg(inner) | Expr::Not(inner) => has_ranges(inner),
-        Expr::Number(_) | Expr::Boolean(_) | Expr::CellRef { .. } => false,
+        Expr::Literal(_) | Expr::CellRef { .. } => false,
     }
 }
 
@@ -939,10 +946,10 @@ mod tests {
     fn test_lex_numbers() {
         let lexer = Lexer::new("123 45.67 1e5 2.5e-3");
         let tokens = lexer.tokenize().unwrap();
-        assert!(matches!(tokens[0], Token::Number(n) if n == 123.0));
-        assert!(matches!(tokens[1], Token::Number(n) if (n - 45.67).abs() < 0.001));
-        assert!(matches!(tokens[2], Token::Number(n) if n == 1e5));
-        assert!(matches!(tokens[3], Token::Number(n) if (n - 2.5e-3).abs() < 1e-10));
+        assert!(matches!(tokens[0], Token::Literal(CalcType::Int(123))));
+        assert!(matches!(tokens[1], Token::Literal(CalcType::Float(n)) if (n - 45.67).abs() < 0.001));
+        assert!(matches!(tokens[2], Token::Literal(CalcType::Float(n)) if n == 1e5));
+        assert!(matches!(tokens[3], Token::Literal(CalcType::Float(n)) if (n - 2.5e-3).abs() < 1e-10));
     }
 
     #[test]
@@ -950,8 +957,8 @@ mod tests {
         let lexer = Lexer::new("\"Hello world\" \"Welcome to my lexer\"");
         let tokens = lexer.tokenize().unwrap();
 
-        assert!(matches!(tokens[0], Token::Str(ref s) if s == "Hello world"));
-        assert!(matches!(tokens[1], Token::Str(ref s) if s == "Welcome to my lexer"));
+        assert!(matches!(&tokens[0], Token::Literal(CalcType::Str(s)) if s == "Hello world"));
+        assert!(matches!(&tokens[1], Token::Literal(CalcType::Str(s)) if s == "Welcome to my lexer"));
     }
 
     #[test]
@@ -959,8 +966,8 @@ mod tests {
         let lexer = Lexer::new("\"\\\"Hello world\\\"\" \"Welcome to my\\\" lexer\"");
         let tokens = lexer.tokenize().unwrap();
 
-        assert!(matches!(tokens[0], Token::Str(ref s) if s == "\"Hello world\""));
-        assert!(matches!(tokens[1], Token::Str(ref s) if s == "Welcome to my\" lexer"));
+        assert!(matches!(&tokens[0], Token::Literal(CalcType::Str(s)) if s == "\"Hello world\""));
+        assert!(matches!(&tokens[1], Token::Literal(CalcType::Str(s)) if s == "Welcome to my\" lexer"));
     }
 
     #[test]
@@ -1005,10 +1012,10 @@ mod tests {
     #[test]
     fn test_parse_number() {
         let expr = parse("42").unwrap();
-        assert_eq!(expr, Expr::Number(42.0));
+        assert_eq!(expr, Expr::Literal(CalcType::Int(42)));
 
         let expr = parse("3.14159").unwrap();
-        assert!(matches!(expr, Expr::Number(n) if (n - 3.14159).abs() < 0.00001));
+        assert!(matches!(expr, Expr::Literal(CalcType::Float(n)) if (n - 3.14159).abs() < 0.00001));
     }
 
     #[test]
@@ -1142,12 +1149,12 @@ mod tests {
     fn test_lex_boolean_literals() {
         let lexer = Lexer::new("TRUE FALSE true false True False");
         let tokens = lexer.tokenize().unwrap();
-        assert_eq!(tokens[0], Token::True);
-        assert_eq!(tokens[1], Token::False);
-        assert_eq!(tokens[2], Token::True);
-        assert_eq!(tokens[3], Token::False);
-        assert_eq!(tokens[4], Token::True);
-        assert_eq!(tokens[5], Token::False);
+        assert_eq!(tokens[0], Token::Literal(CalcType::Bool(true)));
+        assert_eq!(tokens[1], Token::Literal(CalcType::Bool(false)));
+        assert_eq!(tokens[2], Token::Literal(CalcType::Bool(true)));
+        assert_eq!(tokens[3], Token::Literal(CalcType::Bool(false)));
+        assert_eq!(tokens[4], Token::Literal(CalcType::Bool(true)));
+        assert_eq!(tokens[5], Token::Literal(CalcType::Bool(false)));
     }
 
     #[test]
@@ -1165,13 +1172,13 @@ mod tests {
     #[test]
     fn test_parse_boolean_literals() {
         let expr = parse("TRUE").unwrap();
-        assert_eq!(expr, Expr::Boolean(true));
+        assert_eq!(expr, Expr::Literal(CalcType::Bool(true)));
 
         let expr = parse("FALSE").unwrap();
-        assert_eq!(expr, Expr::Boolean(false));
+        assert_eq!(expr, Expr::Literal(CalcType::Bool(false)));
 
         let expr = parse("true").unwrap();
-        assert_eq!(expr, Expr::Boolean(true));
+        assert_eq!(expr, Expr::Literal(CalcType::Bool(true)));
     }
 
     #[test]
