@@ -599,10 +599,10 @@ mod tests {
         ]);
         let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "true");
-        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "false");
-        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "false");
         assert_eq!(results.iter().find(|r| r.1 == 3).unwrap().2, "true");
+        assert_eq!(results.iter().find(|r| r.1 == 4).unwrap().2, "false");
+        assert_eq!(results.iter().find(|r| r.1 == 5).unwrap().2, "false");
+        assert_eq!(results.iter().find(|r| r.1 == 6).unwrap().2, "true");
     }
 
     // === Boolean expression tests ===
