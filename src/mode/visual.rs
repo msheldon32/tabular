@@ -3,9 +3,10 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::mode::Mode;
 use crate::transaction::Transaction;
 use crate::input::{KeyResult, KeyBufferResult, SequenceAction, is_escape, NavigationHandler, KeyBuffer};
-use crate::table::Table;
-use crate::tableview::TableView;
+use crate::table::table::Table;
+use crate::table::tableview::TableView;
 use crate::clipboard::Clipboard;
+use crate::numeric::format::{format_scientific, format_percentage, format_currency, format_commas, format_default, parse_numeric};
 
 /// Selection information for visual mode
 #[derive(Clone, Debug, Default)]
@@ -271,11 +272,11 @@ impl VisualHandler {
                 row.iter()
                     .map(|cell| {
                         let formatted = match op {
-                            FormatOp::Default => crate::format::format_default(cell),
-                            FormatOp::Commas => crate::format::format_commas(cell),
-                            FormatOp::Currency => crate::format::format_currency(cell, '$'),
-                            FormatOp::Scientific => crate::format::format_scientific(cell, 2),
-                            FormatOp::Percentage => crate::format::format_percentage(cell, 0),
+                            FormatOp::Default => format_default(cell),
+                            FormatOp::Commas => format_commas(cell),
+                            FormatOp::Currency => format_currency(cell, '$'),
+                            FormatOp::Scientific => format_scientific(cell, 2),
+                            FormatOp::Percentage => format_percentage(cell, 0),
                         };
                         // If formatting failed (non-numeric), keep original value
                         formatted.unwrap_or_else(|| cell.clone())

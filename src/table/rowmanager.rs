@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use crate::table::Table;
-use crate::predicate::Predicate;
+use crate::table::table::Table;
+use crate::numeric::predicate::Predicate;
 use crate::util::{letters_from_col, ColumnType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

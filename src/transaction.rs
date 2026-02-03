@@ -1,5 +1,5 @@
-use crate::table::Table;
-use crate::rowmanager::FilterState;
+use crate::table::table::Table;
+use crate::table::rowmanager::FilterState;
 
 /// Represents a reversible operation on the table
 #[derive(Debug, Clone)]

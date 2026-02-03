@@ -2,9 +2,9 @@ use std::cmp;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-use crate::table::Table;
+use crate::table::table::Table;
 use crate::mode::Mode;
-use crate::rowmanager::RowManager;
+use crate::table::rowmanager::RowManager;
 
 /// View state for the table (cursor, viewport, selection)
 #[derive(Debug, Clone)]

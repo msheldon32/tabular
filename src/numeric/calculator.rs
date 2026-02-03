@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use regex::Regex;
 use rand::Rng;
 
-use crate::table::Table;
+use crate::table::table::Table;
 use crate::util::{CellRef, parse_cell_ref, parse_range, parse_row_range, 
     parse_col_range, CalcError, letters_from_col };
 
@@ -276,7 +276,7 @@ impl<'a> Calculator<'a> {
         }
 
         // Try to parse as number (handles currency, percentages, etc.)
-        crate::format::parse_numeric(cell_content)
+        crate::numeric::format::parse_numeric(cell_content)
             .ok_or_else(|| CalcError::EvalError(format!("{} is not a number", cell_ref_to_name(cell))))
     }
 

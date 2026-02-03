@@ -1,22 +1,14 @@
 mod app;
-mod calculator;
-mod canvas;
 mod clipboard;
 mod fileio;
-mod format;
 mod input;
 mod mode;
-mod operations;
 mod plugin;
-mod progress;
-mod style;
 mod table;
-mod tableview;
 mod transaction;
 mod ui;
 mod util;
-mod rowmanager;
-mod predicate;
+mod numeric;
 
 use std::io;
 use std::path::PathBuf;

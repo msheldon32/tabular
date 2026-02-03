@@ -3,8 +3,8 @@
 //! These functions handle operations that need to modify both the table data
 //! and the view state (cursor position, selection, etc.)
 
-use crate::table::Table;
-use crate::tableview::TableView;
+use crate::table::table::Table;
+use crate::table::tableview::TableView;
 
 // === Cell Access ===
 /// Get current cell content

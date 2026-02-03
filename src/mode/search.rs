@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::tableview::TableView;
-use crate::table::Table;
+use crate::table::tableview::TableView;
+use crate::table::table::Table;
 use crate::input::{KeyResult, is_escape};
 
 /// Search state and functionality

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::table::Table;
+use crate::table::table::Table;
 use crate::transaction::Transaction;
 
 /// Where yanked data should be anchored when pasting

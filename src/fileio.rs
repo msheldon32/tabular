@@ -3,7 +3,7 @@ use std::fs;
 use std::ffi::OsStr;
 use std::io::{self, BufRead, BufReader, BufWriter};
 
-use crate::table::{Table, CHUNK_SIZE};
+use crate::table::table::{Table, CHUNK_SIZE};
 
 /// Detected file format
 #[derive(Debug, Clone, Copy, PartialEq)]

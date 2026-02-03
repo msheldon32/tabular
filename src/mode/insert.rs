@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent };
 
 use crate::input::{KeyResult, is_escape};
 use crate::transaction::Transaction;
-use crate::tableview::TableView;
+use crate::table::tableview::TableView;
 
 /// Insert mode handler
 /// Note: cursor is a CHARACTER index, not a byte index

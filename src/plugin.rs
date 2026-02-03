@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::mode::Mode;
 use crate::mode::visual::SelectionInfo;
-use crate::canvas::CanvasColor;
+use crate::ui::canvas::CanvasColor;
 
 pub struct PluginManager {
     lua: Lua,

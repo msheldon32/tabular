@@ -2,8 +2,8 @@ use regex::Regex;
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::util::{CellRef, parse_cell_ref};
-use crate::rowmanager::FilterType;
-use crate::predicate::parse_predicate;
+use crate::table::rowmanager::FilterType;
+use crate::numeric::predicate::parse_predicate;
 use crate::input::is_escape;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -9,8 +9,8 @@ use std::cell::RefCell;
 use crossterm::event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-use crate::calculator::Calculator;
-use crate::canvas::Canvas;
+use crate::numeric::calculator::Calculator;
+use crate::ui::canvas::Canvas;
 use crate::clipboard::{Clipboard, RegisterContent};
 use crate::mode::command::{Command, ReplaceCommand, CommandHandler};
 use crate::mode::insert::InsertHandler;
@@ -19,16 +19,16 @@ use crate::input::{
 };
 use crate::mode::search::SearchHandler;
 use crate::mode::Mode;
-use crate::operations;
+use crate::table::operations;
 use crate::plugin::{PluginManager, PluginAction, CommandContext};
-use crate::table::{SortDirection, Table};
-use crate::tableview::TableView;
+use crate::table::table::{SortDirection, Table};
+use crate::table::tableview::TableView;
 use crate::transaction::{History, Transaction};
 use crate::ui;
 use crate::fileio::FileIO;
-use crate::style::Style;
-use crate::progress::Progress;
-use crate::rowmanager::{FilterType, RowManager};
+use crate::ui::style::Style;
+use crate::ui::progress::Progress;
+use crate::table::rowmanager::{FilterType, RowManager};
 use crate::util::ColumnType;
 use crate::mode::visual::{SelectionInfo, VisualType, VisualHandler};
 
@@ -220,7 +220,7 @@ impl App {
             // Check for completed background operations
             self.poll_background_result();
 
-            terminal.draw(|f| ui::render(f, self, self.row_manager.clone()))?;
+            terminal.draw(|f| ui::ui::render(f, self, self.row_manager.clone()))?;
 
             // Execute pending operation after render (so progress bar is visible)
             if let Some(op) = self.pending_op.take() {
@@ -878,7 +878,7 @@ impl App {
                 self.execute_replace(replace_cmd.clone());
             }
             Command::Theme(name) => {
-                use crate::style::Theme;
+                use crate::ui::style::Theme;
                 if let Some(theme) = Theme::by_name(&name) {
                     self.style.set_theme(theme);
                     self.message = Some(format!("Theme set to '{}'", name));
@@ -891,7 +891,7 @@ impl App {
                 }
             }
             Command::ThemeList => {
-                use crate::style::Theme;
+                use crate::ui::style::Theme;
                 self.message = Some(format!(
                     "Available themes: {}",
                     Theme::builtin_names().join(", ")
@@ -1235,7 +1235,7 @@ impl App {
             for (i, row) in (start_row..row_count).enumerate() {
                 let key = match sort_type {
                     ColumnType::Numeric => {
-                        let val = crate::format::parse_numeric(col_data[row].trim())
+                        let val = crate::numeric::format::parse_numeric(col_data[row].trim())
                             .unwrap_or(f64::NAN);
                         SortKey::Numeric(val)
                     }
