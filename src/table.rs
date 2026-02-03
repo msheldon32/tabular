@@ -1,5 +1,7 @@
 use rayon::prelude::*;
 
+use std::cmp;
+
 use crate::util::ColumnType;
 
 /// Number of rows per chunk for memory-efficient storage
@@ -21,6 +23,7 @@ pub struct Table {
     col_widths: Vec<usize>,
     /// Whether col_widths needs full recompute
     col_widths_dirty: bool,
+    max_col_width: usize
 }
 
 impl Table {
@@ -117,6 +120,7 @@ impl Table {
             col_count,
             col_widths: Vec::new(),
             col_widths_dirty: true,
+            max_col_width: 30
         };
         table.recompute_col_widths();
         table
@@ -131,6 +135,7 @@ impl Table {
             col_count,
             col_widths: Vec::new(),
             col_widths_dirty: true,
+            max_col_width: 30,
         };
         table.recompute_col_widths();
         table
@@ -146,6 +151,7 @@ impl Table {
             col_count,
             col_widths: Vec::new(),
             col_widths_dirty: true,
+            max_col_width: 30,
         }
     }
 
@@ -182,6 +188,7 @@ impl Table {
                         .max()
                         .unwrap_or(3)
                         .max(3)
+                        .min(self.max_col_width)
                 })
                 .collect();
         } else {
@@ -194,6 +201,7 @@ impl Table {
                         .max()
                         .unwrap_or(3)
                         .max(3)
+                        .min(self.max_col_width)
                 })
                 .collect();
         }
@@ -210,7 +218,7 @@ impl Table {
     #[inline]
     fn update_col_width(&mut self, col: usize, new_len: usize) {
         if col < self.col_widths.len() {
-            self.col_widths[col] = self.col_widths[col].max(new_len).max(3);
+            self.col_widths[col] = cmp::max(cmp::min(self.col_widths[col].max(new_len).max(3), self.max_col_width), self.max_col_width);
         }
     }
 
@@ -803,6 +811,7 @@ impl Default for Table {
             col_count: 1,
             col_widths: vec![3],
             col_widths_dirty: false,
+            max_col_width: 30,
         }
     }
 }
