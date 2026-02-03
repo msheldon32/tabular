@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use rand::Rng;
 
 use crate::util::{CellRef, CalcError};
-use crate::numeric::calculator::CalcType;
+use crate::numeric::calctype::CalcType;
 use crate::numeric::parser::BinOp;
 
 /// Trait for types that can evaluate expressions and expand ranges
@@ -76,17 +76,17 @@ pub fn evaluate_function<E: ExprEvaluator>(
         "ABS" => {
             require_args(name, args, 1)?;
 
-            Ok(CalcType::abs(evaluator.eval(&args[0], results)?))
+            CalcType::abs(evaluator.eval(&args[0], results)?)
         },
         "FLOOR" => {
             require_args(name, args, 1)?;
 
-            Ok(CalcType::floor(evaluator.eval(&args[0], results)?))
+            CalcType::floor(evaluator.eval(&args[0], results)?)
         },
         "CEIL" => {
             require_args(name, args, 1)?;
 
-            Ok(CalcType::ceil(evaluator.eval(&args[0], results)?))
+            CalcType::ceil(evaluator.eval(&args[0], results)?)
         },
         // I am just killing this function entirely for now, this will require substantial revision
         _default => Err(CalcError::EvalError("(Most) functions have been removed for now".to_string()))

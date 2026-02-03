@@ -3,3 +3,4 @@ pub mod predicate;
 pub mod format;
 pub mod formula;
 pub mod parser;
+pub mod calctype;
