@@ -157,13 +157,19 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<Re
                 };
 
                 let display_content = if is_cursor && app.mode == Mode::Insert {
-                    let buf = app.edit_buffer();
+                    let mut buf = app.edit_buffer();
                     let cursor_char = app.edit_cursor(); // Character index
                     let char_count = crate::util::char_count(buf);
 
                     // Get byte indices for slicing
                     let cursor_byte = crate::util::byte_index_of_char(buf, cursor_char);
                     let next_byte = crate::util::byte_index_of_char(buf, cursor_char + 1);
+
+                    // truncate the cursor from the beginning
+                    if is_cursor {
+                        let idxs = buf.char_indices().rev().nth(app.table.max_col_width-1).map(|(i,_)| i).unwrap_or(0);
+                        buf = &buf[idxs..];
+                    }
 
                     let (before, cursor_char_str, after) = if cursor_char >= char_count {
                         // Cursor at end - show space as cursor

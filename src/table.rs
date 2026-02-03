@@ -23,7 +23,7 @@ pub struct Table {
     col_widths: Vec<usize>,
     /// Whether col_widths needs full recompute
     col_widths_dirty: bool,
-    max_col_width: usize
+    pub max_col_width: usize
 }
 
 impl Table {
@@ -218,7 +218,7 @@ impl Table {
     #[inline]
     fn update_col_width(&mut self, col: usize, new_len: usize) {
         if col < self.col_widths.len() {
-            self.col_widths[col] = cmp::max(cmp::min(self.col_widths[col].max(new_len).max(3), self.max_col_width), self.max_col_width);
+            self.col_widths[col] = cmp::min(self.col_widths[col].max(new_len).max(3), self.max_col_width)
         }
     }
 
