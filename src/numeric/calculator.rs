@@ -37,6 +37,21 @@ impl CalcType {
         }
     }
 
+    fn not(x: CalcType) -> Result<CalcType, CalcError> {
+        match x {
+            CalcType::Bool(b) => Ok(CalcType::Bool(!b)),
+            _default => Err(CalcError::EvalError("Boolean operation on non-boolean expressions".to_string()))
+        }
+    }
+
+    fn negate(x: CalcType) -> Result<CalcType, CalcError> {
+        match x {
+            CalcType::Int(x) => Ok(CalcType::Int(-x)),
+            CalcType::Float(x) => Ok(CalcType::Float(-x)),
+            _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+        }
+    }
+
     fn bin_op(op: BinOp, l: CalcType, r: CalcType) -> Result<CalcType, CalcError> {
         match op {
             BinOp::And => {
@@ -161,15 +176,28 @@ impl CalcType {
 }
 
 /// Format a numeric value for display, removing unnecessary trailing zeros
-fn format_number(value: f64) -> String {
-    if value.fract() == 0.0 && value.abs() < 1e15 {
-        format!("{}", value as i64)
-    } else if value.is_nan() {
-        "NaN".to_string()
-    } else if value.is_infinite() {
-        if value.is_sign_positive() { "Inf" } else { "-Inf" }.to_string()
-    } else {
-        format!("{:.10}", value).trim_end_matches('0').trim_end_matches('.').to_string()
+fn format_number(vt: CalcType) -> String {
+    match vt {
+        CalcType::Float(value) => {
+            if value.fract() == 0.0 && value.abs() < 1e15 {
+                format!("{}", value as i64)
+            } else if value.is_nan() {
+                "NaN".to_string()
+            } else if value.is_infinite() {
+                if value.is_sign_positive() { "Inf" } else { "-Inf" }.to_string()
+            } else {
+                format!("{:.10}", value).trim_end_matches('0').trim_end_matches('.').to_string()
+            }
+        },
+        CalcType::Int(value) => {
+            format!("{}", value)
+        },
+        CalcType::String(value) => {
+            format!("{}", value)
+        },
+        CalcType::Bool(value) => {
+            format!("{}", value)
+        }
     }
 }
 
@@ -231,7 +259,7 @@ impl<'a> Calculator<'a> {
         for cell_ref in order {
             let expr = &formulas[&cell_ref];
             let value = self.evaluate_expr(expr, &results)?;
-            results.insert(cell_ref.clone(), CalcType::Float(value));
+            results.insert(cell_ref.clone(), value);
             updates.push((cell_ref.row, cell_ref.col, format_number(value)));
         }
 
@@ -410,8 +438,9 @@ impl<'a> Calculator<'a> {
     /// Booleans are represented as 1.0 (true) and 0.0 (false)
     fn evaluate_expr(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<CalcType, CalcError> {
         match expr {
-            Expr::Float(n) => Ok(CalcType::Float(n)),
-            Expr::Int(n) => Ok(CalcType::Int(n)),
+            /*Expr::Float(n) => Ok(CalcType::Float(n)),
+            Expr::Int(n) => Ok(CalcType::Int(n)),*/
+            Expr::Number(n) => Ok(CalcType::Float(n)),
 
             Expr::Boolean(b) => Ok(CalcType::Bool(b)),
 
@@ -449,7 +478,7 @@ impl<'a> Calculator<'a> {
     }
 
     /// Expand a range expression to a Vec of f64 values
-    pub fn expand_range(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<Vec<f64>, CalcError> {
+    pub fn expand_range(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<Vec<CalcType>, CalcError> {
         match expr {
             Expr::Range { start, end } => {
                 if let (Expr::CellRef { col: start_col, row: start_row },
@@ -465,7 +494,7 @@ impl<'a> Calculator<'a> {
                     for r in row_min..=row_max {
                         for c in col_min..=col_max {
                             let cell = CellRef { row: r - 1, col: c };
-                            let val = self.get_cell_value(&cell, results).use_float().ok_or_else(|| CalcError::ParseError("Not a number".to_string()))?;
+                            let val = self.get_cell_value(&cell, results)?;
                             values.push(val);
                         }
                     }
@@ -481,7 +510,7 @@ impl<'a> Calculator<'a> {
                 for r in row_min..=row_max {
                     for c in 0..self.table.col_count() {
                         let cell = CellRef { row: r - 1, col: c };
-                        let val = self.get_cell_value(&cell, results).use_float().ok_or_else(|| CalcError::ParseError("Not a number".to_string()))?;
+                        let val = self.get_cell_value(&cell, results)?;
                         values.push(val)
                     }
                 }
@@ -497,7 +526,7 @@ impl<'a> Calculator<'a> {
                 for r in row_start..self.table.row_count() {
                     for c in col_min..=col_max {
                         let cell = CellRef { row: r, col: c };
-                        let val = self.get_cell_value(&cell, results).use_float().ok_or_else(|| CalcError::ParseError("Not a number".to_string()))?;
+                        let val = self.get_cell_value(&cell, results)?;
                         values.push(val);
                     }
                 }
@@ -511,11 +540,11 @@ impl<'a> Calculator<'a> {
 }
 
 impl ExprEvaluator for Calculator<'_> {
-    fn eval(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<f64, CalcError> {
+    fn eval(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<CalcType, CalcError> {
         self.evaluate_expr(expr, results)
     }
 
-    fn expand(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<Vec<f64>, CalcError> {
+    fn expand(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<Vec<CalcType>, CalcError> {
         self.expand_range(expr, results)
     }
 }
