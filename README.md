@@ -1,401 +1,62 @@
 # Tabular
 
-A lightweight, terminal-based CSV editor with vim-like keybindings.
+A terminal-based CSV editor with vim-like keybindings.
 
-## Installation
+## Philosophy
+
+Tabular is **not** a spreadsheet. It's a focused tool for editing tabular data:
+
+- **Vim-first**: Modal editing, registers, counts, visual modes - if you know vim, you know tabular
+- **Minimal**: Does one thing well. No charts, no pivot tables, no macros
+- **Fast**: Opens instantly, handles large files, stays out of your way
+
+## Install
 
 ```bash
 cargo build --release
+cp target/release/tabular ~/.local/bin/
 ```
 
-## Usage
+## Quick Start
 
 ```bash
-tabular <file.csv>
+tabular data.csv
 ```
-
-## Key Bindings
-
-### Normal Mode
-
-#### Navigation
-| Key | Action |
-|-----|--------|
-| `h` / `←` | Move left |
-| `j` / `↓` | Move down |
-| `k` / `↑` | Move up |
-| `l` / `→` | Move right |
-| `gg` | Jump to first row |
-| `G` | Jump to last row |
-| `[N]G` | Jump to row N (e.g., `10G` jumps to row 10) |
-| `0` / `^` | Jump to first column |
-| `$` | Jump to last column |
-| `Ctrl+d` | Half page down |
-| `Ctrl+u` | Half page up |
-| `Ctrl+f` | Full page down |
-| `Ctrl+b` | Full page up |
-
-**Count prefix**: Most navigation keys accept a count prefix. For example:
-- `5j` moves down 5 rows
-- `10l` moves right 10 columns
-- `3k` moves up 3 rows
-
-#### Editing
-| Key | Action |
-|-----|--------|
-| `i` | Enter insert mode |
-| `x` | Clear current cell |
-| `o` | Insert row below |
-| `O` | Insert row above |
-| `a` | Insert column to the left |
-| `A` | Insert column to the right |
-| `dr` | Delete current row |
-| `dc` | Delete current column |
-| `X` | Delete current column |
-| `yr` | Yank (copy) current row |
-| `yc` | Yank (copy) current column |
-| `p` | Paste yanked content |
-| `u` | Undo |
-| `Ctrl+r` | Redo |
-| `"x` | Select register x for next yank/paste |
-
-**Count prefix for bulk operations**:
-- `5dr` deletes 5 rows starting from cursor
-- `3dc` deletes 3 columns starting from cursor
-- `5yr` yanks 5 rows (paste will insert all 5)
-- `3yc` yanks 3 columns
-
-#### Visual Modes
-| Key | Action |
-|-----|--------|
-| `v` | Enter visual mode (select cells) |
-| `V` | Enter visual row mode (select rows) |
-| `Ctrl+v` | Enter visual column mode (select columns) |
-| `yy` | Yank current selection |
-| `dd` | Delete current selection |
-
-#### Search
-| Key | Action |
-|-----|--------|
-| `/` | Start search |
-| `n` | Jump to next match |
-| `N` | Jump to previous match |
-
-#### Other
-| Key | Action |
-|-----|--------|
-| `:` | Enter command mode |
-| `q` | Quit (if no unsaved changes) |
-| `Ctrl+c` | Force quit |
-
-### Insert Mode
 
 | Key | Action |
 |-----|--------|
-| `Escape` / `Ctrl+[` | Save cell, return to normal mode |
-| `Enter` | Save cell, return to normal mode |
-| `Backspace` | Delete character |
-| Any character | Insert character |
-
-**Tip:** Use `Ctrl+[` instead of `Escape` for faster mode switching (avoids terminal escape sequence delay).
-
-
-### Visual Mode
-
-All visual modes support navigation keys (`h`, `j`, `k`, `l`, etc.) to extend the selection.
-
-| Key | Action |
-|-----|--------|
-| `y` | Yank (copy) selection |
-| `x` | Clear selection |
-| `q` | Drag down (fill from top row) |
-| `Q` | Drag right (fill from left column) |
-| `Escape` / `Ctrl+[` | Cancel and return to normal mode |
-
-#### Formatting
-
-> **Note:** Formatting commands **modify the underlying cell values**, not just how they are displayed. These operations may be lossy (e.g., rounding) and permanently change the contents of the cells. You can undo them with `u`.
-
-Format commands start with `f` and modify the selected cells:
-
-| Key | Action | Example |
-|-----|--------|---------|
-| `ff` | Reset to default (plain number) | `$1,234.56` -> `1234.56` |
-| `f,` | Add comma separators | `1234567.89` -> `1,234,567.89` |
-| `f$` | Format as currency | `1234.56` -> `$1,234.56` |
-| `fe` | Format as scientific notation | `0.00123` -> `1.23e-3` |
-| `f%` | Format as percentage | `0.15` -> `15%` |
-
-In **visual row mode** (`V`), formatting applies to entire rows. In **visual column mode** (`Ctrl+v`), formatting applies to entire columns.
-
-Non-numeric cells are left unchanged. All format operations can be undone with `u`.
-
-#### Drag Fill
-
-The drag feature works like spreadsheet drag-fill:
-- **`q` (drag down)**: Copies the first row of the selection to all rows below, translating cell references (e.g., `A1` becomes `A2`, `A3`, etc.)
-- **`Q` (drag right)**: Copies the first column of the selection to all columns to the right, translating cell references (e.g., `A1` becomes `B1`, `C1`, etc.)
-
-In **visual row mode** (`V`), `q` fills entire rows. In **visual column mode** (`Ctrl+v`), `Q` fills entire columns.
-
-
-### Command Mode
-
-| Command | Action |
-|---------|--------|
-| `:w` | Save file |
-| `:q` | Quit (fails if unsaved changes) |
-| `:q!` | Force quit without saving |
-| `:wq` | Save and quit |
-| `:addcol` | Add column after current |
-| `:delcol` | Delete current column |
-| `:header` | Toggle header mode |
-| `:calc` | Evaluate all formulas |
-| `:sort` | Sort rows by current column (ascending) |
-| `:sortd` | Sort rows by current column (descending) |
-| `:sortr` | Sort columns by current row (ascending) |
-| `:sortrd` | Sort columns by current row (descending) |
-| `:grid` | Toggle grid lines |
-| `:prec [N]` | Set display precision (N decimal places, or `auto`) |
-| `:theme [name]` | Set color theme (dark, light, solarized-dark) |
-| `:themes` | List available themes |
-| `:clip` | Copy yanked data to system clipboard |
-| `:sp` | Yank from system clipboard (then `p` to paste) |
-| `:%s/old/new/g` | Find and replace (see [Find and Replace](#find-and-replace)) |
-| `:filter <op> <val>` | Filter rows by current column (see [Filtering](#filtering)) |
-| `:nofilter` | Remove filter and show all rows |
-| `:[NUMBER]` | Jump to row NUMBER |
-| `:[CELL]` | Jump to CELL (e.g., `:A1`, `:B5`) |
-
-## Sorting
-
-Sort data by navigating to the column (or row) you want to sort by, then use `:sort` or `:sortd`.
-
-**Automatic type detection**: Tabular probes the column to determine if it contains numeric or text data:
-- **Numeric sort**: If the majority of non-empty cells are numbers, sorting is done numerically
-- **Text sort**: Otherwise, sorting is case-insensitive alphabetical
-
-**Formatted number recognition**: Currency and percentages are recognized as numbers for sorting:
-- Currency: `$1,234.56`, `€500`, `-$100`, `($50)`
-- Percentages: `15%`, `3.5%` (sorted by their decimal value, e.g., 15% = 0.15)
-- Numbers with commas: `1,234,567`
-
-**Header preservation**: When header mode is enabled (default), the first row is kept in place during sorting.
-
-**Examples**:
-- Navigate to the "Score" column and type `:sort` to sort scores low-to-high
-- Use `:sortd` to sort high-to-low (descending)
-- Use `:sortr` to rearrange columns based on a row's values
-
-## Filtering
-
-Filter rows to show only those matching a condition on the current column. Navigate to the column you want to filter by, then use `:filter`.
-
-### Syntax
-
-```
-:filter <operator> <value>
-```
-
-### Operators
-
-| Operator | Description |
-|----------|-------------|
-| `=` | Equal to |
-| `!` | Not equal to |
-| `<` | Less than |
-| `<=` | Less than or equal to |
-| `>` | Greater than |
-| `>=` | Greater than or equal to |
-
-### Examples
-
-```
-:filter > 100       # Show rows where current column > 100
-:filter = active    # Show rows where current column equals "active"
-:filter ! pending   # Show rows where current column is not "pending"
-:filter >= 50       # Show rows where current column >= 50
-:filter < zebra     # Show rows where current column comes before "zebra" alphabetically
-```
-
-### Behavior
-
-- **Type detection**: Tabular automatically detects whether the column is numeric or text and applies the appropriate comparison
-- **Numeric comparisons**: Compare values as numbers (e.g., `100 < 95` is false)
-- **Text comparisons**: Case-insensitive alphabetical comparison (e.g., `"apple" < "Banana"` is true)
-- **Header preservation**: When header mode is enabled, the header row is always shown regardless of the filter
-- **Chaining filters**: Applying a new filter narrows down the already-filtered results
-- **Navigation**: When filtered, navigation commands (`j`, `k`, `G`, etc.) skip hidden rows
-
-### Removing Filters
-
-```
-:nofilter           # Remove the filter and show all rows
-```
-
-The status bar indicates when a filter is active.
-
-## Undo/Redo
-
-All editing operations can be undone and redone:
-- `u` - Undo last change
-- `Ctrl+r` - Redo last undone change
-
-The undo history tracks cell edits, row/column insertions and deletions, drag fills, and more.
-
-## Search
-
-Press `/` to enter search mode. Type a pattern and press `Enter` to search. The search is case-insensitive and matches any part of cell content.
-
-| Key | Action |
-|-----|--------|
-| `/` | Start search |
-| `Enter` | Execute search and jump to first match |
-| `n` | Jump to next match |
-| `N` | Jump to previous match |
-| `Escape` | Cancel search |
-
-The status bar shows the current match position (e.g., `[3/15] matches`).
-
-## Find and Replace
-
-Use vim-style substitute commands to find and replace text.
-
-### Syntax
-
-| Command | Description |
-|---------|-------------|
-| `:s/old/new/` | Replace first occurrence of "old" with "new" in current cell |
-| `:s/old/new/g` | Replace all occurrences in current cell |
-| `:%s/old/new/` | Replace first occurrence in each cell of the entire table |
-| `:%s/old/new/g` | Replace all occurrences in all cells |
-
-### With Visual Selection
-
-When in visual mode (`v`, `V`, or `Ctrl+v`), pressing `:` enters command mode with the selection preserved:
-
-- `:s/old/new/` - Replace within the selected cells only
-- `:s/old/new/g` - Replace all occurrences within selected cells
-
-### Examples
-
-```
-:%s/foo/bar/g      # Replace all "foo" with "bar" in entire table
-:s/USD/$/          # Replace "USD" with "$" in current cell
-:%s/  / /g         # Replace double spaces with single space everywhere
-:%s/old//g         # Delete all occurrences of "old"
-```
-
-**Note:** Replacements are literal string matches, not regular expressions. All replace operations can be undone with `u`.
-
-## Registers
-
-Tabular uses a vim-style register system for yank and paste operations. Registers are storage locations that hold copied/deleted content.
-
-### Available Registers
-
-| Register | Description |
-|----------|-------------|
-| `""` | Unnamed register (default) - used when no register specified |
-| `"a` - `"z` | Named registers - for storing multiple clips |
-| `"0` | Yank register - holds last yanked content (not affected by deletes) |
-| `"_` | Black hole register - discards content (delete without affecting clipboard) |
-| `"+` | System clipboard register |
-
-### Usage
-
-To use a register, type `"` followed by the register name before a yank or paste command:
-
-| Example | Action |
-|---------|--------|
-| `"ayy` | Yank current row into register `a` |
-| `"ap` | Paste from register `a` |
-| `"_dd` | Delete row without affecting any register |
-| `"+yy` | Yank row to system clipboard |
-| `"+p` | Paste from system clipboard |
-| `"0p` | Paste last yanked content (even after deletes) |
-
-### Behavior
-
-- **Yank operations** (`y`, `yy`, `yr`, `yc`) update both the specified register and the yank register (`"0`)
-- **Delete operations** (`d`, `dd`, `dr`, `dc`, `x`) update the unnamed register but not the yank register
-- **Black hole register** (`"_`) discards content entirely - useful for deleting without overwriting your clipboard
-- **Named registers** (`"a`-`"z`) persist until overwritten, allowing you to store multiple pieces of content
-
-## Formulas
-
-Cells starting with `=` are treated as formulas. Run `:calc` to evaluate all formulas and replace them with results.
-
-Formulas recognize formatted numbers in cell references:
-- Currency values like `$1,234.56` are read as `1234.56`
-- Percentages like `15%` are read as `0.15`
-
-### Cell References
-
-- Single cell: `A1`, `B2`, `AA10`
-- Range: `A1:A10` (column), `A1:E1` (row), `A1:C3` (rectangular)
-
-### Operators
-
-`+`, `-`, `*`, `/`, `%` (modulo), `^` (power)
-
-### Functions
-
-| Function | Description |
-|----------|-------------|
-| `sum(range)` | Sum of values in range |
-| `avg(range)` | Average of values in range |
-| `min(range)` | Minimum value in range |
-| `max(range)` | Maximum value in range |
-| `count(range)` | Count of cells in range |
-
-### Examples
-
-```
-=A1+B1           # Add two cells
-=sum(A1:A10)     # Sum of column range
-=avg(A1:E1)      # Average of row range
-=A1*2+B1/2       # Arithmetic expression
-=sum(A1:A10)/count(A1:A10)  # Manual average
-```
-
-**Note:** Formulas are evaluated once and replaced with values. No circular references allowed.
-
-## Display
-
-- **Row numbers**: Displayed on the left (1, 2, 3...)
-- **Column letters**: Excel-style letters at the top (A, B, C... Z, AA, AB...)
-- **Header mode**: First row is highlighted as a header (on by default, toggle with `:header`)
-- **Scrolling**: Large tables scroll automatically as you navigate. Title bar shows visible range when scrolled.
-
-### Display Precision
-
-Control how many decimal places are shown for numeric values with `:prec`:
-
-| Command | Effect |
-|---------|--------|
-| `:prec 2` | Display numbers with 2 decimal places |
-| `:prec 0` | Display numbers as integers (rounded) |
-| `:prec` or `:prec auto` | Display numbers as stored (default) |
-
-**Note:** Display precision only affects how numbers are shown—it does not modify the underlying cell values. The actual data remains unchanged.
-
-## Themes
-
-Tabular supports color themes. Switch themes with `:theme [name]`:
-
-| Theme | Description |
-|-------|-------------|
-| `dark` | Default dark theme |
-| `light` | Light theme for light terminals |
-| `solarized-dark` | Solarized dark color scheme |
-
-Custom themes can be defined in TOML files. See [docs/styles.md](docs/styles.md) for details.
-
-## Status Bar
-
-The status bar shows:
-- Current mode (NORMAL/INSERT/COMMAND/VISUAL)
-- File name
-- `[+]` indicator if there are unsaved changes
-- Cursor position in Excel format (e.g., A1, B2, AA15)
+| `h` `j` `k` `l` | Navigate |
+| `i` | Edit cell |
+| `Enter` or `Esc` | Finish editing |
+| `o` / `O` | Insert row below/above |
+| `dr` / `dc` | Delete row/column |
+| `yr` / `yc` | Yank row/column |
+| `p` | Paste |
+| `u` / `Ctrl+r` | Undo/redo |
+| `/` | Search |
+| `:w` | Save |
+| `:q` | Quit |
+
+## Features
+
+- **Visual selection**: `v` (cells), `V` (rows), `Ctrl+v` (columns)
+- **Sorting**: `:sort`, `:sortd` - auto-detects numeric vs text
+- **Filtering**: `:filter > 100`, `:filter = active`
+- **Find/replace**: `:%s/old/new/g`
+- **Formulas**: `=sum(A1:A10)`, `=avg(B1:B5)`, then `:calc`
+- **Registers**: `"ayy` to yank into register a, `"ap` to paste
+- **Formatting**: Visual select then `f$` (currency), `f%` (percent), `f,` (commas)
+- **Themes**: `:theme dark`, `:theme light`, `:theme solarized-dark`
+- **Plugins**: Extend with Lua scripts
+
+## Documentation
+
+- [Key Bindings](docs/KEYBINDINGS.md) - Complete keyboard reference
+- [Commands](docs/COMMANDS.md) - All `:` commands
+- [Features](docs/FEATURES.md) - Detailed feature documentation
+- [Plugins](docs/PLUGINS.md) - Writing Lua plugins
+- [Themes](docs/styles.md) - Custom color themes
+
+## License
+
+MIT
