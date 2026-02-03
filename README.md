@@ -162,6 +162,8 @@ In **visual row mode** (`V`), `q` fills entire rows. In **visual column mode** (
 | `:clip` | Copy yanked data to system clipboard |
 | `:sp` | Yank from system clipboard (then `p` to paste) |
 | `:%s/old/new/g` | Find and replace (see [Find and Replace](#find-and-replace)) |
+| `:filter <op> <val>` | Filter rows by current column (see [Filtering](#filtering)) |
+| `:nofilter` | Remove filter and show all rows |
 | `:[NUMBER]` | Jump to row NUMBER |
 | `:[CELL]` | Jump to CELL (e.g., `:A1`, `:B5`) |
 
@@ -184,6 +186,54 @@ Sort data by navigating to the column (or row) you want to sort by, then use `:s
 - Navigate to the "Score" column and type `:sort` to sort scores low-to-high
 - Use `:sortd` to sort high-to-low (descending)
 - Use `:sortr` to rearrange columns based on a row's values
+
+## Filtering
+
+Filter rows to show only those matching a condition on the current column. Navigate to the column you want to filter by, then use `:filter`.
+
+### Syntax
+
+```
+:filter <operator> <value>
+```
+
+### Operators
+
+| Operator | Description |
+|----------|-------------|
+| `=` | Equal to |
+| `!` | Not equal to |
+| `<` | Less than |
+| `<=` | Less than or equal to |
+| `>` | Greater than |
+| `>=` | Greater than or equal to |
+
+### Examples
+
+```
+:filter > 100       # Show rows where current column > 100
+:filter = active    # Show rows where current column equals "active"
+:filter ! pending   # Show rows where current column is not "pending"
+:filter >= 50       # Show rows where current column >= 50
+:filter < zebra     # Show rows where current column comes before "zebra" alphabetically
+```
+
+### Behavior
+
+- **Type detection**: Tabular automatically detects whether the column is numeric or text and applies the appropriate comparison
+- **Numeric comparisons**: Compare values as numbers (e.g., `100 < 95` is false)
+- **Text comparisons**: Case-insensitive alphabetical comparison (e.g., `"apple" < "Banana"` is true)
+- **Header preservation**: When header mode is enabled, the header row is always shown regardless of the filter
+- **Chaining filters**: Applying a new filter narrows down the already-filtered results
+- **Navigation**: When filtered, navigation commands (`j`, `k`, `G`, etc.) skip hidden rows
+
+### Removing Filters
+
+```
+:nofilter           # Remove the filter and show all rows
+```
+
+The status bar indicates when a filter is active.
 
 ## Undo/Redo
 

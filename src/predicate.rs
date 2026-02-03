@@ -113,7 +113,7 @@ impl Predicate {
 
 
 pub fn parse_predicate(pred_string: String) -> Option<Predicate> {
-    let pred_re = Regex::new(r"^\s*(!|=|<|<=|>|>=)\s*([0-9]+)\s*$")
+    let pred_re = Regex::new(r"^\s*(!|=|<|<=|>|>=)\s*(\S+)\s*$")
         .expect("invalid regex");
 
     let caps = pred_re
@@ -185,13 +185,46 @@ mod tests {
         assert_eq!(pred, Some(Predicate::Comparator { op: Op::Ge, val: "123".to_string() }));
     }
 
+    // === parse_predicate tests for text values ===
+
+    #[test]
+    fn parse_predicate_text_eq() {
+        let pred = parse_predicate("= hello".to_string());
+        assert_eq!(pred, Some(Predicate::Comparator { op: Op::Eq, val: "hello".to_string() }));
+    }
+
+    #[test]
+    fn parse_predicate_text_ne() {
+        let pred = parse_predicate("! active".to_string());
+        assert_eq!(pred, Some(Predicate::Comparator { op: Op::Ne, val: "active".to_string() }));
+    }
+
+    #[test]
+    fn parse_predicate_text_lt() {
+        let pred = parse_predicate("< zebra".to_string());
+        assert_eq!(pred, Some(Predicate::Comparator { op: Op::Lt, val: "zebra".to_string() }));
+    }
+
+    #[test]
+    fn parse_predicate_text_mixed_case() {
+        let pred = parse_predicate("= HelloWorld".to_string());
+        assert_eq!(pred, Some(Predicate::Comparator { op: Op::Eq, val: "HelloWorld".to_string() }));
+    }
+
+    #[test]
+    fn parse_predicate_text_with_numbers() {
+        let pred = parse_predicate("= user123".to_string());
+        assert_eq!(pred, Some(Predicate::Comparator { op: Op::Eq, val: "user123".to_string() }));
+    }
+
     #[test]
     fn parse_predicate_invalid_returns_none() {
         assert_eq!(parse_predicate("".to_string()), None);
         assert_eq!(parse_predicate("invalid".to_string()), None);
         assert_eq!(parse_predicate("== 5".to_string()), None);
-        assert_eq!(parse_predicate("= abc".to_string()), None);
         assert_eq!(parse_predicate("5".to_string()), None);
+        assert_eq!(parse_predicate("=".to_string()), None);
+        assert_eq!(parse_predicate("= ".to_string()), None);
     }
 
     // === Predicate::evaluate tests for Numeric ===
