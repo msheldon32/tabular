@@ -306,7 +306,7 @@ impl TableView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::table::table::SortDirection;
+    use crate::table::SortDirection;
     use crate::util::ColumnType;
     use crate::table::operations;
 

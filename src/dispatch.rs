@@ -14,7 +14,7 @@ use crate::mode::visual::SelectionInfo;
 use crate::mode::Mode;
 use crate::input::{KeyResult, SequenceAction};
 use crate::plugin::{PluginAction, CommandContext};
-use crate::table::table::SortDirection;
+use crate::table::SortDirection;
 use crate::table::rowmanager::FilterType;
 use crate::transaction::Transaction;
 use crate::util::ColumnType;

@@ -280,9 +280,10 @@ impl Canvas {
 
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Black))
             .title(title_with_help)
             .title_alignment(Alignment::Center)
-            .style(Style::default().bg(Color::Black));
+            .style(Style::default().bg(Color::White).fg(Color::Black));
 
         let paragraph = Paragraph::new(visible_lines)
             .block(block)
