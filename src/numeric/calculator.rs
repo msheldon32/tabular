@@ -192,7 +192,7 @@ fn format_number(vt: CalcType) -> String {
         CalcType::Int(value) => {
             format!("{}", value)
         },
-        CalcType::String(value) => {
+        CalcType::Str(value) => {
             format!("{}", value)
         },
         CalcType::Bool(value) => {
@@ -259,7 +259,7 @@ impl<'a> Calculator<'a> {
         for cell_ref in order {
             let expr = &formulas[&cell_ref];
             let value = self.evaluate_expr(expr, &results)?;
-            results.insert(cell_ref.clone(), value);
+            results.insert(cell_ref.clone(), value.clone());
             updates.push((cell_ref.row, cell_ref.col, format_number(value)));
         }
 
@@ -440,14 +440,14 @@ impl<'a> Calculator<'a> {
         match expr {
             /*Expr::Float(n) => Ok(CalcType::Float(n)),
             Expr::Int(n) => Ok(CalcType::Int(n)),*/
-            Expr::Number(n) => Ok(CalcType::Float(n)),
+            Expr::Number(n) => Ok(CalcType::Float(*n)),
 
-            Expr::Boolean(b) => Ok(CalcType::Bool(b)),
+            Expr::Boolean(b) => Ok(CalcType::Bool(*b)),
 
             Expr::CellRef { col, row } => {
                 let col_idx = col_from_letters(col);
                 let cell = CellRef { row: *row - 1, col: col_idx };
-                self.get_cell_value(&cell, results)
+                Ok(self.get_cell_value(&cell, results))
             }
 
             Expr::Neg(inner) => {
@@ -463,7 +463,7 @@ impl<'a> Calculator<'a> {
             Expr::BinOp { op, left, right } => {
                 let a = self.evaluate_expr(left, results)?;
                 let b = self.evaluate_expr(right, results)?;
-                CalcType::bin_op(*op, CalcType::Float(a), CalcType::Float(b))
+                CalcType::bin_op(*op, a, b)
             }
 
             Expr::FnCall { name, args } => {
@@ -494,7 +494,7 @@ impl<'a> Calculator<'a> {
                     for r in row_min..=row_max {
                         for c in col_min..=col_max {
                             let cell = CellRef { row: r - 1, col: c };
-                            let val = self.get_cell_value(&cell, results)?;
+                            let val = self.get_cell_value(&cell, results);
                             values.push(val);
                         }
                     }
@@ -510,7 +510,7 @@ impl<'a> Calculator<'a> {
                 for r in row_min..=row_max {
                     for c in 0..self.table.col_count() {
                         let cell = CellRef { row: r - 1, col: c };
-                        let val = self.get_cell_value(&cell, results)?;
+                        let val = self.get_cell_value(&cell, results);
                         values.push(val)
                     }
                 }
@@ -526,7 +526,7 @@ impl<'a> Calculator<'a> {
                 for r in row_start..self.table.row_count() {
                     for c in col_min..=col_max {
                         let cell = CellRef { row: r, col: c };
-                        let val = self.get_cell_value(&cell, results)?;
+                        let val = self.get_cell_value(&cell, results);
                         values.push(val);
                     }
                 }
