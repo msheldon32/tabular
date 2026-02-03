@@ -15,7 +15,7 @@ use crate::clipboard::{Clipboard, RegisterContent};
 use crate::command::{Command, ReplaceCommand};
 use crate::input::{
     is_escape, CommandHandler, InsertHandler, KeyBuffer, KeyBufferResult, KeyResult,
-    NavigationHandler, SearchHandler, SequenceAction, VisualHandler
+    NavigationHandler, SearchHandler, SequenceAction
 };
 use crate::mode::Mode;
 use crate::operations;
@@ -29,7 +29,7 @@ use crate::style::Style;
 use crate::progress::Progress;
 use crate::rowmanager::{FilterType, RowManager};
 use crate::util::ColumnType;
-use crate::visual::{SelectionInfo, VisualType};
+use crate::visual::{SelectionInfo, VisualType, VisualHandler};
 
 /// Result from a background operation
 pub enum BackgroundResult {

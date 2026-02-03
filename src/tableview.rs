@@ -561,13 +561,13 @@ mod tests {
         view.page_down(&table);
         assert_eq!(view.cursor_row, 18);
 
-        view.page_up(&table);
+        view.page_up();
         assert_eq!(view.cursor_row, 9);
 
         view.half_page_down(&table);
         assert_eq!(view.cursor_row, 14);
 
-        view.half_page_up(&table);
+        view.half_page_up();
         assert_eq!(view.cursor_row, 9);
     }
 
@@ -1461,7 +1461,7 @@ mod tests {
         let table = make_table(vec![vec!["x"]; 25]);
 
         view.cursor_row = 20;
-        view.page_up(&table);
+        view.page_up();
         // Jump back 4 positions in filtered rows
         assert_eq!(view.cursor_row, 12);
     }
@@ -1511,7 +1511,7 @@ mod tests {
         let table = make_table(vec![vec!["x"]; 20]);
 
         view.cursor_row = 18;
-        view.half_page_up(&table);
+        view.half_page_up();
         // Half page = 3 rows back in filtered set
         assert_eq!(view.cursor_row, 12);
     }
