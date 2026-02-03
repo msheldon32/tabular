@@ -33,6 +33,32 @@ pub fn evaluate_function<E: ExprEvaluator>(
                 CalcType::bin_op(BinOp::Add, acc, v.clone())
             })?)
         },
+        "AVG" => {
+            require_args(name, args, 1)?;
+            let mut vals = evaluator.expand(&args[0], results)?;
+
+            let sum = vals.iter().try_fold(CalcType::Int(0), |acc, v| {
+                CalcType::bin_op(BinOp::Add, acc, v.clone())
+            })?;
+
+            CalcType::bin_op(BinOp::Div, sum, CalcType::Int(vals.len() as i64))
+        },
+        "MIN" => {
+            require_args(name, args, 1)?;
+            let mut vals = evaluator.expand(&args[0], results)?;
+
+            Ok(vals.iter().try_fold(CalcType::Int(0), |acc, v| {
+                CalcType::min(acc, v.clone())
+            })?)
+        },
+        "MAX" => {
+            require_args(name, args, 1)?;
+            let mut vals = evaluator.expand(&args[0], results)?;
+
+            Ok(vals.iter().try_fold(CalcType::Int(0), |acc, v| {
+                CalcType::max(acc, v.clone())
+            })?)
+        },
         // I am just killing this function entirely for now, this will require substantial revision
         _default => Err(CalcError::EvalError("(Most) functions have been removed for now".to_string()))
     }

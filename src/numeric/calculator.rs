@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::cmp;
 
 use crate::table::table::Table;
 use crate::util::{CellRef, CalcError, col_from_letters, letters_from_col};
@@ -48,6 +49,22 @@ impl CalcType {
         match x {
             CalcType::Int(x) => Ok(CalcType::Int(-x)),
             CalcType::Float(x) => Ok(CalcType::Float(-x)),
+            _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+        }
+    }
+
+    pub fn min(l: CalcType, r: CalcType) -> Result<CalcType, CalcError> {
+        match CalcType::numeric_precedence(l,r) {
+            Ok((CalcType::Int(a), CalcType::Int(b))) => Ok(CalcType::Int(cmp::min(a,b))),
+            Ok((CalcType::Float(a), CalcType::Float(b))) => Ok(CalcType::Float(a.min(b))),
+            _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+        }
+    }
+
+    pub fn max(l: CalcType, r: CalcType) -> Result<CalcType, CalcError> {
+        match CalcType::numeric_precedence(l,r) {
+            Ok((CalcType::Int(a), CalcType::Int(b))) => Ok(CalcType::Int(cmp::max(a,b))),
+            Ok((CalcType::Float(a), CalcType::Float(b))) => Ok(CalcType::Float(a.max(b))),
             _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
         }
     }
