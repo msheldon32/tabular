@@ -11,6 +11,14 @@ pub enum FilterType {
     PredicateFilter(Predicate)
 }
 
+/// Snapshot of filter state for undo/redo
+#[derive(Debug, Clone)]
+pub struct FilterState {
+    pub is_filtered: bool,
+    pub active_rows: Vec<usize>,
+    pub filter_string: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct RowManager {
     pub is_filtered: bool,
@@ -124,6 +132,23 @@ impl RowManager {
         self.active_row_set = HashSet::new();
         self.is_filtered = false;
         self.filter_string = String::new();
+    }
+
+    /// Capture current filter state for undo/redo
+    pub fn snapshot(&self) -> FilterState {
+        FilterState {
+            is_filtered: self.is_filtered,
+            active_rows: self.active_rows.clone(),
+            filter_string: self.filter_string.clone(),
+        }
+    }
+
+    /// Restore filter state from a snapshot
+    pub fn restore(&mut self, state: FilterState) {
+        self.is_filtered = state.is_filtered;
+        self.active_rows = state.active_rows;
+        self.active_row_set = self.active_rows.iter().cloned().collect();
+        self.filter_string = state.filter_string;
     }
 }
 

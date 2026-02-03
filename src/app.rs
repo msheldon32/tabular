@@ -156,6 +156,11 @@ impl App {
         match op {
             PendingOp::Undo => {
                 if let Some(inverse) = self.history.undo() {
+                    // Handle filter state if this is a SetFilter transaction
+                    if let Some(filter_state) = inverse.filter_state() {
+                        self.row_manager.borrow_mut().restore(filter_state.clone());
+                        self.view.move_to_top();
+                    }
                     inverse.apply(&mut self.table);
                     self.view.clamp_cursor(&self.table);
                     self.message = Some("Undo".to_string());
@@ -164,6 +169,11 @@ impl App {
             }
             PendingOp::Redo => {
                 if let Some(txn) = self.history.redo() {
+                    // Handle filter state if this is a SetFilter transaction
+                    if let Some(filter_state) = txn.filter_state() {
+                        self.row_manager.borrow_mut().restore(filter_state.clone());
+                        self.view.move_to_top();
+                    }
                     txn.apply(&mut self.table);
                     self.view.clamp_cursor(&self.table);
                     self.message = Some("Redo".to_string());
@@ -596,6 +606,11 @@ impl App {
                         self.start_progress("Undoing", size);
                         self.pending_op = Some(PendingOp::Undo);
                     } else if let Some(inverse) = self.history.undo() {
+                        // Handle filter state if this is a SetFilter transaction
+                        if let Some(filter_state) = inverse.filter_state() {
+                            self.row_manager.borrow_mut().restore(filter_state.clone());
+                            self.view.move_to_top();
+                        }
                         inverse.apply(&mut self.table);
                         self.view.clamp_cursor(&self.table);
                         self.message = Some("Undo".to_string());
@@ -610,6 +625,11 @@ impl App {
                         self.start_progress("Redoing", size);
                         self.pending_op = Some(PendingOp::Redo);
                     } else if let Some(txn) = self.history.redo() {
+                        // Handle filter state if this is a SetFilter transaction
+                        if let Some(filter_state) = txn.filter_state() {
+                            self.row_manager.borrow_mut().restore(filter_state.clone());
+                            self.view.move_to_top();
+                        }
                         txn.apply(&mut self.table);
                         self.view.clamp_cursor(&self.table);
                         self.message = Some("Redo".to_string());
@@ -895,6 +915,9 @@ impl App {
                 self.message = Some(format!("Unknown command: {}", s));
             }
             Command::Filter(filter_type) => {
+                // Capture old state for undo
+                let old_state = self.row_manager.borrow().snapshot();
+
                 // This is necessary so the view doesn't go out of sync
                 self.view.move_to_top();
                 if filter_type == FilterType::Default {
@@ -907,10 +930,15 @@ impl App {
                     let active_col = self.view.cursor_col;
                     let column_type = self.table.probe_column_type(active_col, self.header_mode);
                     self.row_manager.borrow_mut().predicate_filter(&self.table, active_col, pred, column_type, self.header_mode);
-                    self.message = Some("Numeric filter applied".to_string());
+                    self.message = Some("Filter applied".to_string());
                 } else {
                     self.message = Some("Filter applied".to_string());
                 }
+
+                // Capture new state and record transaction
+                let new_state = self.row_manager.borrow().snapshot();
+                let txn = Transaction::SetFilter { old_state, new_state };
+                self.history.record(txn);
             }
         }
         self.calling_mode = None;

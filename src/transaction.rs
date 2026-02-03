@@ -1,4 +1,5 @@
 use crate::table::Table;
+use crate::rowmanager::FilterState;
 
 /// Represents a reversible operation on the table
 #[derive(Debug, Clone)]
@@ -40,6 +41,10 @@ pub enum Transaction {
     PermuteRows { permutation: Vec<usize> },
     /// Reorder columns by permutation (memory-efficient for sorting)
     PermuteCols { permutation: Vec<usize> },
+    /// Change filter state (stores old and new state for undo/redo)
+    /// Note: This transaction does NOT modify the table; app.rs handles
+    /// applying filter state to RowManager separately.
+    SetFilter { old_state: FilterState, new_state: FilterState },
     /// Multiple transactions grouped together
     Batch(Vec<Transaction>),
 }
@@ -68,6 +73,7 @@ impl Transaction {
             }
             Transaction::PermuteRows { permutation } => permutation.len(),
             Transaction::PermuteCols { permutation } => permutation.len(),
+            Transaction::SetFilter { .. } => 1, // Filter changes are instant
             Transaction::Batch(txns) => txns.iter().map(|t| t.estimated_size()).sum(),
         }
     }
@@ -75,6 +81,14 @@ impl Transaction {
     /// Check if this transaction is large enough to warrant progress display
     pub fn is_large(&self) -> bool {
         self.estimated_size() >= 50_000
+    }
+
+    /// If this is a SetFilter transaction, returns the new filter state to apply
+    pub fn filter_state(&self) -> Option<&FilterState> {
+        match self {
+            Transaction::SetFilter { new_state, .. } => Some(new_state),
+            _ => None,
+        }
     }
 
     pub fn apply(&self, table: &mut Table) {
@@ -132,6 +146,11 @@ impl Transaction {
             }
             Transaction::PermuteCols { permutation } => {
                 table.apply_col_permutation(permutation);
+            }
+            Transaction::SetFilter { .. } => {
+                // Filter state is not stored in the table; app.rs handles
+                // applying filter state to RowManager when this transaction
+                // is applied or inverted.
             }
             Transaction::Batch(txns) => {
                 for txn in txns {
@@ -208,6 +227,12 @@ impl Transaction {
             Transaction::PermuteCols { permutation } => {
                 Transaction::PermuteCols {
                     permutation: Self::inverse_permutation(permutation),
+                }
+            }
+            Transaction::SetFilter { old_state, new_state } => {
+                Transaction::SetFilter {
+                    old_state: new_state.clone(),
+                    new_state: old_state.clone(),
                 }
             }
             Transaction::Batch(txns) => {
