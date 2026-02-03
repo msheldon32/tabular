@@ -59,4 +59,4 @@ tabular data.csv
 
 ## License
 
-MIT
+MPL
