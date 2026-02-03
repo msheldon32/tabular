@@ -418,13 +418,12 @@ impl<'a> Calculator<'a> {
             return CalcType::Float(0.0);
         }
 
-        // this is put before i64 for debugging, move it afterwards!
-        if let Ok(f) = trimmed.parse::<f64>() {
-            return CalcType::Float(f);
-        }
-
         if let Ok(i) = trimmed.parse::<i64>() {
             return CalcType::Int(i);
+        }
+
+        if let Ok(f) = trimmed.parse::<f64>() {
+            return CalcType::Float(f);
         }
 
         if let Ok(b) = trimmed.to_lowercase().parse::<bool>() {
