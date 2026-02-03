@@ -1096,8 +1096,10 @@ impl App {
                         PluginAction::CanvasAddImage { rows, title } => {
                             self.canvas.add_image(rows, title);
                         }
-                        PluginAction::PromptRequest { question, default } => {
-
+                        PluginAction::PromptRequest { question, default: _ } => {
+                            // TODO: Implement full prompt UI with deferred execution
+                            // For now, show message that user should use command args
+                            self.message = Some(format!("Prompt requested: {} (use :cmd args instead)", question));
                         }
                     }
                 }

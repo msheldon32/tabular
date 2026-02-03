@@ -464,17 +464,23 @@ impl PluginManager {
             Ok(())
         })?;
 
-        #[allow(dead_code)]
-        fn load_plugin_data(key: &String) -> Option<String> {
-            None
-        }
-
         // load_data(key) function - load from persistent storage
         let load_data_fn = self.lua.create_function(move |lua, key: String| {
-            let data = load_plugin_data(&key);
-            match data {
-                Some(value) => Ok(Value::String(lua.create_string(&value)?)),
-                None => Ok(Value::Nil),
+            // Inline the load logic to avoid closure scoping issues
+            let safe_key: String = key.chars()
+                .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+                .collect();
+
+            let data_dir = if let Some(home) = std::env::var_os("HOME") {
+                std::path::PathBuf::from(home).join(".config/tabular/data")
+            } else {
+                std::path::PathBuf::from(".config/tabular/data")
+            };
+
+            let path = data_dir.join(&safe_key);
+            match std::fs::read_to_string(&path) {
+                Ok(value) => Ok(Value::String(lua.create_string(&value)?)),
+                Err(_) => Ok(Value::Nil),
             }
         })?;
 
@@ -488,6 +494,7 @@ impl PluginManager {
         canvas_api.set("add_header", canvas_add_header_fn)?;
         canvas_api.set("add_separator", canvas_add_separator_fn)?;
         canvas_api.set("add_blank", canvas_add_blank_fn)?;
+        canvas_api.set("add_styled_text", canvas_add_styled_text_fn)?;
 
         // Create tabular API table
         let api = self.lua.create_table()?;
@@ -501,6 +508,12 @@ impl PluginManager {
         api.set("delete_col", delete_col_fn)?;
         api.set("set_message", set_message_fn)?;
         api.set("canvas", canvas_api)?;
+        api.set("get_selection", get_selection_fn)?;
+        api.set("get_range", get_range_fn)?;
+        api.set("get_column_type", get_column_type_fn)?;
+        api.set("prompt", prompt_fn)?;
+        api.set("save_data", save_data_fn)?;
+        api.set("load_data", load_data_fn)?;
 
         self.lua.globals().set("tabular", api)?;
 
@@ -574,6 +587,39 @@ impl PluginManager {
                     "canvas_add_blank" => {
                         actions.push(PluginAction::CanvasAddBlank);
                     }
+                    "canvas_add_styled_text" => {
+                        let text: String = action.get("text")?;
+                        let fg: Option<String> = action.get("fg").ok();
+                        let bg: Option<String> = action.get("bg").ok();
+                        let bold: bool = action.get("bold").unwrap_or(false);
+                        actions.push(PluginAction::CanvasAddStyledText {
+                            text,
+                            fg: fg.and_then(|s| CanvasColor::from_str(&s)),
+                            bg: bg.and_then(|s| CanvasColor::from_str(&s)),
+                            bold,
+                        });
+                    }
+                    "prompt_request" => {
+                        let question: String = action.get("question")?;
+                        let default: String = action.get("default").unwrap_or_default();
+                        actions.push(PluginAction::PromptRequest { question, default });
+                    }
+                    "save_data" => {
+                        let key: String = action.get("key")?;
+                        let value: String = action.get("value")?;
+                        // Inline save logic
+                        let safe_key: String = key.chars()
+                            .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+                            .collect();
+                        let data_dir = if let Some(home) = std::env::var_os("HOME") {
+                            PathBuf::from(home).join(".config/tabular/data")
+                        } else {
+                            PathBuf::from(".config/tabular/data")
+                        };
+                        let _ = fs::create_dir_all(&data_dir);
+                        let path = data_dir.join(&safe_key);
+                        let _ = fs::write(&path, &value);
+                    }
                     _ => {}
                 }
             }
@@ -597,3 +643,4 @@ fn dirs_plugin_path() -> PathBuf {
 pub fn plugin_dir() -> PathBuf {
     dirs_plugin_path()
 }
+

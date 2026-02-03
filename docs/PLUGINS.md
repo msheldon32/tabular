@@ -47,6 +47,19 @@ Plugins access Tabular through the global `tabular` table, which provides:
 | `cursor_col` | number | Current cursor column (1-indexed) |
 | `row_count` | number | Total number of rows |
 | `col_count` | number | Total number of columns |
+| `selection` | table/nil | Selection info if in visual mode (see below) |
+
+#### Selection Info (`tabular.ctx.selection`)
+
+When in visual mode, `tabular.ctx.selection` contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `start_row` | number | Selection start row (1-indexed) |
+| `start_col` | number | Selection start column (1-indexed) |
+| `end_row` | number | Selection end row (1-indexed) |
+| `end_col` | number | Selection end column (1-indexed) |
+| `mode` | string | One of: `"visual"`, `"visual_row"`, `"visual_col"` |
 
 ### Arguments (`tabular.args`)
 
@@ -57,7 +70,7 @@ tabular.args[1] = "foo"
 tabular.args[2] = "bar"
 ```
 
-### Functions
+### Core Functions
 
 | Function | Description |
 |----------|-------------|
@@ -68,6 +81,105 @@ tabular.args[2] = "bar"
 | `insert_col(at)` | Insert a new column at position (1-indexed) |
 | `delete_col(at)` | Delete the column at position (1-indexed) |
 | `set_message(msg)` | Display a message in the status bar |
+
+### Selection & Range Functions
+
+| Function | Description |
+|----------|-------------|
+| `get_selection()` | Returns selection bounds table or nil if not in visual mode |
+| `get_range(r1, c1, r2, c2)` | Returns a 2D table of cell values for the given range (1-indexed) |
+| `get_column_type(col)` | Returns `"numeric"` or `"text"` based on column content |
+
+#### get_selection()
+
+Returns a table with selection bounds if in visual mode, or `nil` otherwise:
+
+```lua
+local sel = tabular.get_selection()
+if sel then
+    print(sel.start_row, sel.start_col, sel.end_row, sel.end_col)
+    print(sel.mode) -- "visual", "visual_row", or "visual_col"
+end
+```
+
+#### get_range(r1, c1, r2, c2)
+
+Returns a 2D table of values. Useful for batch operations:
+
+```lua
+local data = tabular.get_range(1, 1, 3, 2)
+-- data[1][1] = cell at row 1, col 1
+-- data[1][2] = cell at row 1, col 2
+-- data[2][1] = cell at row 2, col 1
+-- etc.
+```
+
+### Persistent Storage
+
+Plugins can store data that persists between sessions:
+
+| Function | Description |
+|----------|-------------|
+| `save_data(key, value)` | Save a string value to persistent storage |
+| `load_data(key)` | Load a value from storage, returns string or nil |
+
+Data is stored in `~/.config/tabular/data/` with each key as a separate file.
+
+```lua
+-- Save state
+tabular.save_data("my_plugin_config", "some_value")
+
+-- Load state
+local config = tabular.load_data("my_plugin_config")
+if config then
+    print("Loaded: " .. config)
+end
+```
+
+### User Input (Prompt)
+
+| Function | Description |
+|----------|-------------|
+| `prompt(question, default)` | Request input from user, returns answer or nil |
+
+The prompt function works with deferred execution. On first call it returns `nil` and queues a prompt. Tabular will show the prompt, collect user input, and re-run the plugin with the answer available.
+
+```lua
+local answer = tabular.prompt("Enter a value:", "default")
+if answer then
+    -- User provided input, proceed
+    tabular.set_message("You entered: " .. answer)
+else
+    -- Waiting for user input, plugin will be re-run
+    return
+end
+```
+
+### Canvas API (`tabular.canvas`)
+
+Plugins can display rich output using the canvas overlay:
+
+| Function | Description |
+|----------|-------------|
+| `canvas.clear()` | Clear all canvas content |
+| `canvas.show()` | Show the canvas overlay |
+| `canvas.hide()` | Hide the canvas overlay |
+| `canvas.set_title(title)` | Set the canvas title |
+| `canvas.add_text(text)` | Add a line of text |
+| `canvas.add_header(text)` | Add a styled header line |
+| `canvas.add_separator()` | Add a horizontal separator |
+| `canvas.add_blank()` | Add a blank line |
+| `canvas.add_styled_text(text, fg, bg, bold)` | Add styled text with colors |
+
+#### Colors for add_styled_text
+
+Available colors: `"black"`, `"red"`, `"green"`, `"yellow"`, `"blue"`, `"magenta"`, `"cyan"`, `"white"`, `"gray"`
+
+```lua
+tabular.canvas.add_styled_text("Error!", "red", nil, true)  -- Red, bold
+tabular.canvas.add_styled_text("Success", "green", nil, false)  -- Green
+tabular.canvas.add_styled_text("Highlight", "black", "yellow", false)  -- Black on yellow
+```
 
 All row/column indices are **1-indexed** to match Lua conventions.
 
@@ -131,6 +243,84 @@ return {
 }
 ```
 
+### Column Statistics with Canvas
+
+Displays statistics for the current column using the canvas:
+
+```lua
+return {
+    name = "colstats",
+    run = function()
+        local col = tabular.ctx.cursor_col
+        local col_type = tabular.get_column_type(col)
+
+        tabular.canvas.clear()
+        tabular.canvas.set_title("Column Statistics")
+
+        if col_type == "numeric" then
+            local sum, count, min, max = 0, 0, nil, nil
+            for row = 1, tabular.ctx.row_count do
+                local val = tonumber(tabular.get_cell(row, col))
+                if val then
+                    sum = sum + val
+                    count = count + 1
+                    min = min and math.min(min, val) or val
+                    max = max and math.max(max, val) or val
+                end
+            end
+
+            tabular.canvas.add_header("Numeric Column")
+            tabular.canvas.add_text("Count: " .. count)
+            tabular.canvas.add_text("Sum: " .. sum)
+            if count > 0 then
+                tabular.canvas.add_text("Average: " .. (sum / count))
+                tabular.canvas.add_text("Min: " .. min)
+                tabular.canvas.add_text("Max: " .. max)
+            end
+        else
+            tabular.canvas.add_header("Text Column")
+            local count = 0
+            for row = 1, tabular.ctx.row_count do
+                if tabular.get_cell(row, col) ~= "" then
+                    count = count + 1
+                end
+            end
+            tabular.canvas.add_text("Non-empty cells: " .. count)
+        end
+
+        tabular.canvas.show()
+    end
+}
+```
+
+### Selection Sum
+
+Sums values in the current visual selection:
+
+```lua
+return {
+    name = "selsum",
+    run = function()
+        local sel = tabular.get_selection()
+        if not sel then
+            tabular.set_message("No selection - use visual mode first")
+            return
+        end
+
+        local data = tabular.get_range(sel.start_row, sel.start_col, sel.end_row, sel.end_col)
+        local sum = 0
+        for _, row in ipairs(data) do
+            for _, cell in ipairs(row) do
+                local val = tonumber(cell)
+                if val then sum = sum + val end
+            end
+        end
+
+        tabular.set_message("Selection sum: " .. sum)
+    end
+}
+```
+
 ### Duplicate Row
 
 Duplicates the current row below:
@@ -180,3 +370,5 @@ return {
 - Plugins can read values written by `set_cell` in the same execution via `get_cell`
 - Row/column insertions and deletions take effect after the plugin completes
 - Invalid operations (out of bounds, etc.) are silently ignored
+- Canvas output is view-only and not recorded in undo history
+- Persistent data is stored per-key in `~/.config/tabular/data/`

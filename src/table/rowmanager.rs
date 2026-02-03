@@ -324,7 +324,7 @@ mod tests {
 
         let mut rm = RowManager::new();
         let pred = Predicate::Comparator {
-            op: crate::predicate::Op::Gt,
+            op: crate::numeric::predicate::Op::Gt,
             val: "90".to_string(),
         };
 
@@ -352,7 +352,7 @@ mod tests {
 
         let mut rm = RowManager::new();
         let pred = Predicate::Comparator {
-            op: crate::predicate::Op::Eq,
+            op: crate::numeric::predicate::Op::Eq,
             val: "100".to_string(),
         };
 
@@ -372,7 +372,7 @@ mod tests {
 
         let mut rm = RowManager::new();
         let pred = Predicate::Comparator {
-            op: crate::predicate::Op::Ge,
+            op: crate::numeric::predicate::Op::Ge,
             val: "90".to_string(),
         };
 
@@ -395,7 +395,7 @@ mod tests {
 
         let mut rm = RowManager::new();
         let pred = Predicate::Comparator {
-            op: crate::predicate::Op::Eq,
+            op: crate::numeric::predicate::Op::Eq,
             val: "active".to_string(),
         };
 
@@ -415,7 +415,7 @@ mod tests {
 
         let mut rm = RowManager::new();
         let pred = Predicate::Comparator {
-            op: crate::predicate::Op::Gt,
+            op: crate::numeric::predicate::Op::Gt,
             val: "0".to_string(),
         };
 
@@ -441,7 +441,7 @@ mod tests {
 
         // First filter: score > 80
         let pred1 = Predicate::Comparator {
-            op: crate::predicate::Op::Gt,
+            op: crate::numeric::predicate::Op::Gt,
             val: "80".to_string(),
         };
         rm.predicate_filter(&table, 1, pred1, crate::util::ColumnType::Numeric, true);
@@ -449,7 +449,7 @@ mod tests {
 
         // Second filter: score < 95 (should chain with first filter)
         let pred2 = Predicate::Comparator {
-            op: crate::predicate::Op::Lt,
+            op: crate::numeric::predicate::Op::Lt,
             val: "95".to_string(),
         };
         rm.predicate_filter(&table, 1, pred2, crate::util::ColumnType::Numeric, true);
@@ -472,7 +472,7 @@ mod tests {
 
         let mut rm = RowManager::new();
         let pred = Predicate::Comparator {
-            op: crate::predicate::Op::Le,
+            op: crate::numeric::predicate::Op::Le,
             val: "3".to_string(),
         };
         rm.predicate_filter(&table, 0, pred, crate::util::ColumnType::Numeric, true);
@@ -494,7 +494,7 @@ mod tests {
 
         let mut rm = RowManager::new();
         let pred = Predicate::Comparator {
-            op: crate::predicate::Op::Ge,
+            op: crate::numeric::predicate::Op::Ge,
             val: "20".to_string(),
         };
         rm.predicate_filter(&table, 0, pred, crate::util::ColumnType::Numeric, true);
@@ -522,7 +522,7 @@ mod tests {
 
         let mut rm = RowManager::new();
         let pred = Predicate::Comparator {
-            op: crate::predicate::Op::Ge,
+            op: crate::numeric::predicate::Op::Ge,
             val: "20".to_string(),
         };
         rm.predicate_filter(&table, 0, pred, crate::util::ColumnType::Numeric, true);
@@ -547,7 +547,7 @@ mod tests {
 
         let mut rm = RowManager::new();
         let pred = Predicate::Comparator {
-            op: crate::predicate::Op::Gt,
+            op: crate::numeric::predicate::Op::Gt,
             val: "10".to_string(),
         };
         rm.predicate_filter(&table, 0, pred, crate::util::ColumnType::Numeric, true);
@@ -577,7 +577,7 @@ mod tests {
 
         let mut rm = RowManager::new();
         let pred = Predicate::Comparator {
-            op: crate::predicate::Op::Gt,
+            op: crate::numeric::predicate::Op::Gt,
             val: "10".to_string(),
         };
         rm.predicate_filter(&table, 0, pred, crate::util::ColumnType::Numeric, true);
@@ -603,7 +603,7 @@ mod tests {
 
         let mut rm = RowManager::new();
         let pred = Predicate::Comparator {
-            op: crate::predicate::Op::Gt,
+            op: crate::numeric::predicate::Op::Gt,
             val: "100".to_string(),
         };
 
