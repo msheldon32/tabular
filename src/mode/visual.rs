@@ -6,7 +6,7 @@ use crate::input::{KeyResult, KeyBufferResult, SequenceAction, is_escape, Naviga
 use crate::table::table::Table;
 use crate::table::tableview::TableView;
 use crate::clipboard::{Clipboard, RegisterContent, PasteAnchor};
-use crate::numeric::format::{format_scientific, format_percentage, format_currency, format_commas, format_default, parse_numeric};
+use crate::numeric::format::{format_scientific, format_percentage, format_currency, format_commas, format_default };
 
 /// Selection information for visual mode
 #[derive(Clone, Debug, Default)]
@@ -235,12 +235,13 @@ impl VisualHandler {
 
     fn handle_clear(&self, view: &TableView, table: &Table, clipboard: &mut Clipboard) -> KeyResult {
         if view.row_manager.borrow().is_filtered {
+            // probably ease up on this in the future
             return KeyResult::Message("Deleting rows is forbidden in filtered views.".to_string());
         }
         let (start_row, end_row, start_col, end_col) = view.get_selection_bounds();
 
-        let mut new_data = Vec::new();
-        let mut old_data = Vec::new();
+        let new_data;
+        let old_data;
 
         let mut grab_row = start_row;
         let mut grab_col = start_col;
@@ -259,9 +260,9 @@ impl VisualHandler {
                 new_data = vec![vec![String::new(); end_col - start_col + 1]; end_row - start_row + 1];
             }
             VisualType::Row => {
-                // Delete entire rows using bulk operation
-                let count = end_row - start_row + 1;
-                let old_data = table.get_rows_cloned(start_row, count);
+                // Clear and yank row
+                let count = (end_row - start_row) + 1;
+                old_data = table.get_rows_cloned(start_row, count);
 
                 clipboard.store_deleted(RegisterContent {
                     data: old_data.clone(),
@@ -270,11 +271,11 @@ impl VisualHandler {
 
                 grab_col = 0;
 
-                let new_data = vec![vec![String::new(); table.col_count()]; table.row_count()];
+                new_data = vec![vec![String::new(); table.col_count()]; table.row_count()];
             }
             VisualType::Col => {
-                // Delete entire columns
-                let old_data = table.get_cols_cloned(start_col, end_col);
+                // Clear and yank column
+                old_data = table.get_cols_cloned(start_col, end_col);
 
                 clipboard.store_deleted(RegisterContent {
                     data: old_data.clone(),
@@ -283,7 +284,7 @@ impl VisualHandler {
 
                 grab_row = 0;
 
-                let new_data = vec![vec![String::new(); end_col - start_col + 1]; table.row_count()];
+                new_data = vec![vec![String::new(); end_col - start_col + 1]; table.row_count()];
             }
         };
         let txn = Transaction::SetSpan {

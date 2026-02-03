@@ -2,7 +2,6 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::clipboard::Clipboard;
 use crate::table::table::Table;
 use crate::table::tableview::TableView;
 use crate::transaction::Transaction;
