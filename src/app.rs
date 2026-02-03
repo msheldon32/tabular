@@ -447,7 +447,6 @@ impl App {
                                                             &self.nav_handler,
                                                             self.row_manager.borrow().is_filtered,
                                                             &mut self.clipboard,
-                                                            &mut self.history,
                                                             &mut self.search_handler
                                                             );
                 self.process_key_result(result);

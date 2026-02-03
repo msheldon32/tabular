@@ -59,7 +59,6 @@ impl CommandTable {
 
         if tried_action.is_none() {
             // fallthrough to wildcard
-            let mut it = s.iter();
             match keyseq.split() {
                 Some((a, b)) => {
                     return self.wildcard_map.get(&a).map(|f| f(b));

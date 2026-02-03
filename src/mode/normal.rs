@@ -1,14 +1,11 @@
 use crossterm::event::{KeyEvent, KeyCode, KeyModifiers};
 
-use crate::App;
 use crate::input::{KeyResult, NavigationHandler};
 use crate::table::table::Table;
 use crate::table::tableview::TableView;
 use crate::table::operations::current_cell;
 use crate::mode::Mode;
-use crate::mode::insert::InsertHandler;
-use crate::app::PendingOp;
-use crate::transaction::{Transaction, History};
+use crate::transaction::Transaction;
 use crate::clipboard::Clipboard;
 use crate::mode::search::SearchHandler;
 
@@ -29,7 +26,6 @@ impl NormalHandler {
                   nav_handler: &NavigationHandler,
                   is_filtered: bool,
                   clipboard: &mut Clipboard,
-                  history: &History,
                   search_handler: &mut SearchHandler
                   ) -> KeyResult {
         // Handle navigation (hjkl already handled by KeyBuffer with count)
@@ -37,7 +33,6 @@ impl NormalHandler {
 
         match key.code {
             KeyCode::Char('i') => {
-                let current = current_cell(&view, &table).clone();
                 return KeyResult::SwitchMode(Mode::Insert);
             }
             KeyCode::Char('V') => {
