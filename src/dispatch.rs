@@ -412,6 +412,11 @@ impl App {
     }
 
     pub fn get_selection_info(&self) -> SelectionInfo {
+        mode = if (self.mode == Mode::CommandMode) {
+            self.calling_mode.unwrap_or(self.mode)
+        } else {
+            self.mode
+        }
         SelectionInfo {
             mode: self.mode,
             start_row: cmp::min(self.view.support_row, self.view.cursor_row),
