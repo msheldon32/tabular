@@ -6,7 +6,7 @@ A terminal-based CSV editor with vim-like keybindings.
 
 Tabular is **not** a spreadsheet. It's a focused tool for editing tabular data:
 
-- **Vim-first**: Modal editing, registers, counts, visual modes - if you know vim, you know tabular
+- **Vim-inspired**: Modal editing, registers, counts, visual modes - if you know vim, you know tabular
 - **Minimal**: Does one thing well. No charts, no pivot tables, no macros
 - **Fast**: Opens instantly, handles large files, stays out of your way
 
