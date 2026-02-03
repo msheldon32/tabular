@@ -330,8 +330,9 @@ impl App {
                     self.view.clamp_cursor(&self.table);
                     self.message = Some("Undo".to_string());
                 }
+            } else {
+                self.message = Some(String::from("Cannot undo."));
             }
-            self.message = Some(String::from("Cannot undo."));
         } else if matches!(txn, Transaction::Redo) {
             // Check if redo is large before executing
             if let Some(txn) = self.history.peek_redo() {
@@ -349,8 +350,9 @@ impl App {
                     self.view.clamp_cursor(&self.table);
                     self.message = Some("Redo".to_string());
                 }
+            } else {
+                self.message = Some(String::from("Cannot redo."));
             }
-            self.message = Some(String::from("Cannot redo."));
         } else {
             txn.apply(&mut self.table);
             self.history.record(txn);
