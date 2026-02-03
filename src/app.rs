@@ -12,11 +12,12 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use crate::calculator::Calculator;
 use crate::canvas::Canvas;
 use crate::clipboard::{Clipboard, RegisterContent};
-use crate::command::{Command, ReplaceCommand};
+use crate::command::{Command, ReplaceCommand, CommandHandler};
+use crate::insert::InsertHandler;
 use crate::input::{
-    is_escape, CommandHandler, InsertHandler, KeyBuffer, KeyBufferResult, KeyResult,
-    NavigationHandler, SearchHandler, SequenceAction
+    is_escape, KeyBuffer, KeyBufferResult, KeyResult, NavigationHandler, SequenceAction
 };
+use crate::search::SearchHandler;
 use crate::mode::Mode;
 use crate::operations;
 use crate::plugin::{PluginManager, PluginAction, CommandContext};

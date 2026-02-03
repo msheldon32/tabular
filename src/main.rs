@@ -19,6 +19,8 @@ mod util;
 mod rowmanager;
 mod predicate;
 mod visual;
+mod search;
+mod insert;
 
 use std::io;
 use std::path::PathBuf;

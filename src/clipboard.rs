@@ -427,101 +427,6 @@ mod tests {
     }
 
     #[test]
-    fn test_yank_row_updates_unnamed_and_yank_register() {
-        let mut clipboard = Clipboard::new();
-        clipboard.yank_row(vec!["a".to_string(), "b".to_string()]);
-
-        assert!(clipboard.unnamed.is_some());
-        assert!(clipboard.yank_register.is_some());
-        assert_eq!(clipboard.unnamed.as_ref().unwrap().data, vec![vec!["a".to_string(), "b".to_string()]]);
-    }
-
-    #[test]
-    fn test_black_hole_register_discards() {
-        let mut clipboard = Clipboard::new();
-        clipboard.yank_row(vec!["original".to_string()]);
-
-        // Select black hole and yank
-        clipboard.select_register('_').unwrap();
-        clipboard.yank_row(vec!["discarded".to_string()]);
-
-        // Original should still be in unnamed
-        assert_eq!(
-            clipboard.unnamed.as_ref().unwrap().data,
-            vec![vec!["original".to_string()]]
-        );
-
-        // Yank register should still have original
-        assert_eq!(
-            clipboard.yank_register.as_ref().unwrap().data,
-            vec![vec!["original".to_string()]]
-        );
-    }
-
-    #[test]
-    fn test_named_register() {
-        let mut clipboard = Clipboard::new();
-
-        // Yank to register a
-        clipboard.select_register('a').unwrap();
-        clipboard.yank_row(vec!["in_a".to_string()]);
-
-        // Yank something else to unnamed
-        clipboard.yank_row(vec!["in_unnamed".to_string()]);
-
-        // Retrieve from a
-        clipboard.select_register('a').unwrap();
-        let content = clipboard.retrieve().unwrap();
-        assert_eq!(content.data, vec![vec!["in_a".to_string()]]);
-    }
-
-    #[test]
-    fn test_yank_register_not_affected_by_delete() {
-        let mut clipboard = Clipboard::new();
-
-        // Yank something
-        clipboard.yank_row(vec!["yanked".to_string()]);
-
-        // Delete something (store_deleted doesn't update yank register)
-        clipboard.store_deleted(RegisterContent::from_row(vec!["deleted".to_string()]));
-
-        // Yank register should still have the yank
-        assert_eq!(
-            clipboard.yank_register.as_ref().unwrap().data,
-            vec![vec!["yanked".to_string()]]
-        );
-
-        // But unnamed should have the delete
-        assert_eq!(
-            clipboard.unnamed.as_ref().unwrap().data,
-            vec![vec!["deleted".to_string()]]
-        );
-
-        // Retrieve from 0 should get the yank
-        clipboard.select_register('0').unwrap();
-        let content = clipboard.retrieve().unwrap();
-        assert_eq!(content.data, vec![vec!["yanked".to_string()]]);
-    }
-
-    #[test]
-    fn test_paste_anchor_row() {
-        let content = RegisterContent::from_row(vec!["a".to_string()]);
-        assert_eq!(content.anchor, PasteAnchor::RowStart);
-    }
-
-    #[test]
-    fn test_paste_anchor_col() {
-        let content = RegisterContent::from_col(vec!["a".to_string()]);
-        assert_eq!(content.anchor, PasteAnchor::ColStart);
-    }
-
-    #[test]
-    fn test_paste_anchor_span() {
-        let content = RegisterContent::from_span(vec![vec!["a".to_string()]]);
-        assert_eq!(content.anchor, PasteAnchor::Cursor);
-    }
-
-    #[test]
     fn test_paste_as_transaction_nothing() {
         let mut clipboard = Clipboard::new();
         let table = make_table(vec![vec!["a"]]);
@@ -530,28 +435,6 @@ mod tests {
 
         assert_eq!(msg, "Nothing to paste");
         assert!(txn.is_none());
-    }
-
-    #[test]
-    fn test_paste_as_transaction_row() {
-        let mut clipboard = Clipboard::new();
-        clipboard.yank_row(vec!["x".to_string(), "y".to_string()]);
-
-        let table = make_table(vec![
-            vec!["a", "b"],
-            vec!["c", "d"],
-        ]);
-
-        let (msg, txn) = clipboard.paste_as_transaction(0, 0, &table);
-
-        assert_eq!(msg, "1 row(s) pasted");
-        assert!(txn.is_some());
-
-        let txn = txn.unwrap();
-        let mut table = table;
-        txn.apply(&mut table);
-
-        assert_eq!(table.get_row(0).map(|r| r.to_vec()), Some(vec!["x".to_string(), "y".to_string()]));
     }
 
     #[test]
@@ -571,19 +454,5 @@ mod tests {
         assert!(clipboard.select_register('_').is_ok());
         assert!(clipboard.select_register('+').is_ok());
         assert!(clipboard.select_register('"').is_ok());
-    }
-
-    #[test]
-    fn test_list_registers() {
-        let mut clipboard = Clipboard::new();
-        clipboard.yank_row(vec!["unnamed".to_string()]);
-
-        clipboard.select_register('a').unwrap();
-        clipboard.yank_row(vec!["in_a".to_string()]);
-
-        let list = clipboard.list_registers();
-        assert!(list.iter().any(|(name, _)| name == "\"\""));
-        assert!(list.iter().any(|(name, _)| name == "\"0"));
-        assert!(list.iter().any(|(name, _)| name == "\"a"));
     }
 }

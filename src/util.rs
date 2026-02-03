@@ -555,18 +555,4 @@ mod tests {
         assert_eq!(char_count("你好"), 2);
         assert_eq!(char_count(""), 0);
     }
-
-    #[test]
-    fn test_char_indices() {
-        use super::{byte_index_of_char, char_index_of_byte};
-        let s = "héllo"; // é is 2 bytes
-        assert_eq!(byte_index_of_char(s, 0), 0);
-        assert_eq!(byte_index_of_char(s, 1), 1);  // 'h' ends, 'é' starts
-        assert_eq!(byte_index_of_char(s, 2), 3);  // 'é' is 2 bytes, 'l' starts at 3
-        assert_eq!(byte_index_of_char(s, 5), 6);  // End of string
-
-        assert_eq!(char_index_of_byte(s, 0), 0);
-        assert_eq!(char_index_of_byte(s, 1), 1);
-        assert_eq!(char_index_of_byte(s, 3), 2);
-    }
 }

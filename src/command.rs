@@ -1,10 +1,10 @@
 use regex::Regex;
-
+use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::util::{CellRef, parse_cell_ref};
 use crate::rowmanager::FilterType;
-
 use crate::predicate::parse_predicate;
+use crate::input::is_escape;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplaceScope {
@@ -158,6 +158,47 @@ impl Command {
         }
 
         None
+    }
+}
+
+/// Command mode handler
+pub struct CommandHandler {
+    pub buffer: String,
+}
+
+impl CommandHandler {
+    pub fn new() -> Self {
+        Self {
+            buffer: String::new(),
+        }
+    }
+
+    pub fn start(&mut self) {
+        self.buffer.clear();
+    }
+
+    pub fn handle_key(&mut self, key: KeyEvent) -> Option<String> {
+        if is_escape(key) {
+            self.buffer.clear();
+            return None;
+        }
+
+        match key.code {
+            KeyCode::Enter => {
+                let cmd = self.buffer.clone();
+                self.buffer.clear();
+                Some(cmd)
+            }
+            KeyCode::Backspace => {
+                self.buffer.pop();
+                None
+            }
+            KeyCode::Char(c) => {
+                self.buffer.push(c);
+                None
+            }
+            _ => None,
+        }
     }
 }
 
