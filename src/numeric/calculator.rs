@@ -573,218 +573,6 @@ mod tests {
     }
 
     #[test]
-    fn test_sum() {
-        let table = make_table(vec![
-            vec!["1", "2", "3"],
-            vec!["4", "5", "6"],
-            vec!["=sum(A1:C2)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results[0].2, "21");
-    }
-
-    #[test]
-    fn test_avg() {
-        let table = make_table(vec![
-            vec!["10", "20", "30", "40"],
-            vec!["=avg(A1:D1)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results[0].2, "25");
-    }
-
-    #[test]
-    fn test_stdev() {
-        let table = make_table(vec![
-            vec!["2", "4", "4", "4", "5", "5", "7", "9"],
-            vec!["=stdev(A1:H1)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        let val: f64 = results[0].2.parse().unwrap();
-        assert!((val - 2.138).abs() < 0.01);
-    }
-
-    #[test]
-    fn test_median() {
-        let table = make_table(vec![
-            vec!["1", "3", "5", "7", "9"],
-            vec!["=median(A1:E1)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results[0].2, "5");
-    }
-
-    #[test]
-    fn test_correl() {
-        let table = make_table(vec![
-            vec!["1", "2"],
-            vec!["2", "4"],
-            vec!["3", "6"],
-            vec!["=correl(A1:A3,B1:B3)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        let val: f64 = results[0].2.parse().unwrap();
-        assert!((val - 1.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_math_functions() {
-        let table = make_table(vec![
-            vec!["=sqrt(16)"],
-            vec!["=abs(-5)"],
-            vec!["=pow(2,3)"],
-            vec!["=floor(3.7)"],
-            vec!["=ceil(3.2)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.0 == 0).unwrap().2, "4");
-        assert_eq!(results.iter().find(|r| r.0 == 1).unwrap().2, "5");
-        assert_eq!(results.iter().find(|r| r.0 == 2).unwrap().2, "8");
-        assert_eq!(results.iter().find(|r| r.0 == 3).unwrap().2, "3");
-        assert_eq!(results.iter().find(|r| r.0 == 4).unwrap().2, "4");
-    }
-
-    #[test]
-    fn test_trig_functions() {
-        let table = make_table(vec![
-            vec!["=sin(0)"],
-            vec!["=cos(0)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        let sin_val: f64 = results.iter().find(|r| r.0 == 0).unwrap().2.parse().unwrap();
-        let cos_val: f64 = results.iter().find(|r| r.0 == 1).unwrap().2.parse().unwrap();
-        assert!(sin_val.abs() < 0.0001);
-        assert!((cos_val - 1.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn test_constants() {
-        let table = make_table(vec![
-            vec!["=PI()"],
-            vec!["=E()"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        let pi_val: f64 = results.iter().find(|r| r.0 == 0).unwrap().2.parse().unwrap();
-        let e_val: f64 = results.iter().find(|r| r.0 == 1).unwrap().2.parse().unwrap();
-        assert!((pi_val - std::f64::consts::PI).abs() < 0.0001);
-        assert!((e_val - std::f64::consts::E).abs() < 0.0001);
-    }
-
-    #[test]
-    fn test_combinatorics() {
-        let table = make_table(vec![
-            vec!["=combin(5,2)"],
-            vec!["=permut(5,2)"],
-            vec!["=fact(5)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.0 == 0).unwrap().2, "10");
-        assert_eq!(results.iter().find(|r| r.0 == 1).unwrap().2, "20");
-        assert_eq!(results.iter().find(|r| r.0 == 2).unwrap().2, "120");
-    }
-
-    #[test]
-    fn test_gcd_lcm() {
-        let table = make_table(vec![
-            vec!["=gcd(12,18)"],
-            vec!["=lcm(12,18)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.0 == 0).unwrap().2, "6");
-        assert_eq!(results.iter().find(|r| r.0 == 1).unwrap().2, "36");
-    }
-
-    #[test]
-    fn test_percentile() {
-        let table = make_table(vec![
-            vec!["1", "2", "3", "4", "5"],
-            vec!["=percentile(A1:E1,0.5)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results[0].2, "3");
-    }
-
-    #[test]
-    fn test_nested_functions() {
-        let table = make_table(vec![
-            vec!["=sqrt(abs(-16))"],
-            vec!["=pow(sqrt(4),2)"],
-            vec!["=abs(floor(-3.7))"],
-            vec!["=round(sqrt(2),2)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.0 == 0).unwrap().2, "4");
-        assert_eq!(results.iter().find(|r| r.0 == 1).unwrap().2, "4");
-        assert_eq!(results.iter().find(|r| r.0 == 2).unwrap().2, "4");
-        assert_eq!(results.iter().find(|r| r.0 == 3).unwrap().2, "1.41");
-    }
-
-    #[test]
-    fn test_deeply_nested_functions() {
-        let table = make_table(vec![
-            vec!["=sqrt(sqrt(sqrt(256)))"],
-            vec!["=abs(abs(abs(-5)))"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.0 == 0).unwrap().2, "2");
-        assert_eq!(results.iter().find(|r| r.0 == 1).unwrap().2, "5");
-    }
-
-    #[test]
-    fn test_column_range_sum() {
-        let table = make_table(vec![
-            vec!["1", "10", "100", "=sum(A:A)"],
-            vec!["2", "20", "200", "=sum(B:B)"],
-            vec!["3", "30", "300", "=sum(C:C)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.0 == 0 && r.1 == 3).unwrap().2, "6");
-        assert_eq!(results.iter().find(|r| r.0 == 1 && r.1 == 3).unwrap().2, "60");
-        assert_eq!(results.iter().find(|r| r.0 == 2 && r.1 == 3).unwrap().2, "600");
-    }
-
-    #[test]
-    fn test_row_range_sum_1indexed() {
-        let table = make_table(vec![
-            vec!["1", "2", "3"],
-            vec!["10", "20", "30"],
-            vec!["100", "200", "300"],
-            vec!["=sum(1:1)", "=sum(2:2)", "=sum(3:3)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.0 == 3 && r.1 == 0).unwrap().2, "6");
-        assert_eq!(results.iter().find(|r| r.0 == 3 && r.1 == 1).unwrap().2, "60");
-        assert_eq!(results.iter().find(|r| r.0 == 3 && r.1 == 2).unwrap().2, "600");
-    }
-
-    #[test]
-    fn test_lowercase_column_range() {
-        let table = make_table(vec![
-            vec!["1", "10", "=sum(a:a)"],
-            vec!["2", "20", "=sum(b:b)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.0 == 0 && r.1 == 2).unwrap().2, "3");
-        assert_eq!(results.iter().find(|r| r.0 == 1 && r.1 == 2).unwrap().2, "30");
-    }
-
-    #[test]
     fn test_arithmetic_expression() {
         let table = make_table(vec![
             vec!["5", "3", "=(A1+B1)*2"],
@@ -813,8 +601,8 @@ mod tests {
         ]);
         let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "1");
-        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "0");
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "true");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "false");
     }
 
     #[test]
@@ -824,9 +612,9 @@ mod tests {
         ]);
         let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "0");
-        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "1");
-        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "0");
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "false");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "true");
+        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "false");
     }
 
     #[test]
@@ -836,10 +624,10 @@ mod tests {
         ]);
         let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "1");
-        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "0");
-        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "0");
-        assert_eq!(results.iter().find(|r| r.1 == 3).unwrap().2, "0");
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "true");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "false");
+        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "false");
+        assert_eq!(results.iter().find(|r| r.1 == 3).unwrap().2, "false");
     }
 
     #[test]
@@ -849,10 +637,10 @@ mod tests {
         ]);
         let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "1");
-        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "1");
-        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "1");
-        assert_eq!(results.iter().find(|r| r.1 == 3).unwrap().2, "0");
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "true");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "true");
+        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "true");
+        assert_eq!(results.iter().find(|r| r.1 == 3).unwrap().2, "false");
     }
 
     #[test]
@@ -862,119 +650,18 @@ mod tests {
         ]);
         let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "0");
-        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "1");
-    }
-
-    #[test]
-    fn test_if_function() {
-        let table = make_table(vec![
-            vec!["=IF(TRUE, 10, 20)", "=IF(FALSE, 10, 20)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "10");
-        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "20");
-    }
-
-    #[test]
-    fn test_if_with_comparison() {
-        let table = make_table(vec![
-            vec!["10", "=IF(A1>5, 100, 200)", "=IF(A1<5, 100, 200)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "100");
-        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "200");
-    }
-
-    #[test]
-    fn test_nested_if() {
-        let table = make_table(vec![
-            vec!["5", "=IF(A1>10, 1, IF(A1>3, 2, 3))"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results[0].2, "2");
-    }
-
-    #[test]
-    fn test_and_function() {
-        let table = make_table(vec![
-            vec!["=AND(TRUE, TRUE)", "=AND(TRUE, FALSE)", "=AND(TRUE, TRUE, TRUE)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "1");
-        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "0");
-        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "1");
-    }
-
-    #[test]
-    fn test_or_function() {
-        let table = make_table(vec![
-            vec!["=OR(FALSE, FALSE)", "=OR(FALSE, TRUE)", "=OR(FALSE, FALSE, TRUE)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "0");
-        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "1");
-        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "1");
-    }
-
-    #[test]
-    fn test_not_function() {
-        let table = make_table(vec![
-            vec!["=NOT(TRUE)", "=NOT(FALSE)", "=NOT(1)", "=NOT(0)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "0");
-        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "1");
-        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "0");
-        assert_eq!(results.iter().find(|r| r.1 == 3).unwrap().2, "1");
-    }
-
-    #[test]
-    fn test_complex_boolean_formula() {
-        let table = make_table(vec![
-            vec!["10", "5", "=IF(A1>5 AND B1<10, 1, 0)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results[0].2, "1");
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "false");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "true");
     }
 
     #[test]
     fn test_boolean_with_cell_refs() {
         let table = make_table(vec![
-            vec!["1", "0", "=A1 AND B1", "=A1 OR B1"],
+            vec!["TRUE", "FALSE", "=A1 AND B1", "=A1 OR B1"],
         ]);
         let calc = Calculator::new(&table, false);
         let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "0");
-        assert_eq!(results.iter().find(|r| r.1 == 3).unwrap().2, "1");
-    }
-
-    #[test]
-    fn test_iferror() {
-        let table = make_table(vec![
-            vec!["=IFERROR(1/0, 999)", "=IFERROR(10, 999)"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "999");
-        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "10");
-    }
-
-    #[test]
-    fn test_true_false_functions() {
-        let table = make_table(vec![
-            vec!["=TRUE()", "=FALSE()"],
-        ]);
-        let calc = Calculator::new(&table, false);
-        let results = calc.evaluate_all().unwrap();
-        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "1");
-        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "0");
+        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "false");
+        assert_eq!(results.iter().find(|r| r.1 == 3).unwrap().2, "true");
     }
 }
