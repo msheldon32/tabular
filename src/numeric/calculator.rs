@@ -53,6 +53,30 @@ impl CalcType {
         }
     }
 
+    pub fn abs(x: CalcType) -> Result<CalcType, CalcError> {
+        match x {
+            CalcType::Int(x) => Ok(CalcType::Int(x.abs())),
+            CalcType::Float(x) => Ok(CalcType::Float(x.abs())),
+            _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+        }
+    }
+
+    pub fn floor(x: CalcType) -> Result<CalcType, CalcError> {
+        match x {
+            CalcType::Int(x) => Ok(CalcType::Int(x)),
+            CalcType::Float(x) => Ok(CalcType::Float(x.floor())),
+            _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+        }
+    }
+
+    pub fn ceil(x: CalcType) -> Result<CalcType, CalcError> {
+        match x {
+            CalcType::Int(x) => Ok(CalcType::Int(x)),
+            CalcType::Float(x) => Ok(CalcType::Float(x.ceil())),
+            _default => Err(CalcError::EvalError("Numeric operation on non-numeric data".to_string()))
+        }
+    }
+
     pub fn min(l: CalcType, r: CalcType) -> Result<CalcType, CalcError> {
         match CalcType::numeric_precedence(l,r) {
             Ok((CalcType::Int(a), CalcType::Int(b))) => Ok(CalcType::Int(cmp::min(a,b))),

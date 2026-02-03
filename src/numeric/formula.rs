@@ -63,7 +63,7 @@ pub fn evaluate_function<E: ExprEvaluator>(
             require_args(name, args, 1)?;
             let mut vals = evaluator.expand(&args[0], results)?;
 
-            Ok(CalcType::Int(vals.len()))
+            Ok(CalcType::Int(vals.len() as i64))
         },
         "PROD" => {
             require_args(name, args, 1)?;
@@ -72,6 +72,21 @@ pub fn evaluate_function<E: ExprEvaluator>(
             Ok(vals.iter().try_fold(CalcType::Int(0), |acc, v| {
                 CalcType::bin_op(BinOp::Mul, acc, v.clone())
             })?)
+        },
+        "ABS" => {
+            require_args(name, args, 1)?;
+
+            Ok(CalcType::abs(evaluator.eval(&args[0], results)?))
+        },
+        "FLOOR" => {
+            require_args(name, args, 1)?;
+
+            Ok(CalcType::floor(evaluator.eval(&args[0], results)?))
+        },
+        "CEIL" => {
+            require_args(name, args, 1)?;
+
+            Ok(CalcType::ceil(evaluator.eval(&args[0], results)?))
         },
         // I am just killing this function entirely for now, this will require substantial revision
         _default => Err(CalcError::EvalError("(Most) functions have been removed for now".to_string()))
