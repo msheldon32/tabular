@@ -1,5 +1,6 @@
 mod app;
 mod calculator;
+mod canvas;
 mod clipboard;
 mod command;
 mod fileio;

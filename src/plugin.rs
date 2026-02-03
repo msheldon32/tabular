@@ -15,6 +15,52 @@ pub struct CommandContext {
     pub col_count: usize,
 }
 
+/// Color representation for canvas
+#[derive(Clone, Debug)]
+pub enum CanvasColor {
+    Black,
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+    White,
+    Gray,
+}
+
+impl CanvasColor {
+    pub fn to_ratatui(&self) -> ratatui::style::Color {
+        use ratatui::style::Color;
+        match self {
+            CanvasColor::Black => Color::Black,
+            CanvasColor::Red => Color::Red,
+            CanvasColor::Green => Color::Green,
+            CanvasColor::Yellow => Color::Yellow,
+            CanvasColor::Blue => Color::Blue,
+            CanvasColor::Magenta => Color::Magenta,
+            CanvasColor::Cyan => Color::Cyan,
+            CanvasColor::White => Color::White,
+            CanvasColor::Gray => Color::Gray,
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "black" => Some(CanvasColor::Black),
+            "red" => Some(CanvasColor::Red),
+            "green" => Some(CanvasColor::Green),
+            "yellow" => Some(CanvasColor::Yellow),
+            "blue" => Some(CanvasColor::Blue),
+            "magenta" => Some(CanvasColor::Magenta),
+            "cyan" => Some(CanvasColor::Cyan),
+            "white" => Some(CanvasColor::White),
+            "gray" | "grey" => Some(CanvasColor::Gray),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum PluginAction {
     SetCell { row: usize, col: usize, value: String },
@@ -22,6 +68,17 @@ pub enum PluginAction {
     DeleteRow { at: usize },
     InsertCol { at: usize },
     DeleteCol { at: usize },
+    // Canvas actions
+    CanvasClear,
+    CanvasShow,
+    CanvasHide,
+    CanvasSetTitle { title: String },
+    CanvasAddText { text: String },
+    CanvasAddHeader { text: String },
+    CanvasAddSeparator,
+    CanvasAddBlank,
+    CanvasAddStyledText { text: String, fg: Option<CanvasColor>, bg: Option<CanvasColor>, bold: bool },
+    CanvasAddImage { rows: Vec<String>, title: Option<String> },
 }
 
 pub struct PluginResult {
@@ -217,6 +274,93 @@ impl PluginManager {
             Ok(())
         })?;
 
+        // Canvas API functions
+        let actions_ref6 = actions_table.clone();
+        let canvas_clear_fn = self.lua.create_function(move |lua, ()| {
+            let action = lua.create_table()?;
+            action.set("type", "canvas_clear")?;
+            let len = actions_ref6.len()? + 1;
+            actions_ref6.set(len, action)?;
+            Ok(())
+        })?;
+
+        let actions_ref7 = actions_table.clone();
+        let canvas_show_fn = self.lua.create_function(move |lua, ()| {
+            let action = lua.create_table()?;
+            action.set("type", "canvas_show")?;
+            let len = actions_ref7.len()? + 1;
+            actions_ref7.set(len, action)?;
+            Ok(())
+        })?;
+
+        let actions_ref8 = actions_table.clone();
+        let canvas_hide_fn = self.lua.create_function(move |lua, ()| {
+            let action = lua.create_table()?;
+            action.set("type", "canvas_hide")?;
+            let len = actions_ref8.len()? + 1;
+            actions_ref8.set(len, action)?;
+            Ok(())
+        })?;
+
+        let actions_ref9 = actions_table.clone();
+        let canvas_set_title_fn = self.lua.create_function(move |lua, title: String| {
+            let action = lua.create_table()?;
+            action.set("type", "canvas_set_title")?;
+            action.set("title", title)?;
+            let len = actions_ref9.len()? + 1;
+            actions_ref9.set(len, action)?;
+            Ok(())
+        })?;
+
+        let actions_ref10 = actions_table.clone();
+        let canvas_add_text_fn = self.lua.create_function(move |lua, text: String| {
+            let action = lua.create_table()?;
+            action.set("type", "canvas_add_text")?;
+            action.set("text", text)?;
+            let len = actions_ref10.len()? + 1;
+            actions_ref10.set(len, action)?;
+            Ok(())
+        })?;
+
+        let actions_ref11 = actions_table.clone();
+        let canvas_add_header_fn = self.lua.create_function(move |lua, text: String| {
+            let action = lua.create_table()?;
+            action.set("type", "canvas_add_header")?;
+            action.set("text", text)?;
+            let len = actions_ref11.len()? + 1;
+            actions_ref11.set(len, action)?;
+            Ok(())
+        })?;
+
+        let actions_ref12 = actions_table.clone();
+        let canvas_add_separator_fn = self.lua.create_function(move |lua, ()| {
+            let action = lua.create_table()?;
+            action.set("type", "canvas_add_separator")?;
+            let len = actions_ref12.len()? + 1;
+            actions_ref12.set(len, action)?;
+            Ok(())
+        })?;
+
+        let actions_ref13 = actions_table.clone();
+        let canvas_add_blank_fn = self.lua.create_function(move |lua, ()| {
+            let action = lua.create_table()?;
+            action.set("type", "canvas_add_blank")?;
+            let len = actions_ref13.len()? + 1;
+            actions_ref13.set(len, action)?;
+            Ok(())
+        })?;
+
+        // Create canvas sub-API
+        let canvas_api = self.lua.create_table()?;
+        canvas_api.set("clear", canvas_clear_fn)?;
+        canvas_api.set("show", canvas_show_fn)?;
+        canvas_api.set("hide", canvas_hide_fn)?;
+        canvas_api.set("set_title", canvas_set_title_fn)?;
+        canvas_api.set("add_text", canvas_add_text_fn)?;
+        canvas_api.set("add_header", canvas_add_header_fn)?;
+        canvas_api.set("add_separator", canvas_add_separator_fn)?;
+        canvas_api.set("add_blank", canvas_add_blank_fn)?;
+
         // Create tabular API table
         let api = self.lua.create_table()?;
         api.set("ctx", ctx_table)?;
@@ -228,6 +372,7 @@ impl PluginManager {
         api.set("insert_col", insert_col_fn)?;
         api.set("delete_col", delete_col_fn)?;
         api.set("set_message", set_message_fn)?;
+        api.set("canvas", canvas_api)?;
 
         self.lua.globals().set("tabular", api)?;
 
@@ -272,6 +417,34 @@ impl PluginManager {
                     "delete_col" => {
                         let at: usize = action.get("at")?;
                         actions.push(PluginAction::DeleteCol { at: at.saturating_sub(1) });
+                    }
+                    // Canvas actions
+                    "canvas_clear" => {
+                        actions.push(PluginAction::CanvasClear);
+                    }
+                    "canvas_show" => {
+                        actions.push(PluginAction::CanvasShow);
+                    }
+                    "canvas_hide" => {
+                        actions.push(PluginAction::CanvasHide);
+                    }
+                    "canvas_set_title" => {
+                        let title: String = action.get("title")?;
+                        actions.push(PluginAction::CanvasSetTitle { title });
+                    }
+                    "canvas_add_text" => {
+                        let text: String = action.get("text")?;
+                        actions.push(PluginAction::CanvasAddText { text });
+                    }
+                    "canvas_add_header" => {
+                        let text: String = action.get("text")?;
+                        actions.push(PluginAction::CanvasAddHeader { text });
+                    }
+                    "canvas_add_separator" => {
+                        actions.push(PluginAction::CanvasAddSeparator);
+                    }
+                    "canvas_add_blank" => {
+                        actions.push(PluginAction::CanvasAddBlank);
                     }
                     _ => {}
                 }

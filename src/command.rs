@@ -47,6 +47,7 @@ pub enum Command {
     Precision(Option<usize>),  // Set display precision for numbers (None = auto)
     Custom { name: String, args: Vec<String> },
     Filter(FilterType),
+    Canvas,  // Debug command to show canvas overlay
     Unknown(String),
 }
 
@@ -122,6 +123,7 @@ impl Command {
             "plugins" => Some(Command::PluginList),
             "fibfilter" => Some(Command::Filter(FilterType::Fibonacci)),
             "nofilter" => Some(Command::Filter(FilterType::Default)),
+            "canvas" => Some(Command::Canvas),
             _ => Some(Command::Unknown(trimmed.to_string())),
         }
     }

@@ -9,6 +9,7 @@ use crossterm::event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::calculator::Calculator;
+use crate::canvas::Canvas;
 use crate::clipboard::{Clipboard, RegisterContent};
 use crate::command::{Command, ReplaceCommand};
 use crate::input::{
@@ -62,6 +63,7 @@ pub struct App {
     pub header_mode: bool,
     pub precision: Option<usize>,  // Display precision for numbers (None = auto)
     pub progress: Option<(String, Progress)>,  // Optional progress indicator (operation name, progress)
+    pub canvas: Canvas,  // Canvas overlay for displaying text/images
     pending_op: Option<PendingOp>,  // Pending operation to execute after next render
     // Background task handling
     bg_receiver: Option<Receiver<BackgroundResult>>,
@@ -102,6 +104,7 @@ impl App {
             header_mode: true,
             precision: None,
             progress: None,
+            canvas: Canvas::new(),
             pending_op: None,
             bg_receiver: None,
             bg_handle: None,
@@ -317,6 +320,36 @@ impl App {
     // === Key handling ===
 
     fn handle_key(&mut self, key: KeyEvent) {
+        // If canvas is visible, handle canvas-specific keys first
+        if self.canvas.visible {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    self.canvas.hide();
+                    return;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.canvas.scroll_down(1);
+                    return;
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.canvas.scroll_up(1);
+                    return;
+                }
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.canvas.scroll_down(10);
+                    return;
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.canvas.scroll_up(10);
+                    return;
+                }
+                _ => {
+                    // Ignore other keys when canvas is visible
+                    return;
+                }
+            }
+        }
+
         match self.mode {
             Mode::Normal => self.handle_normal_mode(key),
             Mode::Insert => self.handle_insert_mode(key),
@@ -940,6 +973,34 @@ impl App {
                 let txn = Transaction::SetFilter { old_state, new_state };
                 self.history.record(txn);
             }
+            Command::Canvas => {
+                // Debug command: show canvas with sample content
+                self.canvas.clear();
+                self.canvas.set_title("Debug Canvas");
+                self.canvas.add_header("Canvas Overlay Demo");
+                self.canvas.add_separator();
+                self.canvas.add_text(format!("Table: {} rows x {} cols", self.table.row_count(), self.table.col_count()));
+                self.canvas.add_text(format!("Cursor: row {}, col {}", self.view.cursor_row + 1, self.view.cursor_col + 1));
+                self.canvas.add_text(format!("Header mode: {}", if self.header_mode { "on" } else { "off" }));
+                self.canvas.add_blank();
+                self.canvas.add_header("Sample ASCII Art");
+                self.canvas.add_box(20, 5, ' ');
+                self.canvas.add_blank();
+                self.canvas.add_styled_text(
+                    "This is styled text (cyan)",
+                    Some(ratatui::style::Color::Cyan),
+                    None,
+                    false
+                );
+                self.canvas.add_styled_text(
+                    "This is bold text",
+                    None,
+                    None,
+                    true
+                );
+                self.canvas.show();
+                self.message = Some("Canvas opened (q/Esc to close, j/k to scroll)".to_string());
+            }
         }
         self.calling_mode = None;
     }
@@ -988,12 +1049,48 @@ impl App {
                             let data = self.table.get_col_cloned(at).unwrap_or_default();
                             txns.push(Transaction::DeleteCol { idx: at, data });
                         }
+                        // Canvas actions (not recorded in transactions)
+                        PluginAction::CanvasClear => {
+                            self.canvas.clear();
+                        }
+                        PluginAction::CanvasShow => {
+                            self.canvas.show();
+                        }
+                        PluginAction::CanvasHide => {
+                            self.canvas.hide();
+                        }
+                        PluginAction::CanvasSetTitle { title } => {
+                            self.canvas.set_title(title);
+                        }
+                        PluginAction::CanvasAddText { text } => {
+                            self.canvas.add_text(text);
+                        }
+                        PluginAction::CanvasAddHeader { text } => {
+                            self.canvas.add_header(text);
+                        }
+                        PluginAction::CanvasAddSeparator => {
+                            self.canvas.add_separator();
+                        }
+                        PluginAction::CanvasAddBlank => {
+                            self.canvas.add_blank();
+                        }
+                        PluginAction::CanvasAddStyledText { text, fg, bg, bold } => {
+                            self.canvas.add_styled_text(
+                                text,
+                                fg.map(|c| c.to_ratatui()),
+                                bg.map(|c| c.to_ratatui()),
+                                bold
+                            );
+                        }
+                        PluginAction::CanvasAddImage { rows, title } => {
+                            self.canvas.add_image(rows, title);
+                        }
                     }
                 }
 
                 if !txns.is_empty() {
                     self.execute(Transaction::Batch(txns));
-                            }
+                }
 
                 if let Some(msg) = result.message {
                     self.message = Some(msg);

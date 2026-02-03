@@ -35,6 +35,9 @@ pub fn render(frame: &mut Frame, app: &mut App, row_manager: Rc<RefCell<RowManag
     render_table(frame, app, chunks[0], row_manager);
     render_status_bar(frame, app, chunks[1]);
     render_command_line(frame, app, chunks[2]);
+
+    // Render canvas overlay if visible
+    app.canvas.render(frame, frame.size());
 }
 
 fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<RefCell<RowManager>>) {
