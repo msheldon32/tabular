@@ -13,7 +13,7 @@ use crate::mode::command::{Command, ReplaceCommand, ReplaceScope};
 use crate::mode::visual::SelectionInfo;
 use crate::mode::Mode;
 use crate::input::{KeyResult, SequenceAction};
-use crate::plugin::{PluginAction, CommandContext};
+use crate::plugin::{PluginAction, PluginContext};
 use crate::table::SortDirection;
 use crate::table::rowmanager::FilterType;
 use crate::transaction::Transaction;
@@ -412,11 +412,11 @@ impl App {
     }
 
     pub fn get_selection_info(&self) -> SelectionInfo {
-        mode = if (self.mode == Mode::CommandMode) {
+        let mode = if (self.mode == Mode::Command) {
             self.calling_mode.unwrap_or(self.mode)
         } else {
             self.mode
-        }
+        };
         SelectionInfo {
             mode: self.mode,
             start_row: cmp::min(self.view.support_row, self.view.cursor_row),
@@ -427,7 +427,7 @@ impl App {
     }
 
     pub fn execute_plugin(&mut self, name: &str, args: &[String]) {
-        let ctx = CommandContext {
+        let ctx = PluginContext {
             cursor_row: self.view.cursor_row,
             cursor_col: self.view.cursor_col,
             row_count: self.table.row_count(),

@@ -13,7 +13,7 @@ pub struct PluginManager {
     prompt_results: HashMap<String, String>, // question -> answer for deferred prompts
 }
 
-pub struct CommandContext {
+pub struct PluginContext {
     pub cursor_row: usize,
     pub cursor_col: usize,
     pub row_count: usize,
@@ -125,7 +125,7 @@ impl PluginManager {
         &self,
         command: &str,
         args: &[String],
-        ctx: &CommandContext,
+        ctx: &PluginContext,
         get_cell: impl Fn(usize, usize) -> Option<String>,
     ) -> LuaResult<PluginResult> {
         let script = match self.commands.get(command) {
