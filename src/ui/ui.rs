@@ -8,6 +8,7 @@ use ratatui::{
 
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::cmp;
 
 use crate::app::App;
 use crate::numeric::format::format_display;
@@ -162,19 +163,19 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<Re
                     let char_count = crate::util::char_count(buf);
 
                     // Get byte indices for slicing
-                    //let cursor_byte = crate::util::byte_index_of_char(buf, cursor_char);
-                    let next_byte = crate::util::byte_index_of_char(buf, cursor_char + 1);
-
                     // truncate the cursor from the beginning
                     let cursor_byte = if is_cursor {
+                        let original_idx = crate::util::byte_index_of_char(buf, cursor_char);
                         let original_len = buf.chars().count();
-                        let idxs = buf.char_indices().rev().nth(app.table.max_col_width-1).map(|(i,_)| i).unwrap_or(0);
-                        buf = &buf[idxs..];
-                        let truncation = original_len.saturating_sub(buf.chars().count());
-                        crate::util::byte_index_of_char(buf, cursor_char).saturating_sub(truncation)
+
+                        let endpoint = cmp::min(cmp::max(original_idx, app.table.max_col_width-1), original_len-1);
+                        let startpoint = endpoint.saturating_sub(app.table.max_col_width-1);
+                        buf = &buf[startpoint..=endpoint];
+                        crate::util::byte_index_of_char(buf, cursor_char.saturating_sub(startpoint))
                     } else {
                         0
                     };
+                    let next_byte = crate::util::byte_index_of_char(buf, cursor_char + 1);
 
                     let (before, cursor_char_str, after) = if cursor_char >= char_count {
                         // Cursor at end - show space as cursor
