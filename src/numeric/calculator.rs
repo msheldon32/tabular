@@ -27,7 +27,7 @@ impl CalcType {
         if let CalcType::Bool(x) = self { Some(*x) } else { None }
     }
 
-    fn numeric_precedence(l: CalcType, r: CalcType) -> Result<(CalcType, CalcType), CalcError> {
+    pub fn numeric_precedence(l: CalcType, r: CalcType) -> Result<(CalcType, CalcType), CalcError> {
         match (l,r) {
             (CalcType::Int(a), CalcType::Int(b)) => Ok((CalcType::Int(a), CalcType::Int(b))),
             (CalcType::Int(a), CalcType::Float(b)) => Ok((CalcType::Float(a as f64), CalcType::Float(b))),
@@ -37,14 +37,14 @@ impl CalcType {
         }
     }
 
-    fn not(x: CalcType) -> Result<CalcType, CalcError> {
+    pub fn not(x: CalcType) -> Result<CalcType, CalcError> {
         match x {
             CalcType::Bool(b) => Ok(CalcType::Bool(!b)),
             _default => Err(CalcError::EvalError("Boolean operation on non-boolean expressions".to_string()))
         }
     }
 
-    fn negate(x: CalcType) -> Result<CalcType, CalcError> {
+    pub fn negate(x: CalcType) -> Result<CalcType, CalcError> {
         match x {
             CalcType::Int(x) => Ok(CalcType::Int(-x)),
             CalcType::Float(x) => Ok(CalcType::Float(-x)),
@@ -52,7 +52,7 @@ impl CalcType {
         }
     }
 
-    fn bin_op(op: BinOp, l: CalcType, r: CalcType) -> Result<CalcType, CalcError> {
+    pub fn bin_op(op: BinOp, l: CalcType, r: CalcType) -> Result<CalcType, CalcError> {
         match op {
             BinOp::And => {
                 match (l,r) {

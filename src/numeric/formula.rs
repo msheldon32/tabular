@@ -7,6 +7,7 @@ use rand::Rng;
 
 use crate::util::{CellRef, CalcError};
 use crate::numeric::calculator::CalcType;
+use crate::numeric::parser::BinOp;
 
 /// Trait for types that can evaluate expressions and expand ranges
 /// This allows the function evaluator to delegate back to the calculator
@@ -22,8 +23,19 @@ pub fn evaluate_function<E: ExprEvaluator>(
     args: &[super::parser::Expr],
     results: &HashMap<CellRef, CalcType>,
 ) -> Result<CalcType, CalcError> {
-    // I am just killing this function entirely for now, this will require substantial revision
-    Err(CalcError::EvalError("Functions have been removed for now".to_string()))
+    // === Aggregate Functions ===
+    match name {
+        "SUM" => {
+            require_args(name, args, 1)?;
+            let mut vals = evaluator.expand(&args[0], results)?;
+
+            Ok(vals.iter().try_fold(CalcType::Int(0), |acc, v| {
+                CalcType::bin_op(BinOp::Add, acc, v.clone())
+            })?)
+        },
+        // I am just killing this function entirely for now, this will require substantial revision
+        _default => Err(CalcError::EvalError("(Most) functions have been removed for now".to_string()))
+    }
 }
 
 fn require_args(name: &str, args: &[super::parser::Expr], expected: usize) -> Result<(), CalcError> {
