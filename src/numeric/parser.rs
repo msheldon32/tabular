@@ -1,316 +1,221 @@
-//! Numeric parser with proper lexer/tokenizer and structured output.
+//! Formula parser for spreadsheet-like calculations.
 //!
-//! This module provides a full parser for numeric strings that can handle:
-//! - Plain integers and floats
-//! - Scientific notation (1.23e-5)
-//! - Currency values ($1,234.56, €1.234,56)
-//! - Percentages (15%, 15.5%)
-//! - Numbers with thousand separators (1,234,567.89)
-//! - Negative values including accounting format (parentheses)
-//! - Hexadecimal (0x1A2B), octal (0o755), binary (0b1010)
+//! This module provides a proper lexer and parser for formula expressions like:
+//! - Cell references: A1, AA123
+//! - Ranges: A1:B10, A:A, 1:5
+//! - Function calls: SUM(A1:A10), AVG(B1:B5)
+//! - Arithmetic: A1 + B1 * 2
+//! - Nested expressions: SUM(A1:A5) + SQRT(B1)
 
 use std::fmt;
 
-/// Tokens produced by the lexer
+// ============================================================================
+// Tokens
+// ============================================================================
+
+/// Token types produced by the lexer
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    /// A sequence of digits
-    Digits(String),
-    /// Decimal point
-    Decimal,
-    /// Sign (+ or -)
-    Sign(char),
-    /// Exponent marker (e or E)
-    Exponent,
-    /// Percentage sign
-    Percent,
-    /// Currency symbol ($, €, £, ¥, etc.)
-    Currency(char),
-    /// Thousand separator (comma in US format)
+    /// A number literal (integer or float)
+    Number(f64),
+    /// An identifier (function name or could be part of cell ref)
+    Ident(String),
+    /// A cell reference like A1, AA123
+    CellRef { col: String, row: usize },
+    /// A colon (used in ranges)
+    Colon,
+    /// Arithmetic operators
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Caret,   // ^
+    Percent, // % (modulo)
+    /// Comparison operators
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    /// Parentheses
+    LParen,
+    RParen,
+    /// Comma (argument separator)
     Comma,
-    /// Open parenthesis (for accounting negative)
-    OpenParen,
-    /// Close parenthesis
-    CloseParen,
-    /// Hex prefix 0x or 0X
-    HexPrefix,
-    /// Octal prefix 0o or 0O
-    OctalPrefix,
-    /// Binary prefix 0b or 0B
-    BinaryPrefix,
-    /// Hex digits (a-f, A-F)
-    HexDigits(String),
-    /// Whitespace
-    Whitespace,
-    /// Unknown character
-    Unknown(char),
+    /// End of input
+    Eof,
 }
 
-/// The detected format of a numeric value
-#[derive(Debug, Clone, PartialEq)]
-pub enum NumericFormat {
-    /// Plain integer or float
-    Plain,
-    /// Currency with the symbol used
-    Currency(char),
-    /// Percentage (value is stored as decimal, e.g., 15% -> 0.15)
-    Percentage,
-    /// Scientific notation with original exponent
-    Scientific { exponent: i32 },
-    /// Number had thousand separators
-    Formatted,
-    /// Hexadecimal number
-    Hexadecimal,
-    /// Octal number
-    Octal,
-    /// Binary number
-    Binary,
-}
-
-/// A parsed numeric value with format information
-#[derive(Debug, Clone, PartialEq)]
-pub struct NumericValue {
-    /// The numeric value as f64
-    pub value: f64,
-    /// The detected format
-    pub format: NumericFormat,
-    /// Whether the number was negative
-    pub is_negative: bool,
-    /// Whether parentheses were used for negative (accounting style)
-    pub accounting_negative: bool,
-    /// Number of decimal places in original input (if applicable)
-    pub decimal_places: Option<usize>,
-}
-
-impl NumericValue {
-    /// Create a new NumericValue
-    pub fn new(value: f64, format: NumericFormat) -> Self {
-        Self {
-            value,
-            format,
-            is_negative: value < 0.0,
-            accounting_negative: false,
-            decimal_places: None,
-        }
-    }
-
-    /// Get the value as an integer if it has no fractional part
-    pub fn as_integer(&self) -> Option<i64> {
-        if self.value.fract() == 0.0 && self.value.abs() < i64::MAX as f64 {
-            Some(self.value as i64)
-        } else {
-            None
-        }
-    }
-}
-
-impl fmt::Display for NumericValue {
+impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.format {
-            NumericFormat::Plain => {
-                if let Some(i) = self.as_integer() {
-                    write!(f, "{}", i)
-                } else {
-                    write!(f, "{}", self.value)
-                }
-            }
-            NumericFormat::Currency(sym) => {
-                if self.is_negative {
-                    if self.accounting_negative {
-                        write!(f, "({}{})", sym, format_with_commas(self.value.abs()))
-                    } else {
-                        write!(f, "-{}{}", sym, format_with_commas(self.value.abs()))
-                    }
-                } else {
-                    write!(f, "{}{}", sym, format_with_commas(self.value))
-                }
-            }
-            NumericFormat::Percentage => {
-                write!(f, "{}%", self.value * 100.0)
-            }
-            NumericFormat::Scientific { exponent } => {
-                write!(f, "{}e{}", self.value / 10f64.powi(*exponent), exponent)
-            }
-            NumericFormat::Formatted => {
-                if self.is_negative {
-                    write!(f, "-{}", format_with_commas(self.value.abs()))
-                } else {
-                    write!(f, "{}", format_with_commas(self.value))
-                }
-            }
-            NumericFormat::Hexadecimal => {
-                if let Some(i) = self.as_integer() {
-                    write!(f, "0x{:X}", i.unsigned_abs())
-                } else {
-                    write!(f, "{}", self.value)
-                }
-            }
-            NumericFormat::Octal => {
-                if let Some(i) = self.as_integer() {
-                    write!(f, "0o{:o}", i.unsigned_abs())
-                } else {
-                    write!(f, "{}", self.value)
-                }
-            }
-            NumericFormat::Binary => {
-                if let Some(i) = self.as_integer() {
-                    write!(f, "0b{:b}", i.unsigned_abs())
-                } else {
-                    write!(f, "{}", self.value)
-                }
-            }
+        match self {
+            Token::Number(n) => write!(f, "{}", n),
+            Token::Ident(s) => write!(f, "{}", s),
+            Token::CellRef { col, row } => write!(f, "{}{}", col, row),
+            Token::Colon => write!(f, ":"),
+            Token::Plus => write!(f, "+"),
+            Token::Minus => write!(f, "-"),
+            Token::Star => write!(f, "*"),
+            Token::Slash => write!(f, "/"),
+            Token::Caret => write!(f, "^"),
+            Token::Percent => write!(f, "%"),
+            Token::Eq => write!(f, "="),
+            Token::Ne => write!(f, "!="),
+            Token::Lt => write!(f, "<"),
+            Token::Le => write!(f, "<="),
+            Token::Gt => write!(f, ">"),
+            Token::Ge => write!(f, ">="),
+            Token::LParen => write!(f, "("),
+            Token::RParen => write!(f, ")"),
+            Token::Comma => write!(f, ","),
+            Token::Eof => write!(f, "EOF"),
         }
     }
 }
 
-/// Error type for parsing failures
+// ============================================================================
+// AST
+// ============================================================================
+
+/// Abstract Syntax Tree nodes for formulas
+#[derive(Debug, Clone, PartialEq)]
+pub enum Expr {
+    /// A numeric literal
+    Number(f64),
+    /// A cell reference (col letters, row number 1-indexed)
+    CellRef { col: String, row: usize },
+    /// A range between two cell references
+    Range { start: Box<Expr>, end: Box<Expr> },
+    /// A row range like 1:5
+    RowRange { start: usize, end: usize },
+    /// A column range like A:C
+    ColRange { start: String, end: String },
+    /// A function call with arguments
+    FnCall { name: String, args: Vec<Expr> },
+    /// Binary operation
+    BinOp { op: BinOp, left: Box<Expr>, right: Box<Expr> },
+    /// Unary negation
+    Neg(Box<Expr>),
+}
+
+/// Binary operators
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Pow,
+    Mod,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+impl fmt::Display for BinOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BinOp::Add => write!(f, "+"),
+            BinOp::Sub => write!(f, "-"),
+            BinOp::Mul => write!(f, "*"),
+            BinOp::Div => write!(f, "/"),
+            BinOp::Pow => write!(f, "^"),
+            BinOp::Mod => write!(f, "%"),
+            BinOp::Eq => write!(f, "="),
+            BinOp::Ne => write!(f, "!="),
+            BinOp::Lt => write!(f, "<"),
+            BinOp::Le => write!(f, "<="),
+            BinOp::Gt => write!(f, ">"),
+            BinOp::Ge => write!(f, ">="),
+        }
+    }
+}
+
+// ============================================================================
+// Parse Error
+// ============================================================================
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParseError {
-    /// Input was empty
-    EmptyInput,
-    /// Unexpected character at position
-    UnexpectedChar { char: char, position: usize },
-    /// Invalid number format
-    InvalidFormat(String),
-    /// Multiple decimal points
-    MultipleDecimals,
-    /// Multiple signs
-    MultipleSigns,
-    /// Invalid hex digit
-    InvalidHexDigit(char),
-    /// Invalid octal digit
-    InvalidOctalDigit(char),
-    /// Invalid binary digit
-    InvalidBinaryDigit(char),
-    /// Number overflow
-    Overflow,
-    /// Mismatched parentheses
-    MismatchedParentheses,
+    UnexpectedChar(char, usize),
+    UnexpectedToken { expected: String, found: Token },
+    UnexpectedEof,
+    InvalidNumber(String),
+    InvalidCellRef(String),
+    EmptyExpression,
 }
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ParseError::EmptyInput => write!(f, "empty input"),
-            ParseError::UnexpectedChar { char, position } => {
-                write!(f, "unexpected character '{}' at position {}", char, position)
+            ParseError::UnexpectedChar(c, pos) => {
+                write!(f, "unexpected character '{}' at position {}", c, pos)
             }
-            ParseError::InvalidFormat(msg) => write!(f, "invalid format: {}", msg),
-            ParseError::MultipleDecimals => write!(f, "multiple decimal points"),
-            ParseError::MultipleSigns => write!(f, "multiple signs"),
-            ParseError::InvalidHexDigit(c) => write!(f, "invalid hex digit: {}", c),
-            ParseError::InvalidOctalDigit(c) => write!(f, "invalid octal digit: {}", c),
-            ParseError::InvalidBinaryDigit(c) => write!(f, "invalid binary digit: {}", c),
-            ParseError::Overflow => write!(f, "number overflow"),
-            ParseError::MismatchedParentheses => write!(f, "mismatched parentheses"),
+            ParseError::UnexpectedToken { expected, found } => {
+                write!(f, "expected {}, found {}", expected, found)
+            }
+            ParseError::UnexpectedEof => write!(f, "unexpected end of input"),
+            ParseError::InvalidNumber(s) => write!(f, "invalid number: {}", s),
+            ParseError::InvalidCellRef(s) => write!(f, "invalid cell reference: {}", s),
+            ParseError::EmptyExpression => write!(f, "empty expression"),
         }
     }
 }
 
 impl std::error::Error for ParseError {}
 
-/// The lexer that tokenizes input strings
+// ============================================================================
+// Lexer
+// ============================================================================
+
 pub struct Lexer<'a> {
     input: &'a str,
     chars: std::iter::Peekable<std::str::CharIndices<'a>>,
+    pos: usize,
 }
 
 impl<'a> Lexer<'a> {
-    /// Create a new lexer for the given input
     pub fn new(input: &'a str) -> Self {
         Self {
             input,
             chars: input.char_indices().peekable(),
+            pos: 0,
         }
     }
 
-    /// Tokenize the entire input
-    pub fn tokenize(&mut self) -> Vec<Token> {
+    /// Tokenize the entire input into a Vec of tokens
+    pub fn tokenize(mut self) -> Result<Vec<Token>, ParseError> {
         let mut tokens = Vec::new();
-        while let Some(token) = self.next_token() {
-            tokens.push(token);
+        loop {
+            let tok = self.next_token()?;
+            if tok == Token::Eof {
+                tokens.push(tok);
+                break;
+            }
+            tokens.push(tok);
         }
-        tokens
+        Ok(tokens)
     }
 
-    fn next_token(&mut self) -> Option<Token> {
-        let (pos, ch) = self.chars.next()?;
+    fn peek_char(&mut self) -> Option<char> {
+        self.chars.peek().map(|&(_, c)| c)
+    }
 
-        match ch {
-            // Whitespace
-            ' ' | '\t' | '\n' | '\r' => {
-                self.skip_whitespace();
-                Some(Token::Whitespace)
-            }
-
-            // Signs
-            '+' | '-' => Some(Token::Sign(ch)),
-
-            // Decimal point
-            '.' => Some(Token::Decimal),
-
-            // Comma (thousand separator)
-            ',' => Some(Token::Comma),
-
-            // Parentheses
-            '(' => Some(Token::OpenParen),
-            ')' => Some(Token::CloseParen),
-
-            // Percent
-            '%' => Some(Token::Percent),
-
-            // Currency symbols
-            '$' | '€' | '£' | '¥' | '₹' | '₽' | '₩' | '₪' | '฿' => Some(Token::Currency(ch)),
-
-            // Exponent
-            'e' | 'E' => Some(Token::Exponent),
-
-            // Digits - need to check for 0x, 0o, 0b prefixes
-            '0' => {
-                if let Some(&(_, next_ch)) = self.chars.peek() {
-                    match next_ch {
-                        'x' | 'X' => {
-                            self.chars.next(); // consume the x
-                            Some(Token::HexPrefix)
-                        }
-                        'o' | 'O' => {
-                            self.chars.next(); // consume the o
-                            Some(Token::OctalPrefix)
-                        }
-                        'b' | 'B' => {
-                            self.chars.next(); // consume the b
-                            Some(Token::BinaryPrefix)
-                        }
-                        _ => {
-                            let digits = self.collect_digits(ch);
-                            Some(Token::Digits(digits))
-                        }
-                    }
-                } else {
-                    Some(Token::Digits("0".to_string()))
-                }
-            }
-
-            // Regular digits
-            '1'..='9' => {
-                let digits = self.collect_digits(ch);
-                Some(Token::Digits(digits))
-            }
-
-            // Hex digits (when we're after a hex prefix)
-            'a'..='f' | 'A'..='F' => {
-                let hex = self.collect_hex_digits(ch);
-                Some(Token::HexDigits(hex))
-            }
-
-            // Unknown
-            _ => Some(Token::Unknown(ch)),
+    fn next_char(&mut self) -> Option<(usize, char)> {
+        let result = self.chars.next();
+        if let Some((pos, _)) = result {
+            self.pos = pos;
         }
+        result
     }
 
     fn skip_whitespace(&mut self) {
-        while let Some(&(_, ch)) = self.chars.peek() {
-            if ch.is_whitespace() {
+        while let Some(&(_, c)) = self.chars.peek() {
+            if c.is_whitespace() {
                 self.chars.next();
             } else {
                 break;
@@ -318,618 +223,726 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn collect_digits(&mut self, first: char) -> String {
-        let mut digits = String::new();
-        digits.push(first);
-        while let Some(&(_, ch)) = self.chars.peek() {
-            if ch.is_ascii_digit() {
-                digits.push(ch);
-                self.chars.next();
-            } else {
-                break;
+    fn next_token(&mut self) -> Result<Token, ParseError> {
+        self.skip_whitespace();
+
+        let (pos, ch) = match self.next_char() {
+            Some(x) => x,
+            None => return Ok(Token::Eof),
+        };
+
+        match ch {
+            // Single-char tokens
+            '+' => Ok(Token::Plus),
+            '-' => Ok(Token::Minus),
+            '*' => Ok(Token::Star),
+            '/' => Ok(Token::Slash),
+            '^' => Ok(Token::Caret),
+            '%' => Ok(Token::Percent),
+            '(' => Ok(Token::LParen),
+            ')' => Ok(Token::RParen),
+            ',' => Ok(Token::Comma),
+            ':' => Ok(Token::Colon),
+
+            // Comparison operators
+            '=' => {
+                if self.peek_char() == Some('=') {
+                    self.next_char();
+                }
+                Ok(Token::Eq)
             }
+            '!' => {
+                if self.peek_char() == Some('=') {
+                    self.next_char();
+                    Ok(Token::Ne)
+                } else {
+                    Err(ParseError::UnexpectedChar('!', pos))
+                }
+            }
+            '<' => {
+                if self.peek_char() == Some('=') {
+                    self.next_char();
+                    Ok(Token::Le)
+                } else if self.peek_char() == Some('>') {
+                    self.next_char();
+                    Ok(Token::Ne)
+                } else {
+                    Ok(Token::Lt)
+                }
+            }
+            '>' => {
+                if self.peek_char() == Some('=') {
+                    self.next_char();
+                    Ok(Token::Ge)
+                } else {
+                    Ok(Token::Gt)
+                }
+            }
+
+            // Numbers
+            '0'..='9' | '.' => self.read_number(ch),
+
+            // Identifiers or cell references
+            'A'..='Z' | 'a'..='z' | '_' => self.read_ident_or_cell(ch),
+
+            _ => Err(ParseError::UnexpectedChar(ch, pos)),
         }
-        digits
     }
 
-    fn collect_hex_digits(&mut self, first: char) -> String {
-        let mut digits = String::new();
-        digits.push(first);
-        while let Some(&(_, ch)) = self.chars.peek() {
-            if ch.is_ascii_hexdigit() {
-                digits.push(ch);
-                self.chars.next();
+    fn read_number(&mut self, first: char) -> Result<Token, ParseError> {
+        let mut s = String::new();
+        s.push(first);
+
+        // Collect digits and at most one decimal point
+        let mut has_dot = first == '.';
+        while let Some(&(_, c)) = self.chars.peek() {
+            if c.is_ascii_digit() {
+                s.push(c);
+                self.next_char();
+            } else if c == '.' && !has_dot {
+                has_dot = true;
+                s.push(c);
+                self.next_char();
             } else {
                 break;
             }
         }
-        digits
+
+        // Check for scientific notation
+        if let Some(&(_, c)) = self.chars.peek() {
+            if c == 'e' || c == 'E' {
+                s.push(c);
+                self.next_char();
+
+                // Optional sign
+                if let Some(&(_, sign)) = self.chars.peek() {
+                    if sign == '+' || sign == '-' {
+                        s.push(sign);
+                        self.next_char();
+                    }
+                }
+
+                // Exponent digits
+                while let Some(&(_, c)) = self.chars.peek() {
+                    if c.is_ascii_digit() {
+                        s.push(c);
+                        self.next_char();
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        let n: f64 = s.parse().map_err(|_| ParseError::InvalidNumber(s))?;
+        Ok(Token::Number(n))
+    }
+
+    fn read_ident_or_cell(&mut self, first: char) -> Result<Token, ParseError> {
+        let mut s = String::new();
+        s.push(first);
+
+        // Collect alphanumeric characters
+        while let Some(&(_, c)) = self.chars.peek() {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                s.push(c);
+                self.next_char();
+            } else {
+                break;
+            }
+        }
+
+        // Check if this looks like a cell reference (letters followed by digits)
+        if let Some((col, row)) = parse_cell_ref_parts(&s) {
+            Ok(Token::CellRef { col, row })
+        } else {
+            Ok(Token::Ident(s))
+        }
     }
 }
 
-/// The parser that converts tokens into a NumericValue
+/// Try to parse a string as a cell reference (e.g., "A1", "AA123")
+/// Returns (column_letters, row_number) if valid
+fn parse_cell_ref_parts(s: &str) -> Option<(String, usize)> {
+    let s_upper = s.to_uppercase();
+    let mut chars = s_upper.chars().peekable();
+
+    // Collect letters (column)
+    let mut col = String::new();
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_alphabetic() {
+            col.push(c);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    if col.is_empty() {
+        return None;
+    }
+
+    // Collect digits (row)
+    let mut row_str = String::new();
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_digit() {
+            row_str.push(c);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    // Must have digits and no trailing characters
+    if row_str.is_empty() || chars.next().is_some() {
+        return None;
+    }
+
+    let row: usize = row_str.parse().ok()?;
+    if row == 0 {
+        return None; // Row 0 is invalid (1-indexed)
+    }
+
+    Some((col, row))
+}
+
+// ============================================================================
+// Parser
+// ============================================================================
+
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
 }
 
 impl Parser {
-    /// Create a new parser from tokens
     pub fn new(tokens: Vec<Token>) -> Self {
         Self { tokens, pos: 0 }
     }
 
-    /// Parse the tokens into a NumericValue
-    pub fn parse(&mut self) -> Result<NumericValue, ParseError> {
-        // Filter out whitespace
-        self.tokens.retain(|t| !matches!(t, Token::Whitespace));
+    /// Parse a formula string into an AST
+    pub fn parse_formula(input: &str) -> Result<Expr, ParseError> {
+        let input = input.trim();
 
-        if self.tokens.is_empty() {
-            return Err(ParseError::EmptyInput);
-        }
+        // Skip leading '=' if present
+        let input = input.strip_prefix('=').unwrap_or(input);
 
-        // Check for special formats first
-        if self.is_hex() {
-            return self.parse_hex();
-        }
-        if self.is_octal() {
-            return self.parse_octal();
-        }
-        if self.is_binary() {
-            return self.parse_binary();
+        if input.is_empty() {
+            return Err(ParseError::EmptyExpression);
         }
 
-        // Parse standard number formats
-        self.parse_standard()
+        let lexer = Lexer::new(input);
+        let tokens = lexer.tokenize()?;
+        let mut parser = Parser::new(tokens);
+        parser.parse_expr()
     }
 
-    fn peek(&self) -> Option<&Token> {
-        self.tokens.get(self.pos)
+    fn peek(&self) -> &Token {
+        self.tokens.get(self.pos).unwrap_or(&Token::Eof)
     }
 
-    fn advance(&mut self) -> Option<&Token> {
-        let token = self.tokens.get(self.pos);
+    fn advance(&mut self) -> Token {
+        let tok = self.tokens.get(self.pos).cloned().unwrap_or(Token::Eof);
         self.pos += 1;
-        token
+        tok
     }
 
-    fn is_hex(&self) -> bool {
-        self.tokens.iter().any(|t| matches!(t, Token::HexPrefix))
-    }
-
-    fn is_octal(&self) -> bool {
-        self.tokens.iter().any(|t| matches!(t, Token::OctalPrefix))
-    }
-
-    fn is_binary(&self) -> bool {
-        self.tokens.iter().any(|t| matches!(t, Token::BinaryPrefix))
-    }
-
-    fn parse_hex(&mut self) -> Result<NumericValue, ParseError> {
-        let mut is_negative = false;
-
-        // Optional sign
-        if let Some(Token::Sign(s)) = self.peek() {
-            is_negative = *s == '-';
-            self.advance();
+    fn expect(&mut self, expected: Token) -> Result<(), ParseError> {
+        let tok = self.advance();
+        if tok == expected {
+            Ok(())
+        } else {
+            Err(ParseError::UnexpectedToken {
+                expected: expected.to_string(),
+                found: tok,
+            })
         }
+    }
 
-        // Expect hex prefix
-        if !matches!(self.advance(), Some(Token::HexPrefix)) {
-            return Err(ParseError::InvalidFormat("expected hex prefix".into()));
-        }
+    /// Parse an expression (entry point)
+    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+        self.parse_comparison()
+    }
 
-        // Collect hex digits
-        let mut hex_str = String::new();
-        while let Some(token) = self.peek() {
-            match token {
-                Token::Digits(d) => {
-                    hex_str.push_str(d);
-                    self.advance();
-                }
-                Token::HexDigits(h) => {
-                    hex_str.push_str(h);
-                    self.advance();
-                }
+    /// Parse comparison operators (lowest precedence)
+    fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_additive()?;
+
+        loop {
+            let op = match self.peek() {
+                Token::Eq => BinOp::Eq,
+                Token::Ne => BinOp::Ne,
+                Token::Lt => BinOp::Lt,
+                Token::Le => BinOp::Le,
+                Token::Gt => BinOp::Gt,
+                Token::Ge => BinOp::Ge,
                 _ => break,
-            }
+            };
+            self.advance();
+            let right = self.parse_additive()?;
+            left = Expr::BinOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
         }
 
-        if hex_str.is_empty() {
-            return Err(ParseError::InvalidFormat("no hex digits".into()));
-        }
-
-        let value = u64::from_str_radix(&hex_str, 16)
-            .map_err(|_| ParseError::Overflow)? as f64;
-
-        let value = if is_negative { -value } else { value };
-
-        Ok(NumericValue {
-            value,
-            format: NumericFormat::Hexadecimal,
-            is_negative,
-            accounting_negative: false,
-            decimal_places: None,
-        })
+        Ok(left)
     }
 
-    fn parse_octal(&mut self) -> Result<NumericValue, ParseError> {
-        let mut is_negative = false;
+    /// Parse additive operators (+ -)
+    fn parse_additive(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_multiplicative()?;
 
-        // Optional sign
-        if let Some(Token::Sign(s)) = self.peek() {
-            is_negative = *s == '-';
+        loop {
+            let op = match self.peek() {
+                Token::Plus => BinOp::Add,
+                Token::Minus => BinOp::Sub,
+                _ => break,
+            };
             self.advance();
+            let right = self.parse_multiplicative()?;
+            left = Expr::BinOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
         }
 
-        // Expect octal prefix
-        if !matches!(self.advance(), Some(Token::OctalPrefix)) {
-            return Err(ParseError::InvalidFormat("expected octal prefix".into()));
-        }
-
-        // Collect octal digits
-        let mut oct_str = String::new();
-        while let Some(Token::Digits(d)) = self.peek() {
-            // Validate octal digits
-            for c in d.chars() {
-                if !('0'..='7').contains(&c) {
-                    return Err(ParseError::InvalidOctalDigit(c));
-                }
-            }
-            oct_str.push_str(d);
-            self.advance();
-        }
-
-        if oct_str.is_empty() {
-            return Err(ParseError::InvalidFormat("no octal digits".into()));
-        }
-
-        let value = u64::from_str_radix(&oct_str, 8)
-            .map_err(|_| ParseError::Overflow)? as f64;
-
-        let value = if is_negative { -value } else { value };
-
-        Ok(NumericValue {
-            value,
-            format: NumericFormat::Octal,
-            is_negative,
-            accounting_negative: false,
-            decimal_places: None,
-        })
+        Ok(left)
     }
 
-    fn parse_binary(&mut self) -> Result<NumericValue, ParseError> {
-        let mut is_negative = false;
+    /// Parse multiplicative operators (* / %)
+    fn parse_multiplicative(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_power()?;
 
-        // Optional sign
-        if let Some(Token::Sign(s)) = self.peek() {
-            is_negative = *s == '-';
+        loop {
+            let op = match self.peek() {
+                Token::Star => BinOp::Mul,
+                Token::Slash => BinOp::Div,
+                Token::Percent => BinOp::Mod,
+                _ => break,
+            };
             self.advance();
+            let right = self.parse_power()?;
+            left = Expr::BinOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
         }
 
-        // Expect binary prefix
-        if !matches!(self.advance(), Some(Token::BinaryPrefix)) {
-            return Err(ParseError::InvalidFormat("expected binary prefix".into()));
-        }
-
-        // Collect binary digits
-        let mut bin_str = String::new();
-        while let Some(Token::Digits(d)) = self.peek() {
-            // Validate binary digits
-            for c in d.chars() {
-                if c != '0' && c != '1' {
-                    return Err(ParseError::InvalidBinaryDigit(c));
-                }
-            }
-            bin_str.push_str(d);
-            self.advance();
-        }
-
-        if bin_str.is_empty() {
-            return Err(ParseError::InvalidFormat("no binary digits".into()));
-        }
-
-        let value = u64::from_str_radix(&bin_str, 2)
-            .map_err(|_| ParseError::Overflow)? as f64;
-
-        let value = if is_negative { -value } else { value };
-
-        Ok(NumericValue {
-            value,
-            format: NumericFormat::Binary,
-            is_negative,
-            accounting_negative: false,
-            decimal_places: None,
-        })
+        Ok(left)
     }
 
-    fn parse_standard(&mut self) -> Result<NumericValue, ParseError> {
-        let mut is_negative = false;
-        let mut accounting_negative = false;
-        let mut currency: Option<char> = None;
-        let mut has_commas = false;
-        let mut is_percentage = false;
-        let mut decimal_places: Option<usize> = None;
+    /// Parse power operator (^) - right associative
+    fn parse_power(&mut self) -> Result<Expr, ParseError> {
+        let left = self.parse_unary()?;
 
-        // Check for opening parenthesis (accounting negative)
-        if matches!(self.peek(), Some(Token::OpenParen)) {
-            accounting_negative = true;
-            is_negative = true;
+        if matches!(self.peek(), Token::Caret) {
             self.advance();
+            let right = self.parse_power()?; // Right associative
+            Ok(Expr::BinOp {
+                op: BinOp::Pow,
+                left: Box::new(left),
+                right: Box::new(right),
+            })
+        } else {
+            Ok(left)
         }
+    }
 
-        // Check for leading sign
-        if let Some(Token::Sign(s)) = self.peek() {
-            if *s == '-' {
-                is_negative = true;
+    /// Parse unary operators (-)
+    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+        if matches!(self.peek(), Token::Minus) {
+            self.advance();
+            let expr = self.parse_unary()?;
+            Ok(Expr::Neg(Box::new(expr)))
+        } else {
+            self.parse_primary()
+        }
+    }
+
+    /// Parse primary expressions (numbers, cell refs, function calls, parentheses)
+    fn parse_primary(&mut self) -> Result<Expr, ParseError> {
+        match self.peek().clone() {
+            Token::Number(n) => {
+                self.advance();
+                Ok(Expr::Number(n))
             }
-            self.advance();
-        }
 
-        // Check for currency symbol
-        if let Some(Token::Currency(c)) = self.peek() {
-            currency = Some(*c);
-            self.advance();
-        }
+            Token::CellRef { col, row } => {
+                self.advance();
+                // Check if this is the start of a range
+                if matches!(self.peek(), Token::Colon) {
+                    self.advance();
+                    self.parse_range_end(col, row)
+                } else {
+                    Ok(Expr::CellRef { col, row })
+                }
+            }
 
-        // Build the number string
-        let mut num_str = String::new();
-        let mut has_decimal = false;
-        let mut has_exponent = false;
-        let mut exponent_value: Option<i32> = None;
-        let mut digits_after_decimal = 0usize;
+            Token::Ident(name) => {
+                self.advance();
+                // Check if this is a function call
+                if matches!(self.peek(), Token::LParen) {
+                    self.parse_function_call(name)
+                } else if matches!(self.peek(), Token::Colon) {
+                    // Could be a column range like A:C
+                    self.advance();
+                    self.parse_col_range(name)
+                } else {
+                    // Just an identifier (shouldn't happen in valid formulas)
+                    Err(ParseError::InvalidCellRef(name))
+                }
+            }
 
-        while let Some(token) = self.peek() {
-            match token {
-                Token::Digits(d) => {
-                    if has_decimal && !has_exponent {
-                        digits_after_decimal += d.len();
-                    }
-                    num_str.push_str(d);
-                    self.advance();
-                }
-                Token::Decimal => {
-                    if has_decimal {
-                        return Err(ParseError::MultipleDecimals);
-                    }
-                    has_decimal = true;
-                    num_str.push('.');
-                    self.advance();
-                }
-                Token::Comma => {
-                    // Thousand separator - skip but note it
-                    has_commas = true;
-                    self.advance();
-                }
-                Token::Exponent => {
-                    if has_exponent {
-                        return Err(ParseError::InvalidFormat("multiple exponents".into()));
-                    }
-                    has_exponent = true;
-                    num_str.push('e');
-                    self.advance();
+            Token::LParen => {
+                self.advance();
+                let expr = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(expr)
+            }
 
-                    // Optional sign after exponent
-                    if let Some(Token::Sign(s)) = self.peek() {
-                        num_str.push(*s);
-                        self.advance();
-                    }
-
-                    // Exponent digits
-                    if let Some(Token::Digits(d)) = self.peek() {
-                        let exp_str = d.clone();
-                        num_str.push_str(&exp_str);
-                        exponent_value = exp_str.parse().ok();
-                        self.advance();
-                    }
-                }
-                Token::Percent => {
-                    is_percentage = true;
+            // Row range starting with a number: 1:5
+            Token::Number(n) if n.fract() == 0.0 && n >= 1.0 => {
+                self.advance();
+                if matches!(self.peek(), Token::Colon) {
                     self.advance();
-                    break;
-                }
-                Token::CloseParen => {
-                    if !accounting_negative {
-                        return Err(ParseError::MismatchedParentheses);
-                    }
-                    self.advance();
-                    break;
-                }
-                Token::Currency(_) => {
-                    // Currency at the end (some formats put it there)
-                    if currency.is_none() {
-                        if let Token::Currency(c) = token {
-                            currency = Some(*c);
+                    if let Token::Number(end) = self.peek().clone() {
+                        if end.fract() == 0.0 && end >= 1.0 {
+                            self.advance();
+                            return Ok(Expr::RowRange {
+                                start: n as usize,
+                                end: end as usize,
+                            });
                         }
                     }
-                    self.advance();
-                    break;
+                    Err(ParseError::UnexpectedToken {
+                        expected: "row number".to_string(),
+                        found: self.peek().clone(),
+                    })
+                } else {
+                    Ok(Expr::Number(n))
                 }
-                _ => break,
+            }
+
+            Token::Eof => Err(ParseError::UnexpectedEof),
+
+            other => Err(ParseError::UnexpectedToken {
+                expected: "number, cell reference, or function".to_string(),
+                found: other,
+            }),
+        }
+    }
+
+    /// Parse the end of a range (after seeing "A1:")
+    fn parse_range_end(&mut self, start_col: String, start_row: usize) -> Result<Expr, ParseError> {
+        match self.peek().clone() {
+            Token::CellRef { col, row } => {
+                self.advance();
+                Ok(Expr::Range {
+                    start: Box::new(Expr::CellRef {
+                        col: start_col,
+                        row: start_row,
+                    }),
+                    end: Box::new(Expr::CellRef { col, row }),
+                })
+            }
+            _ => Err(ParseError::UnexpectedToken {
+                expected: "cell reference".to_string(),
+                found: self.peek().clone(),
+            }),
+        }
+    }
+
+    /// Parse a column range like A:C (after seeing "A:")
+    fn parse_col_range(&mut self, start: String) -> Result<Expr, ParseError> {
+        match self.peek().clone() {
+            Token::Ident(end) => {
+                // Verify it's all letters
+                if end.chars().all(|c| c.is_ascii_alphabetic()) {
+                    self.advance();
+                    Ok(Expr::ColRange {
+                        start: start.to_uppercase(),
+                        end: end.to_uppercase(),
+                    })
+                } else {
+                    Err(ParseError::InvalidCellRef(end))
+                }
+            }
+            _ => Err(ParseError::UnexpectedToken {
+                expected: "column letter".to_string(),
+                found: self.peek().clone(),
+            }),
+        }
+    }
+
+    /// Parse a function call like SUM(A1:A10)
+    fn parse_function_call(&mut self, name: String) -> Result<Expr, ParseError> {
+        self.expect(Token::LParen)?;
+
+        let mut args = Vec::new();
+
+        // Handle empty argument list
+        if !matches!(self.peek(), Token::RParen) {
+            args.push(self.parse_expr()?);
+
+            while matches!(self.peek(), Token::Comma) {
+                self.advance();
+                args.push(self.parse_expr()?);
             }
         }
 
-        if num_str.is_empty() {
-            return Err(ParseError::InvalidFormat("no digits found".into()));
-        }
+        self.expect(Token::RParen)?;
 
-        // Parse the number
-        let mut value: f64 = num_str.parse()
-            .map_err(|_| ParseError::InvalidFormat(format!("cannot parse '{}'", num_str)))?;
-
-        // Apply percentage conversion
-        if is_percentage {
-            value /= 100.0;
-        }
-
-        // Apply negative
-        if is_negative {
-            value = -value;
-        }
-
-        // Determine format
-        let format = if let Some(c) = currency {
-            NumericFormat::Currency(c)
-        } else if is_percentage {
-            NumericFormat::Percentage
-        } else if has_exponent {
-            NumericFormat::Scientific {
-                exponent: exponent_value.unwrap_or(0),
-            }
-        } else if has_commas {
-            NumericFormat::Formatted
-        } else {
-            NumericFormat::Plain
-        };
-
-        if has_decimal {
-            decimal_places = Some(digits_after_decimal);
-        }
-
-        Ok(NumericValue {
-            value,
-            format,
-            is_negative,
-            accounting_negative,
-            decimal_places,
+        Ok(Expr::FnCall {
+            name: name.to_uppercase(),
+            args,
         })
     }
 }
 
-/// Parse a string into a NumericValue
-pub fn parse(s: &str) -> Result<NumericValue, ParseError> {
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        return Err(ParseError::EmptyInput);
-    }
+// ============================================================================
+// Convenience functions
+// ============================================================================
 
-    let mut lexer = Lexer::new(trimmed);
-    let tokens = lexer.tokenize();
-    let mut parser = Parser::new(tokens);
-    parser.parse()
+/// Parse a formula string into an AST
+pub fn parse(input: &str) -> Result<Expr, ParseError> {
+    Parser::parse_formula(input)
 }
 
-/// Parse a string into an f64, returning None on failure (compatible with old API)
-pub fn parse_numeric(s: &str) -> Option<f64> {
-    parse(s).ok().map(|v| v.value)
+/// Extract all cell references from an expression
+pub fn extract_cell_refs(expr: &Expr) -> Vec<(String, usize)> {
+    let mut refs = Vec::new();
+    collect_cell_refs(expr, &mut refs);
+    refs
 }
 
-/// Format a number with comma separators
-fn format_with_commas(n: f64) -> String {
-    let abs_n = n.abs();
-    let integer_part = abs_n.trunc() as u64;
-    let fract_part = abs_n.fract();
-
-    let int_str = integer_part.to_string();
-    let with_commas: String = int_str
-        .as_bytes()
-        .rchunks(3)
-        .rev()
-        .map(|chunk| std::str::from_utf8(chunk).unwrap())
-        .collect::<Vec<_>>()
-        .join(",");
-
-    if fract_part > 0.0 {
-        // Format fractional part, removing trailing zeros
-        let fract_str = format!("{:.10}", fract_part);
-        let fract_str = fract_str.trim_start_matches("0.");
-        let fract_str = fract_str.trim_end_matches('0');
-        if fract_str.is_empty() {
-            with_commas
-        } else {
-            format!("{}.{}", with_commas, fract_str)
+fn collect_cell_refs(expr: &Expr, refs: &mut Vec<(String, usize)>) {
+    match expr {
+        Expr::CellRef { col, row } => {
+            refs.push((col.clone(), *row));
         }
-    } else {
-        with_commas
+        Expr::Range { start, end } => {
+            collect_cell_refs(start, refs);
+            collect_cell_refs(end, refs);
+        }
+        Expr::FnCall { args, .. } => {
+            for arg in args {
+                collect_cell_refs(arg, refs);
+            }
+        }
+        Expr::BinOp { left, right, .. } => {
+            collect_cell_refs(left, refs);
+            collect_cell_refs(right, refs);
+        }
+        Expr::Neg(inner) => {
+            collect_cell_refs(inner, refs);
+        }
+        Expr::Number(_) | Expr::RowRange { .. } | Expr::ColRange { .. } => {}
     }
 }
+
+/// Check if an expression contains any ranges
+pub fn has_ranges(expr: &Expr) -> bool {
+    match expr {
+        Expr::Range { .. } | Expr::RowRange { .. } | Expr::ColRange { .. } => true,
+        Expr::FnCall { args, .. } => args.iter().any(has_ranges),
+        Expr::BinOp { left, right, .. } => has_ranges(left) || has_ranges(right),
+        Expr::Neg(inner) => has_ranges(inner),
+        Expr::Number(_) | Expr::CellRef { .. } => false,
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_plain_integers() {
-        let v = parse("123").unwrap();
-        assert_eq!(v.value, 123.0);
-        assert_eq!(v.format, NumericFormat::Plain);
-
-        let v = parse("-456").unwrap();
-        assert_eq!(v.value, -456.0);
-        assert!(v.is_negative);
-
-        let v = parse("+789").unwrap();
-        assert_eq!(v.value, 789.0);
+    fn test_lex_numbers() {
+        let lexer = Lexer::new("123 45.67 1e5 2.5e-3");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0], Token::Number(n) if n == 123.0));
+        assert!(matches!(tokens[1], Token::Number(n) if (n - 45.67).abs() < 0.001));
+        assert!(matches!(tokens[2], Token::Number(n) if n == 1e5));
+        assert!(matches!(tokens[3], Token::Number(n) if (n - 2.5e-3).abs() < 1e-10));
     }
 
     #[test]
-    fn test_parse_plain_floats() {
-        let v = parse("123.45").unwrap();
-        assert_eq!(v.value, 123.45);
-        assert_eq!(v.decimal_places, Some(2));
-
-        let v = parse("-0.001").unwrap();
-        assert_eq!(v.value, -0.001);
-        assert_eq!(v.decimal_places, Some(3));
+    fn test_lex_cell_refs() {
+        let lexer = Lexer::new("A1 AA123 Z99");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(&tokens[0], Token::CellRef { col, row } if col == "A" && *row == 1));
+        assert!(matches!(&tokens[1], Token::CellRef { col, row } if col == "AA" && *row == 123));
+        assert!(matches!(&tokens[2], Token::CellRef { col, row } if col == "Z" && *row == 99));
     }
 
     #[test]
-    fn test_parse_scientific() {
-        let v = parse("1.23e5").unwrap();
-        assert_eq!(v.value, 123000.0);
-        assert!(matches!(v.format, NumericFormat::Scientific { .. }));
-
-        let v = parse("1.23e-3").unwrap();
-        assert!((v.value - 0.00123).abs() < 1e-10);
-
-        let v = parse("5E10").unwrap();
-        assert_eq!(v.value, 5e10);
+    fn test_lex_operators() {
+        let lexer = Lexer::new("+ - * / ^ % ( ) , :");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0], Token::Plus);
+        assert_eq!(tokens[1], Token::Minus);
+        assert_eq!(tokens[2], Token::Star);
+        assert_eq!(tokens[3], Token::Slash);
+        assert_eq!(tokens[4], Token::Caret);
+        assert_eq!(tokens[5], Token::Percent);
+        assert_eq!(tokens[6], Token::LParen);
+        assert_eq!(tokens[7], Token::RParen);
+        assert_eq!(tokens[8], Token::Comma);
+        assert_eq!(tokens[9], Token::Colon);
     }
 
     #[test]
-    fn test_parse_currency() {
-        let v = parse("$1,234.56").unwrap();
-        assert_eq!(v.value, 1234.56);
-        assert_eq!(v.format, NumericFormat::Currency('$'));
-
-        let v = parse("-$1,234.56").unwrap();
-        assert_eq!(v.value, -1234.56);
-        assert!(v.is_negative);
-
-        let v = parse("($1,234.56)").unwrap();
-        assert_eq!(v.value, -1234.56);
-        assert!(v.accounting_negative);
-
-        let v = parse("€999").unwrap();
-        assert_eq!(v.value, 999.0);
-        assert_eq!(v.format, NumericFormat::Currency('€'));
-
-        let v = parse("£50.00").unwrap();
-        assert_eq!(v.value, 50.0);
-        assert_eq!(v.format, NumericFormat::Currency('£'));
+    fn test_lex_comparisons() {
+        let lexer = Lexer::new("= == != <> < <= > >=");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0], Token::Eq);
+        assert_eq!(tokens[1], Token::Eq);
+        assert_eq!(tokens[2], Token::Ne);
+        assert_eq!(tokens[3], Token::Ne);
+        assert_eq!(tokens[4], Token::Lt);
+        assert_eq!(tokens[5], Token::Le);
+        assert_eq!(tokens[6], Token::Gt);
+        assert_eq!(tokens[7], Token::Ge);
     }
 
     #[test]
-    fn test_parse_percentage() {
-        let v = parse("15%").unwrap();
-        assert_eq!(v.value, 0.15);
-        assert_eq!(v.format, NumericFormat::Percentage);
+    fn test_parse_number() {
+        let expr = parse("42").unwrap();
+        assert_eq!(expr, Expr::Number(42.0));
 
-        let v = parse("15.5%").unwrap();
-        assert_eq!(v.value, 0.155);
-
-        let v = parse("100%").unwrap();
-        assert_eq!(v.value, 1.0);
-
-        let v = parse("-50%").unwrap();
-        assert_eq!(v.value, -0.5);
+        let expr = parse("3.14159").unwrap();
+        assert!(matches!(expr, Expr::Number(n) if (n - 3.14159).abs() < 0.00001));
     }
 
     #[test]
-    fn test_parse_with_commas() {
-        let v = parse("1,234").unwrap();
-        assert_eq!(v.value, 1234.0);
-        assert_eq!(v.format, NumericFormat::Formatted);
+    fn test_parse_cell_ref() {
+        let expr = parse("A1").unwrap();
+        assert!(matches!(expr, Expr::CellRef { col, row } if col == "A" && row == 1));
 
-        let v = parse("1,234,567.89").unwrap();
-        assert_eq!(v.value, 1234567.89);
+        let expr = parse("AA123").unwrap();
+        assert!(matches!(expr, Expr::CellRef { col, row } if col == "AA" && row == 123));
     }
 
     #[test]
-    fn test_parse_hex() {
-        let v = parse("0x1A").unwrap();
-        assert_eq!(v.value, 26.0);
-        assert_eq!(v.format, NumericFormat::Hexadecimal);
-
-        let v = parse("0xFF").unwrap();
-        assert_eq!(v.value, 255.0);
-
-        let v = parse("-0x10").unwrap();
-        assert_eq!(v.value, -16.0);
-
-        let v = parse("0xDEADBEEF").unwrap();
-        assert_eq!(v.value, 3735928559.0);
+    fn test_parse_range() {
+        let expr = parse("A1:B10").unwrap();
+        assert!(matches!(expr, Expr::Range { .. }));
     }
 
     #[test]
-    fn test_parse_octal() {
-        let v = parse("0o755").unwrap();
-        assert_eq!(v.value, 493.0);
-        assert_eq!(v.format, NumericFormat::Octal);
-
-        let v = parse("0o10").unwrap();
-        assert_eq!(v.value, 8.0);
-
-        assert!(parse("0o89").is_err()); // Invalid octal digits
+    fn test_parse_col_range() {
+        let expr = parse("A:C").unwrap();
+        assert!(matches!(expr, Expr::ColRange { start, end } if start == "A" && end == "C"));
     }
 
     #[test]
-    fn test_parse_binary() {
-        let v = parse("0b1010").unwrap();
-        assert_eq!(v.value, 10.0);
-        assert_eq!(v.format, NumericFormat::Binary);
+    fn test_parse_arithmetic() {
+        let expr = parse("A1 + B1").unwrap();
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::Add, .. }));
 
-        let v = parse("0b11111111").unwrap();
-        assert_eq!(v.value, 255.0);
+        let expr = parse("A1 * 2 + B1").unwrap();
+        // Should be (A1 * 2) + B1 due to precedence
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::Add, .. }));
 
-        assert!(parse("0b123").is_err()); // Invalid binary digits
+        let expr = parse("2 ^ 3 ^ 2").unwrap();
+        // Should be 2 ^ (3 ^ 2) due to right associativity
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::Pow, .. }));
     }
 
     #[test]
-    fn test_parse_errors() {
-        assert!(matches!(parse(""), Err(ParseError::EmptyInput)));
-        assert!(matches!(parse("   "), Err(ParseError::EmptyInput)));
-        assert!(parse("abc").is_err());
-        assert!(parse("12.34.56").is_err());
+    fn test_parse_negation() {
+        let expr = parse("-5").unwrap();
+        assert!(matches!(expr, Expr::Neg(_)));
+
+        let expr = parse("-A1").unwrap();
+        assert!(matches!(expr, Expr::Neg(_)));
     }
 
     #[test]
-    fn test_lexer_tokens() {
-        let mut lexer = Lexer::new("$1,234.56");
-        let tokens = lexer.tokenize();
-        assert!(matches!(tokens[0], Token::Currency('$')));
-        assert!(matches!(tokens[1], Token::Digits(_)));
+    fn test_parse_function_call() {
+        let expr = parse("SUM(A1:A10)").unwrap();
+        assert!(matches!(expr, Expr::FnCall { name, args } if name == "SUM" && args.len() == 1));
+
+        let expr = parse("POW(2, 3)").unwrap();
+        assert!(matches!(expr, Expr::FnCall { name, args } if name == "POW" && args.len() == 2));
     }
 
     #[test]
-    fn test_numeric_value_display() {
-        let v = parse("$1,234.56").unwrap();
-        assert_eq!(v.to_string(), "$1,234.56");
-
-        let v = parse("15%").unwrap();
-        assert_eq!(v.to_string(), "15%");
-
-        let v = parse("0xFF").unwrap();
-        assert_eq!(v.to_string(), "0xFF");
+    fn test_parse_nested_functions() {
+        let expr = parse("SQRT(SUM(A1:A10))").unwrap();
+        assert!(matches!(expr, Expr::FnCall { name, .. } if name == "SQRT"));
     }
 
     #[test]
-    fn test_parse_numeric_compat() {
-        // Test backward compatibility function
-        assert_eq!(parse_numeric("123"), Some(123.0));
-        assert_eq!(parse_numeric("$1,234.56"), Some(1234.56));
-        assert_eq!(parse_numeric("15%"), Some(0.15));
-        assert_eq!(parse_numeric("abc"), None);
+    fn test_parse_complex_expression() {
+        let expr = parse("SUM(A1:A10) + AVG(B1:B10) * 2").unwrap();
+        // Should be SUM(...) + (AVG(...) * 2)
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::Add, .. }));
     }
 
     #[test]
-    fn test_whitespace_handling() {
-        let v = parse("  123  ").unwrap();
-        assert_eq!(v.value, 123.0);
-
-        let v = parse("  $1,234.56  ").unwrap();
-        assert_eq!(v.value, 1234.56);
+    fn test_parse_with_equals() {
+        // Leading = should be stripped
+        let expr = parse("=A1+B1").unwrap();
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::Add, .. }));
     }
 
     #[test]
-    fn test_as_integer() {
-        let v = parse("123").unwrap();
-        assert_eq!(v.as_integer(), Some(123));
+    fn test_parse_parentheses() {
+        let expr = parse("(A1 + B1) * 2").unwrap();
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::Mul, .. }));
+    }
 
-        let v = parse("123.45").unwrap();
-        assert_eq!(v.as_integer(), None);
+    #[test]
+    fn test_extract_cell_refs() {
+        let expr = parse("A1 + B2 + SUM(C1:C10)").unwrap();
+        let refs = extract_cell_refs(&expr);
+        assert!(refs.contains(&("A".to_string(), 1)));
+        assert!(refs.contains(&("B".to_string(), 2)));
+        assert!(refs.contains(&("C".to_string(), 1)));
+        assert!(refs.contains(&("C".to_string(), 10)));
+    }
 
-        let v = parse("123.00").unwrap();
-        assert_eq!(v.as_integer(), Some(123));
+    #[test]
+    fn test_case_insensitivity() {
+        // Function names should be normalized to uppercase
+        let expr = parse("sum(a1:a10)").unwrap();
+        assert!(matches!(expr, Expr::FnCall { name, .. } if name == "SUM"));
+
+        // Cell refs should preserve original case in col
+        let expr = parse("a1").unwrap();
+        assert!(matches!(expr, Expr::CellRef { col, .. } if col == "A"));
+    }
+
+    #[test]
+    fn test_constants() {
+        let expr = parse("PI()").unwrap();
+        assert!(matches!(expr, Expr::FnCall { name, args } if name == "PI" && args.is_empty()));
+
+        let expr = parse("E()").unwrap();
+        assert!(matches!(expr, Expr::FnCall { name, args } if name == "E" && args.is_empty()));
+    }
+
+    #[test]
+    fn test_empty_expression() {
+        assert!(parse("").is_err());
+        assert!(parse("   ").is_err());
+        assert!(parse("=").is_err());
+    }
+
+    #[test]
+    fn test_comparisons() {
+        let expr = parse("A1 > 10").unwrap();
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::Gt, .. }));
+
+        let expr = parse("A1 <= B1").unwrap();
+        assert!(matches!(expr, Expr::BinOp { op: BinOp::Le, .. }));
     }
 }
