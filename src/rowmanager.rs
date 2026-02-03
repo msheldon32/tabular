@@ -304,4 +304,308 @@ mod tests {
         assert!(rm.active_row_set.is_empty());
         assert!(rm.is_row_live(999)); // unfiltered should be true
     }
+
+    // ---- Predicate filter tests ----
+
+    #[test]
+    fn predicate_filter_numeric_gt() {
+        let table = make_table(vec![
+            vec!["Name", "Score"],
+            vec!["Alice", "95"],
+            vec!["Bob", "87"],
+            vec!["Carol", "92"],
+            vec!["Dave", "50"],
+        ]);
+
+        let mut rm = RowManager::new();
+        let pred = Predicate::Comparator {
+            op: crate::predicate::Op::Gt,
+            val: "90".to_string(),
+        };
+
+        rm.predicate_filter(&table, 1, pred, crate::util::ColumnType::Numeric, true);
+
+        assert!(rm.is_filtered);
+        // Header (row 0) + rows with score > 90: Alice (95), Carol (92)
+        assert!(rm.is_row_live(0)); // header kept
+        assert!(rm.is_row_live(1)); // Alice, 95 > 90
+        assert!(!rm.is_row_live(2)); // Bob, 87 not > 90
+        assert!(rm.is_row_live(3)); // Carol, 92 > 90
+        assert!(!rm.is_row_live(4)); // Dave, 50 not > 90
+        assert_eq!(rm.active_rows, vec![0, 1, 3]);
+    }
+
+    #[test]
+    fn predicate_filter_numeric_eq() {
+        let table = make_table(vec![
+            vec!["ID", "Value"],
+            vec!["1", "100"],
+            vec!["2", "200"],
+            vec!["3", "100"],
+            vec!["4", "300"],
+        ]);
+
+        let mut rm = RowManager::new();
+        let pred = Predicate::Comparator {
+            op: crate::predicate::Op::Eq,
+            val: "100".to_string(),
+        };
+
+        rm.predicate_filter(&table, 1, pred, crate::util::ColumnType::Numeric, true);
+
+        assert!(rm.is_filtered);
+        assert_eq!(rm.active_rows, vec![0, 1, 3]); // header + rows with value == 100
+    }
+
+    #[test]
+    fn predicate_filter_without_header() {
+        let table = make_table(vec![
+            vec!["Alice", "95"],
+            vec!["Bob", "87"],
+            vec!["Carol", "92"],
+        ]);
+
+        let mut rm = RowManager::new();
+        let pred = Predicate::Comparator {
+            op: crate::predicate::Op::Ge,
+            val: "90".to_string(),
+        };
+
+        rm.predicate_filter(&table, 1, pred, crate::util::ColumnType::Numeric, false);
+
+        assert!(rm.is_filtered);
+        // No header preservation: rows with score >= 90
+        assert_eq!(rm.active_rows, vec![0, 2]); // Alice (95), Carol (92)
+    }
+
+    #[test]
+    fn predicate_filter_text() {
+        let table = make_table(vec![
+            vec!["Name", "Status"],
+            vec!["Alice", "active"],
+            vec!["Bob", "inactive"],
+            vec!["Carol", "ACTIVE"],
+            vec!["Dave", "pending"],
+        ]);
+
+        let mut rm = RowManager::new();
+        let pred = Predicate::Comparator {
+            op: crate::predicate::Op::Eq,
+            val: "active".to_string(),
+        };
+
+        rm.predicate_filter(&table, 1, pred, crate::util::ColumnType::Text, true);
+
+        assert!(rm.is_filtered);
+        // Header + rows where Status == "active" (case-insensitive)
+        assert_eq!(rm.active_rows, vec![0, 1, 3]); // header, Alice, Carol
+    }
+
+    #[test]
+    fn predicate_filter_sets_filter_string() {
+        let table = make_table(vec![
+            vec!["A", "B"],
+            vec!["1", "2"],
+        ]);
+
+        let mut rm = RowManager::new();
+        let pred = Predicate::Comparator {
+            op: crate::predicate::Op::Gt,
+            val: "0".to_string(),
+        };
+
+        rm.predicate_filter(&table, 0, pred, crate::util::ColumnType::Numeric, true);
+
+        assert!(rm.filter_string.contains("Filtered"));
+        assert!(rm.filter_string.contains("A")); // column letter
+        assert!(rm.filter_string.contains("> 0"));
+    }
+
+    #[test]
+    fn predicate_filter_chains_with_existing_filter() {
+        let table = make_table(vec![
+            vec!["Name", "Score"],
+            vec!["Alice", "95"],
+            vec!["Bob", "87"],
+            vec!["Carol", "92"],
+            vec!["Dave", "50"],
+            vec!["Eve", "99"],
+        ]);
+
+        let mut rm = RowManager::new();
+
+        // First filter: score > 80
+        let pred1 = Predicate::Comparator {
+            op: crate::predicate::Op::Gt,
+            val: "80".to_string(),
+        };
+        rm.predicate_filter(&table, 1, pred1, crate::util::ColumnType::Numeric, true);
+        assert_eq!(rm.active_rows, vec![0, 1, 2, 3, 5]); // header + Alice, Bob, Carol, Eve
+
+        // Second filter: score < 95 (should chain with first filter)
+        let pred2 = Predicate::Comparator {
+            op: crate::predicate::Op::Lt,
+            val: "95".to_string(),
+        };
+        rm.predicate_filter(&table, 1, pred2, crate::util::ColumnType::Numeric, true);
+        // Only rows that pass both: 80 < score < 95
+        assert_eq!(rm.active_rows, vec![0, 2, 3]); // header + Bob (87), Carol (92)
+    }
+
+    // ---- Navigation with predicate filter ----
+
+    #[test]
+    fn get_end_with_predicate_filter() {
+        let table = make_table(vec![
+            vec!["A"],
+            vec!["1"],
+            vec!["2"],
+            vec!["3"],
+            vec!["4"],
+            vec!["5"],
+        ]);
+
+        let mut rm = RowManager::new();
+        let pred = Predicate::Comparator {
+            op: crate::predicate::Op::Le,
+            val: "3".to_string(),
+        };
+        rm.predicate_filter(&table, 0, pred, crate::util::ColumnType::Numeric, true);
+
+        // Active rows: 0 (header), 1, 2, 3 (values 1, 2, 3)
+        assert_eq!(rm.get_end(&table), 3);
+    }
+
+    #[test]
+    fn jump_down_with_predicate_filter() {
+        let table = make_table(vec![
+            vec!["A"],
+            vec!["10"],
+            vec!["20"],
+            vec!["30"],
+            vec!["40"],
+            vec!["50"],
+        ]);
+
+        let mut rm = RowManager::new();
+        let pred = Predicate::Comparator {
+            op: crate::predicate::Op::Ge,
+            val: "20".to_string(),
+        };
+        rm.predicate_filter(&table, 0, pred, crate::util::ColumnType::Numeric, true);
+
+        // Active rows: 0 (header), 2, 3, 4, 5 (values 20, 30, 40, 50)
+        assert_eq!(rm.active_rows, vec![0, 2, 3, 4, 5]);
+
+        // Jump down 2 from row 0 should land on row 3
+        assert_eq!(rm.jump_down(0, 2, &table), 3);
+
+        // Jump down 1 from row 2 should land on row 3
+        assert_eq!(rm.jump_down(2, 1, &table), 3);
+    }
+
+    #[test]
+    fn jump_up_with_predicate_filter() {
+        let table = make_table(vec![
+            vec!["A"],
+            vec!["10"],
+            vec!["20"],
+            vec!["30"],
+            vec!["40"],
+            vec!["50"],
+        ]);
+
+        let mut rm = RowManager::new();
+        let pred = Predicate::Comparator {
+            op: crate::predicate::Op::Ge,
+            val: "20".to_string(),
+        };
+        rm.predicate_filter(&table, 0, pred, crate::util::ColumnType::Numeric, true);
+
+        // Active rows: 0 (header), 2, 3, 4, 5
+        // Jump up 2 from row 5 should land on row 3
+        assert_eq!(rm.jump_up(5, 2), 3);
+
+        // Jump up 1 from row 3 should land on row 2
+        assert_eq!(rm.jump_up(3, 1), 2);
+    }
+
+    #[test]
+    fn get_successor_with_predicate_filter() {
+        let table = make_table(vec![
+            vec!["A"],
+            vec!["5"],
+            vec!["15"],
+            vec!["25"],
+            vec!["35"],
+        ]);
+
+        let mut rm = RowManager::new();
+        let pred = Predicate::Comparator {
+            op: crate::predicate::Op::Gt,
+            val: "10".to_string(),
+        };
+        rm.predicate_filter(&table, 0, pred, crate::util::ColumnType::Numeric, true);
+
+        // Active rows: 0 (header), 2, 3, 4 (values 15, 25, 35)
+        assert_eq!(rm.active_rows, vec![0, 2, 3, 4]);
+
+        // Successor of 0 is 2 (skips filtered row 1)
+        assert_eq!(rm.get_successor(0), Some(2));
+
+        // Successor of 2 is 3
+        assert_eq!(rm.get_successor(2), Some(3));
+
+        // Successor of 4 is None (last active row)
+        assert_eq!(rm.get_successor(4), None);
+    }
+
+    #[test]
+    fn get_predecessor_with_predicate_filter() {
+        let table = make_table(vec![
+            vec!["A"],
+            vec!["5"],
+            vec!["15"],
+            vec!["25"],
+            vec!["35"],
+        ]);
+
+        let mut rm = RowManager::new();
+        let pred = Predicate::Comparator {
+            op: crate::predicate::Op::Gt,
+            val: "10".to_string(),
+        };
+        rm.predicate_filter(&table, 0, pred, crate::util::ColumnType::Numeric, true);
+
+        // Active rows: 0 (header), 2, 3, 4
+        // Predecessor of 2 is 0 (skips filtered row 1)
+        assert_eq!(rm.get_predecessor(2), Some(0));
+
+        // Predecessor of 3 is 2
+        assert_eq!(rm.get_predecessor(3), Some(2));
+
+        // Predecessor of 0 is None
+        assert_eq!(rm.get_predecessor(0), None);
+    }
+
+    #[test]
+    fn predicate_filter_empty_result_keeps_header() {
+        let table = make_table(vec![
+            vec!["Name", "Score"],
+            vec!["Alice", "50"],
+            vec!["Bob", "60"],
+        ]);
+
+        let mut rm = RowManager::new();
+        let pred = Predicate::Comparator {
+            op: crate::predicate::Op::Gt,
+            val: "100".to_string(),
+        };
+
+        rm.predicate_filter(&table, 1, pred, crate::util::ColumnType::Numeric, true);
+
+        // No data rows match, but header should be preserved
+        assert!(rm.is_filtered);
+        assert_eq!(rm.active_rows, vec![0]);
+    }
 }

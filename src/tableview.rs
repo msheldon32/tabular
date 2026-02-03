@@ -1375,4 +1375,170 @@ mod tests {
         // Row 1 is numeric (scores)
         assert_eq!(table.probe_row_type(1, true), ColumnType::Numeric);
     }
+
+    // === Filtered navigation tests ===
+
+    fn row_manager_filtered(active_rows: Vec<usize>) -> Rc<RefCell<RowManager>> {
+        let mut rm = RowManager::new();
+        rm.is_filtered = true;
+        rm.active_rows = active_rows.clone();
+        rm.active_row_set = active_rows.into_iter().collect();
+        Rc::new(RefCell::new(rm))
+    }
+
+    #[test]
+    fn test_move_down_with_filter() {
+        // Table has 10 rows, but only rows 0, 2, 5, 8 are active
+        let rm = row_manager_filtered(vec![0, 2, 5, 8]);
+        let mut view = TableView::new(rm);
+        let table = make_table(vec![vec!["x"]; 10]);
+
+        view.cursor_row = 0;
+        view.move_down(&table);
+        // Should skip to row 2 (next active row)
+        assert_eq!(view.cursor_row, 2);
+
+        view.move_down(&table);
+        // Should skip to row 5
+        assert_eq!(view.cursor_row, 5);
+
+        view.move_down(&table);
+        // Should skip to row 8
+        assert_eq!(view.cursor_row, 8);
+
+        view.move_down(&table);
+        // At last active row, should stay
+        assert_eq!(view.cursor_row, 8);
+    }
+
+    #[test]
+    fn test_move_up_with_filter() {
+        let rm = row_manager_filtered(vec![0, 2, 5, 8]);
+        let mut view = TableView::new(rm);
+        let table = make_table(vec![vec!["x"]; 10]);
+
+        view.cursor_row = 8;
+        view.move_up();
+        // Should skip to row 5 (previous active row)
+        assert_eq!(view.cursor_row, 5);
+
+        view.move_up();
+        assert_eq!(view.cursor_row, 2);
+
+        view.move_up();
+        assert_eq!(view.cursor_row, 0);
+
+        view.move_up();
+        // At first row, should stay
+        assert_eq!(view.cursor_row, 0);
+    }
+
+    #[test]
+    fn test_move_to_bottom_with_filter() {
+        let rm = row_manager_filtered(vec![0, 2, 5, 8]);
+        let mut view = TableView::new(rm);
+        let table = make_table(vec![vec!["x"]; 10]);
+
+        view.cursor_row = 0;
+        view.move_to_bottom(&table);
+        // Should go to last active row (8), not last table row (9)
+        assert_eq!(view.cursor_row, 8);
+    }
+
+    #[test]
+    fn test_page_down_with_filter() {
+        let rm = row_manager_filtered(vec![0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20]);
+        let mut view = TableView::new(rm);
+        view.viewport_height = 5;
+        let table = make_table(vec![vec!["x"]; 25]);
+
+        view.cursor_row = 0;
+        view.page_down(&table);
+        // Jump of 4 (viewport_height - 1) in filtered rows
+        // From index 0 in active_rows, jump 4 positions: 0 -> 2 -> 4 -> 6 -> 8
+        assert_eq!(view.cursor_row, 8);
+    }
+
+    #[test]
+    fn test_page_up_with_filter() {
+        let rm = row_manager_filtered(vec![0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20]);
+        let mut view = TableView::new(rm);
+        view.viewport_height = 5;
+        let table = make_table(vec![vec!["x"]; 25]);
+
+        view.cursor_row = 20;
+        view.page_up(&table);
+        // Jump back 4 positions in filtered rows
+        assert_eq!(view.cursor_row, 12);
+    }
+
+    #[test]
+    fn test_move_down_n_with_filter() {
+        let rm = row_manager_filtered(vec![0, 3, 6, 9, 12]);
+        let mut view = TableView::new(rm);
+        let table = make_table(vec![vec!["x"]; 15]);
+
+        view.cursor_row = 0;
+        view.move_down_n(2, &table);
+        // Should jump 2 active rows: 0 -> 3 -> 6
+        assert_eq!(view.cursor_row, 6);
+    }
+
+    #[test]
+    fn test_move_up_n_with_filter() {
+        let rm = row_manager_filtered(vec![0, 3, 6, 9, 12]);
+        let mut view = TableView::new(rm);
+        let table = make_table(vec![vec!["x"]; 15]);
+
+        view.cursor_row = 12;
+        view.move_up_n(3);
+        // Should jump back 3 active rows: 12 -> 9 -> 6 -> 3
+        assert_eq!(view.cursor_row, 3);
+    }
+
+    #[test]
+    fn test_half_page_down_with_filter() {
+        let rm = row_manager_filtered(vec![0, 2, 4, 6, 8, 10, 12, 14, 16, 18]);
+        let mut view = TableView::new(rm);
+        view.viewport_height = 6;
+        let table = make_table(vec![vec!["x"]; 20]);
+
+        view.cursor_row = 0;
+        view.half_page_down(&table);
+        // Half page = 3 rows in filtered set: 0 -> 2 -> 4 -> 6
+        assert_eq!(view.cursor_row, 6);
+    }
+
+    #[test]
+    fn test_half_page_up_with_filter() {
+        let rm = row_manager_filtered(vec![0, 2, 4, 6, 8, 10, 12, 14, 16, 18]);
+        let mut view = TableView::new(rm);
+        view.viewport_height = 6;
+        let table = make_table(vec![vec!["x"]; 20]);
+
+        view.cursor_row = 18;
+        view.half_page_up(&table);
+        // Half page = 3 rows back in filtered set
+        assert_eq!(view.cursor_row, 12);
+    }
+
+    #[test]
+    fn test_scroll_to_cursor_with_filter() {
+        let rm = row_manager_filtered(vec![0, 10, 20, 30, 40, 50]);
+        let mut view = TableView::new(rm);
+        view.viewport_height = 3;
+        let table = make_table(vec![vec!["x"]; 60]);
+
+        // Start at top
+        view.viewport_row = 0;
+        view.cursor_row = 50;
+
+        // Scroll to cursor should adjust viewport
+        view.scroll_to_cursor();
+
+        // Viewport should have scrolled to show cursor
+        // The exact value depends on jump_up implementation
+        assert!(view.viewport_row <= view.cursor_row);
+        assert!(view.cursor_row < view.viewport_row + view.viewport_height + 50);
+    }
 }

@@ -76,7 +76,14 @@ impl Command {
 
         if let Some(filter_args) = trimmed.strip_prefix("filter ") {
             let predicate = parse_predicate(filter_args.to_string());
-            return Some(Command::Filter(FilterType::PredicateFilter(predicate)));
+            match predicate {
+                Some(pred) => {
+                    return Some(Command::Filter(FilterType::PredicateFilter(pred)));
+                }
+                None => {
+                    return None;
+                }
+            }
         }
 
         // Check for precision command: prec N or precision N (or just prec/precision for auto)
