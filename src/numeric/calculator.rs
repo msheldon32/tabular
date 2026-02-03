@@ -591,6 +591,20 @@ mod tests {
         assert_eq!(results[0].2, "8");
     }
 
+    // == String equality tests ==
+    #[test]
+    fn test_string_comparison() {
+        let table = make_table(vec![
+            vec!["hi", "hi", "hello", "=A1==B1", "=A1!=B1", "=A1==C1", "=A1!=C1"],
+        ]);
+        let calc = Calculator::new(&table, false);
+        let results = calc.evaluate_all().unwrap();
+        assert_eq!(results.iter().find(|r| r.1 == 0).unwrap().2, "true");
+        assert_eq!(results.iter().find(|r| r.1 == 1).unwrap().2, "false");
+        assert_eq!(results.iter().find(|r| r.1 == 2).unwrap().2, "false");
+        assert_eq!(results.iter().find(|r| r.1 == 3).unwrap().2, "true");
+    }
+
     // === Boolean expression tests ===
 
     #[test]

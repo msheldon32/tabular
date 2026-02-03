@@ -160,27 +160,27 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<Re
                 let display_content = if is_cursor && app.mode == Mode::Insert {
                     let mut buf = app.edit_buffer();
                     let cursor_char = app.edit_cursor(); // Character index
-                    let char_count = crate::util::char_count(buf);
 
                     // Get byte indices for slicing
                     // truncate the cursor from the beginning
-                    let cursor_byte = if is_cursor {
+                    let cursor_byte = if buf.len() > 0 {
                         let original_idx = crate::util::byte_index_of_char(buf, cursor_char);
                         let original_len = buf.chars().count();
 
-                        let endpoint = cmp::min(cmp::max(original_idx, app.table.max_col_width-1), original_len-1);
+                        let endpoint = cmp::min(cmp::max(original_idx, app.table.max_col_width-1), original_len);
                         let startpoint = endpoint.saturating_sub(app.table.max_col_width-1);
-                        buf = &buf[startpoint..=endpoint];
+                        buf = &buf[startpoint..cmp::min(endpoint+1, original_len)];
                         crate::util::byte_index_of_char(buf, cursor_char.saturating_sub(startpoint))
                     } else {
                         0
                     };
-                    let next_byte = crate::util::byte_index_of_char(buf, cursor_char + 1);
+                    let char_count = crate::util::char_count(buf);
 
                     let (before, cursor_char_str, after) = if cursor_char >= char_count {
                         // Cursor at end - show space as cursor
                         (buf.to_string(), " ".to_string(), String::new())
                     } else {
+                        let next_byte = crate::util::byte_index_of_char(buf, cursor_char + 1);
                         (
                             buf[..cursor_byte].to_string(),
                             buf[cursor_byte..next_byte].to_string(),
