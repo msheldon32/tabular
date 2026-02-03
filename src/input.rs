@@ -1,4 +1,6 @@
 use std::time::{Duration, Instant};
+use std::rc::Rc;
+use std::cell::RefCell;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -87,17 +89,17 @@ pub struct KeyBuffer {
     count: Option<usize>,
     last_key_time: Instant,
     timeout: Duration,
-    config: AppConfig
+    config: Rc<RefCell<AppConfig>>
 }
 
 impl KeyBuffer {
-    pub fn new() -> Self {
+    pub fn new(config: Rc<RefCell<AppConfig>>) -> Self {
         Self {
             keys: Vec::new(),
             count: None,
             last_key_time: Instant::now(),
             timeout: Duration::from_millis(1000),
-            config: AppConfig::new()
+            config
         }
     }
 
@@ -199,7 +201,7 @@ impl KeyBuffer {
             }
             _ => None,
         }*/
-        self.config.commands.match_sequence(self.keys.clone())
+        self.config.borrow().commands.match_sequence(self.keys.clone())
     }
 
     fn is_valid_prefix(&self) -> bool {

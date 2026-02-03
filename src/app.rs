@@ -31,6 +31,7 @@ use crate::ui::progress::Progress;
 use crate::table::rowmanager::RowManager;
 use crate::util::ColumnType;
 use crate::mode::visual::{VisualType, VisualHandler};
+use crate::config::AppConfig;
 
 /// Result from a background operation
 pub enum BackgroundResult {
@@ -58,6 +59,7 @@ pub struct App {
     pub style: Style,
     pub mode: Mode,
     pub file_io: FileIO,
+    pub config: Rc<RefCell<AppConfig>>,
     pub row_manager: Rc<RefCell<RowManager>>,
     pub dirty: bool,
     pub calling_mode: Option<Mode>,
@@ -91,6 +93,9 @@ impl App {
         let mut plugin_manager = PluginManager::new();
         let _ = plugin_manager.load_plugins();
 
+        let config = Rc::new(RefCell::new(AppConfig::new()));
+        let key_buffer = KeyBuffer::new(config.clone());
+
         Self {
             table,
             view,
@@ -99,6 +104,7 @@ impl App {
             style: Style::new(),
             mode: Mode::Normal,
             file_io,
+            config,
             row_manager,
             dirty: false,
             calling_mode: None,
@@ -111,7 +117,7 @@ impl App {
             pending_op: None,
             bg_receiver: None,
             bg_handle: None,
-            key_buffer: KeyBuffer::new(),
+            key_buffer,
             nav_handler: NavigationHandler::new(),
             search_handler: SearchHandler::new(),
             insert_handler: InsertHandler::new(),
