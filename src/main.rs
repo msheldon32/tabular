@@ -1,5 +1,6 @@
 mod app;
 mod clipboard;
+mod dispatch;
 mod fileio;
 mod input;
 mod mode;
