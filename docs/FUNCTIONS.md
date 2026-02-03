@@ -291,6 +291,63 @@ All trigonometric functions work in **radians**. Use `RADIANS()` to convert from
 
 ---
 
+## Logical & Conditional Functions
+
+These functions enable conditional logic and boolean operations in formulas.
+
+### Conditional Functions
+
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `IF` | `if(condition, true_val, false_val)` | Returns `true_val` if condition is true, `false_val` otherwise |
+| `IFERROR` | `iferror(value, fallback)` | Returns `value` if valid, `fallback` if error/NaN/Inf |
+
+**Examples:**
+```
+=if(A1>0, A1, 0)           # Return A1 if positive, else 0
+=if(A1>=60, 1, 0)          # Pass/fail: 1 if A1 >= 60
+=iferror(A1/B1, 0)         # Safe division, returns 0 on div-by-zero
+```
+
+### Boolean Functions
+
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `AND` | `and(a, b, ...)` | Returns 1 (true) if ALL arguments are non-zero |
+| `OR` | `or(a, b, ...)` | Returns 1 (true) if ANY argument is non-zero |
+| `NOT` | `not(x)` | Returns 1 if x is 0, returns 0 otherwise |
+| `TRUE` | `true()` | Returns 1 |
+| `FALSE` | `false()` | Returns 0 |
+
+**Examples:**
+```
+=and(A1>0, B1>0)           # True if both A1 and B1 are positive
+=or(A1>10, A1<-10)         # True if A1 is outside [-10, 10]
+=not(A1=0)                 # True if A1 is not zero
+=if(and(A1>=0, A1<=100), A1, 0)  # Clamp to range [0,100]
+```
+
+### Boolean Values
+
+Tabular uses numeric boolean representation:
+- **True** = 1 (or any non-zero value)
+- **False** = 0
+
+Comparison operators return 1 for true, 0 for false.
+
+### Short-Circuit Evaluation
+
+`AND` and `OR` operators use short-circuit evaluation:
+- `AND`: Stops evaluating after first false (0) value
+- `OR`: Stops evaluating after first true (non-zero) value
+
+This is useful for avoiding errors:
+```
+=if(B1<>0 AND A1/B1>10, 1, 0)   # Safe: division only happens if B1 is non-zero
+```
+
+---
+
 ## Cell References
 
 ### Single Cells
@@ -307,9 +364,21 @@ A1:E1       # Row range (5 cells)
 A1:C3       # Rectangular range (9 cells)
 ```
 
+### Entire Row/Column Ranges
+```
+A:A         # Entire column A
+A:C         # Columns A through C
+1:1         # Entire row 1
+1:5         # Rows 1 through 5
+```
+
+**Note:** Entire row/column ranges operate on all data in those rows/columns.
+
 ---
 
 ## Operators
+
+### Arithmetic Operators
 
 | Operator | Description | Example |
 |----------|-------------|---------|
@@ -319,6 +388,46 @@ A1:C3       # Rectangular range (9 cells)
 | `/` | Division | `A1/B1` |
 | `%` | Modulo | `A1%10` |
 | `^` | Power | `A1^2` |
+
+### Comparison Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `=` | Equal to | `A1=B1` |
+| `<>` | Not equal to | `A1<>0` |
+| `<` | Less than | `A1<10` |
+| `<=` | Less than or equal | `A1<=100` |
+| `>` | Greater than | `A1>0` |
+| `>=` | Greater than or equal | `A1>=B1` |
+
+Comparison operators return 1 (true) or 0 (false).
+
+### Logical Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `AND` | Logical AND (infix) | `A1>0 AND B1>0` |
+| `OR` | Logical OR (infix) | `A1<0 OR A1>100` |
+| `NOT` | Logical NOT (prefix) | `NOT A1=0` |
+
+Logical operators can be used both as infix operators and as functions:
+```
+=A1>0 AND B1>0         # Infix style
+=and(A1>0, B1>0)       # Function style (equivalent)
+```
+
+### Operator Precedence
+
+From highest to lowest:
+1. `^` (power)
+2. `-` (unary negation), `NOT`
+3. `*`, `/`, `%`
+4. `+`, `-`
+5. `=`, `<>`, `<`, `<=`, `>`, `>=`
+6. `AND`
+7. `OR`
+
+Use parentheses to override precedence: `=(A1+B1)*C1`
 
 ---
 
@@ -361,6 +470,31 @@ A1:C3       # Rectangular range (9 cells)
 
 # Percent rank
 =percentile(A1:A100,B1/count(A1:A100))
+```
+
+### Conditional Logic
+```
+# Letter grade (simplified)
+=if(A1>=90, 4, if(A1>=80, 3, if(A1>=70, 2, if(A1>=60, 1, 0))))
+
+# Clamp value to range [0, 100]
+=if(A1<0, 0, if(A1>100, 100, A1))
+
+# Safe division (avoid divide by zero)
+=iferror(A1/B1, 0)
+
+# Count values meeting criteria (manual)
+=if(A1>0,1,0)+if(A2>0,1,0)+if(A3>0,1,0)
+
+# Boolean flag: is value in range?
+=and(A1>=0, A1<=100)
+
+# Exclusive conditions
+=if(A1<0, -1, if(A1>0, 1, 0))    # Sign function
+
+# Multiple conditions
+=if(and(A1>0, B1>0, C1>0), 1, 0)  # All positive?
+=if(or(A1=0, B1=0), 0, A1*B1)     # Multiply if both non-zero
 ```
 
 ---
