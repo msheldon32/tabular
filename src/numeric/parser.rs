@@ -279,8 +279,17 @@ impl<'a> Lexer<'a> {
                 while let Some((_,ch)) = self.next_char() {
                     if ch == '"' {
                         return Ok(Token::Str(buf.into_iter().collect()));
+                    } else if ch == '\\' {
+                        if self.peek_char() == Some('\\') {
+                            buf.push('\\');
+                            self.next_char();
+                        } else if self.peek_char() == Some('"') {
+                            buf.push('"');
+                            self.next_char();
+                        }
+                    } else {
+                        buf.push(ch);
                     }
-                    buf.push(ch);
                 }
                 Err(ParseError::UnclosedQuote)
             }
@@ -931,6 +940,24 @@ mod tests {
         assert!(matches!(tokens[1], Token::Number(n) if (n - 45.67).abs() < 0.001));
         assert!(matches!(tokens[2], Token::Number(n) if n == 1e5));
         assert!(matches!(tokens[3], Token::Number(n) if (n - 2.5e-3).abs() < 1e-10));
+    }
+
+    #[test]
+    fn test_lex_string() {
+        let lexer = Lexer::new("\"Hello world\" \"Welcome to my lexer\"");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[0], Token::Str(ref s) if s == "Hello world"));
+        assert!(matches!(tokens[1], Token::Str(ref s) if s == "Welcome to my lexer"));
+    }
+
+    #[test]
+    fn test_lex_string_escape() {
+        let lexer = Lexer::new("\"\\\"Hello world\\\"\" \"Welcome to my\\\" lexer\"");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert!(matches!(tokens[0], Token::Str(ref s) if s == "\"Hello world\""));
+        assert!(matches!(tokens[1], Token::Str(ref s) if s == "Welcome to my\" lexer"));
     }
 
     #[test]
