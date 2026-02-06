@@ -92,6 +92,36 @@ pub fn evaluate_function<E: ExprEvaluator>(
             let mut rng = rand::thread_rng();
             Ok(CalcType::Float(rng.gen()))
         },
+        "IF" => {
+            require_args(name, args, 3)?;
+
+            let cond = evaluator.eval(&args[0], results)?;
+
+            match cond {
+                CalcType::Bool(b) => {
+                    if b {
+                        evaluator.eval(&args[1], results)
+                    } else {
+                        evaluator.eval(&args[2], results)
+                    }
+                },
+                default => Err(CalcError::EvalError("Condition in IF() is not a boolean".to_string()))
+            }
+        },
+        "OR" => {
+            require_args(name, args, 2)?;
+            let cond1  = evaluator.eval(&args[0], results)?;
+            let cond2  = evaluator.eval(&args[1], results)?;
+
+            return CalcType::bin_op(BinOp::Or, cond1, cond2);
+        },
+        "AND" => {
+            require_args(name, args, 2)?;
+            let cond1  = evaluator.eval(&args[0], results)?;
+            let cond2  = evaluator.eval(&args[1], results)?;
+
+            return CalcType::bin_op(BinOp::And, cond1, cond2);
+        },
         // I am just killing this function entirely for now, this will require substantial revision
         _default => Err(CalcError::EvalError("(Most) functions have been removed for now".to_string()))
     }
