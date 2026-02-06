@@ -88,6 +88,10 @@ pub fn evaluate_function<E: ExprEvaluator>(
 
             CalcType::ceil(evaluator.eval(&args[0], results)?)
         },
+        "RAND" => {
+            let mut rng = rand::thread_rng();
+            Ok(CalcType::Float(rng.gen()))
+        },
         // I am just killing this function entirely for now, this will require substantial revision
         _default => Err(CalcError::EvalError("(Most) functions have been removed for now".to_string()))
     }
