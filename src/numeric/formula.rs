@@ -27,7 +27,7 @@ pub fn evaluate_function<E: ExprEvaluator>(
     match name {
         "SUM" => {
             require_args(name, args, 1)?;
-            let mut vals = evaluator.expand(&args[0], results)?;
+            let vals = evaluator.expand(&args[0], results)?;
 
             Ok(vals.iter().try_fold(CalcType::Int(0), |acc, v| {
                 CalcType::bin_op(BinOp::Add, acc, v.clone())
@@ -35,7 +35,7 @@ pub fn evaluate_function<E: ExprEvaluator>(
         },
         "AVG" => {
             require_args(name, args, 1)?;
-            let mut vals = evaluator.expand(&args[0], results)?;
+            let vals = evaluator.expand(&args[0], results)?;
 
             let sum = vals.iter().try_fold(CalcType::Int(0), |acc, v| {
                 CalcType::bin_op(BinOp::Add, acc, v.clone())
@@ -45,7 +45,7 @@ pub fn evaluate_function<E: ExprEvaluator>(
         },
         "MIN" => {
             require_args(name, args, 1)?;
-            let mut vals = evaluator.expand(&args[0], results)?;
+            let vals = evaluator.expand(&args[0], results)?;
 
             Ok(vals.iter().try_fold(CalcType::Int(0), |acc, v| {
                 CalcType::min(acc, v.clone())
@@ -53,7 +53,7 @@ pub fn evaluate_function<E: ExprEvaluator>(
         },
         "MAX" => {
             require_args(name, args, 1)?;
-            let mut vals = evaluator.expand(&args[0], results)?;
+            let vals = evaluator.expand(&args[0], results)?;
 
             Ok(vals.iter().try_fold(CalcType::Int(0), |acc, v| {
                 CalcType::max(acc, v.clone())
@@ -61,13 +61,13 @@ pub fn evaluate_function<E: ExprEvaluator>(
         },
         "COUNT" => {
             require_args(name, args, 1)?;
-            let mut vals = evaluator.expand(&args[0], results)?;
+            let vals = evaluator.expand(&args[0], results)?;
 
             Ok(CalcType::Int(vals.len() as i64))
         },
         "PROD" => {
             require_args(name, args, 1)?;
-            let mut vals = evaluator.expand(&args[0], results)?;
+            let vals = evaluator.expand(&args[0], results)?;
 
             Ok(vals.iter().try_fold(CalcType::Int(0), |acc, v| {
                 CalcType::bin_op(BinOp::Mul, acc, v.clone())
@@ -105,7 +105,7 @@ pub fn evaluate_function<E: ExprEvaluator>(
                         evaluator.eval(&args[2], results)
                     }
                 },
-                default => Err(CalcError::EvalError("Condition in IF() is not a boolean".to_string()))
+                _default => Err(CalcError::EvalError("Condition in IF() is not a boolean".to_string()))
             }
         },
         "OR" => {

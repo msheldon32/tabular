@@ -1,8 +1,9 @@
-use crossterm::event::{KeyCode, KeyEvent };
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::input::{KeyResult, is_escape};
 use crate::transaction::Transaction;
 use crate::table::tableview::TableView;
+use crate::string::{get_word_start, get_word_end};
 
 /// Insert mode handler
 /// Note: cursor is a CHARACTER index, not a byte index
@@ -49,10 +50,14 @@ impl InsertHandler {
                 self.buffer = crate::util::insert_char_at(&self.buffer, self.cursor, c);
                 self.cursor += 1;
             }
+            KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.cursor = get_word_start(&self.buffer, self.cursor);
+            }
+            KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) => { 
+                self.cursor = get_word_end(&self.buffer, self.cursor);
+            }
             KeyCode::Left => {
-                if self.cursor > 0 {
-                    self.cursor -= 1;
-                }
+                self.cursor = self.cursor.saturating_sub(1);
             }
             KeyCode::Right => {
                 let char_count = crate::util::char_count(&self.buffer);

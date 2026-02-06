@@ -11,6 +11,7 @@ mod ui;
 mod util;
 mod numeric;
 mod config;
+mod string;
 
 use std::io;
 use std::path::PathBuf;

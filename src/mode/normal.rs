@@ -3,7 +3,6 @@ use crossterm::event::{KeyEvent, KeyCode, KeyModifiers};
 use crate::input::{KeyResult, NavigationHandler};
 use crate::table::table::Table;
 use crate::table::tableview::TableView;
-use crate::table::operations::current_cell;
 use crate::mode::Mode;
 use crate::transaction::Transaction;
 use crate::clipboard::Clipboard;
