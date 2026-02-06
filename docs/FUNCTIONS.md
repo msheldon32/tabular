@@ -44,102 +44,11 @@ These functions operate on ranges of cells.
 |----------|--------|-------------|
 | `MEDIAN` | `median(range)` | Middle value (or average of two middle values) |
 | `MODE` | `mode(range)` | Most frequently occurring value |
-| `GEOMEAN` | `geomean(range)` | Geometric mean: ⁿ√(x₁ × x₂ × ... × xₙ) |
-| `HARMEAN` | `harmean(range)` | Harmonic mean: n / (1/x₁ + 1/x₂ + ... + 1/xₙ) |
 
 **Examples:**
 ```
 =median(A1:A100)    # Middle value of dataset
 =geomean(B1:B10)    # Geometric mean (useful for growth rates)
-```
-
-### Dispersion & Variability
-
-| Function | Syntax | Description |
-|----------|--------|-------------|
-| `STDEV` | `stdev(range)` | Sample standard deviation (n-1 denominator) |
-| `STDEVP` | `stdevp(range)` | Population standard deviation (n denominator) |
-| `VAR` | `var(range)` | Sample variance |
-| `VARP` | `varp(range)` | Population variance |
-| `AVEDEV` | `avedev(range)` | Average absolute deviation from mean |
-
-**When to use sample vs population:**
-- Use `STDEV`/`VAR` when your data is a sample from a larger population
-- Use `STDEVP`/`VARP` when your data represents the entire population
-
-**Examples:**
-```
-=stdev(A1:A50)      # Sample standard deviation
-=var(B1:B100)       # Sample variance
-```
-
-### Sum of Squares
-
-| Function | Syntax | Description |
-|----------|--------|-------------|
-| `SUMSQ` | `sumsq(range)` | Sum of squares: Σx² |
-| `DEVSQ` | `devsq(range)` | Sum of squared deviations from mean: Σ(x - x̄)² |
-
-**Examples:**
-```
-=sumsq(A1:A10)      # Sum of x²
-=devsq(A1:A10)      # Sum of (x - mean)²
-```
-
-### Distribution Shape
-
-| Function | Syntax | Description |
-|----------|--------|-------------|
-| `SKEW` | `skew(range)` | Skewness (measure of asymmetry) |
-| `KURT` | `kurt(range)` | Excess kurtosis (measure of tail weight) |
-
-**Interpreting results:**
-- **Skewness**: 0 = symmetric, positive = right-tailed, negative = left-tailed
-- **Kurtosis**: 0 = normal distribution, positive = heavy tails, negative = light tails
-
-**Examples:**
-```
-=skew(A1:A100)      # Test for asymmetry
-=kurt(A1:A100)      # Test for heavy/light tails
-```
-
----
-
-## Two-Range Functions
-
-These functions compare or correlate two ranges of equal size.
-
-| Function | Syntax | Description |
-|----------|--------|-------------|
-| `CORREL` | `correl(range1, range2)` | Pearson correlation coefficient (-1 to 1) |
-| `COVAR` | `covar(range1, range2)` | Population covariance |
-
-**Interpreting correlation:**
-- 1.0 = perfect positive correlation
-- 0.0 = no correlation
-- -1.0 = perfect negative correlation
-
-**Examples:**
-```
-=correl(A1:A20, B1:B20)   # Correlation between columns A and B
-=covar(A1:A10, B1:B10)    # Covariance
-```
-
----
-
-## Percentile Functions
-
-| Function | Syntax | Description |
-|----------|--------|-------------|
-| `PERCENTILE` | `percentile(range, k)` | Value at the k-th percentile (k between 0 and 1) |
-| `QUARTILE` | `quartile(range, q)` | Value at quartile q (0=min, 1=Q1, 2=median, 3=Q3, 4=max) |
-
-**Examples:**
-```
-=percentile(A1:A100, 0.95)   # 95th percentile
-=percentile(A1:A100, 0.5)    # 50th percentile (same as median)
-=quartile(A1:A100, 1)        # First quartile (25th percentile)
-=quartile(A1:A100, 3)        # Third quartile (75th percentile)
 ```
 
 ---
@@ -151,17 +60,10 @@ These functions compare or correlate two ranges of equal size.
 | Function | Syntax | Description |
 |----------|--------|-------------|
 | `ABS` | `abs(x)` | Absolute value |
-| `SIGN` | `sign(x)` | Sign of number (-1, 0, or 1) |
-| `SQRT` | `sqrt(x)` | Square root |
-| `POW` / `POWER` | `pow(x, y)` | x raised to power y |
-| `MOD` | `mod(x, y)` | Remainder of x divided by y |
 
 **Examples:**
 ```
 =abs(-5)            # Returns 5
-=sqrt(16)           # Returns 4
-=pow(2, 10)         # Returns 1024
-=mod(17, 5)         # Returns 2
 ```
 
 ### Rounding
@@ -170,106 +72,11 @@ These functions compare or correlate two ranges of equal size.
 |----------|--------|-------------|
 | `FLOOR` | `floor(x)` | Round down to nearest integer |
 | `CEIL` | `ceil(x)` | Round up to nearest integer |
-| `TRUNC` | `trunc(x)` | Truncate decimal part (round toward zero) |
-| `ROUND` | `round(x, digits)` | Round to specified decimal places |
 
 **Examples:**
 ```
 =floor(3.7)         # Returns 3
 =ceil(3.2)          # Returns 4
-=trunc(-3.7)        # Returns -3
-=round(3.14159, 2)  # Returns 3.14
-```
-
-### Exponential & Logarithmic
-
-| Function | Syntax | Description |
-|----------|--------|-------------|
-| `EXP` | `exp(x)` | e raised to power x |
-| `LN` | `ln(x)` | Natural logarithm (base e) |
-| `LOG10` | `log10(x)` | Logarithm base 10 |
-| `LOG2` | `log2(x)` | Logarithm base 2 |
-| `LOG` | `log(x, base)` | Logarithm with custom base |
-
-**Examples:**
-```
-=exp(1)             # Returns e ≈ 2.718
-=ln(E())            # Returns 1
-=log10(100)         # Returns 2
-=log(8, 2)          # Returns 3
-```
-
----
-
-## Trigonometric Functions
-
-All trigonometric functions work in **radians**. Use `RADIANS()` to convert from degrees.
-
-### Basic Trig
-
-| Function | Syntax | Description |
-|----------|--------|-------------|
-| `SIN` | `sin(x)` | Sine |
-| `COS` | `cos(x)` | Cosine |
-| `TAN` | `tan(x)` | Tangent |
-| `ASIN` | `asin(x)` | Arcsine (inverse sine) |
-| `ACOS` | `acos(x)` | Arccosine (inverse cosine) |
-| `ATAN` | `atan(x)` | Arctangent (inverse tangent) |
-| `ATAN2` | `atan2(y, x)` | Two-argument arctangent |
-
-### Hyperbolic
-
-| Function | Syntax | Description |
-|----------|--------|-------------|
-| `SINH` | `sinh(x)` | Hyperbolic sine |
-| `COSH` | `cosh(x)` | Hyperbolic cosine |
-| `TANH` | `tanh(x)` | Hyperbolic tangent |
-
-### Angle Conversion
-
-| Function | Syntax | Description |
-|----------|--------|-------------|
-| `DEGREES` | `degrees(x)` | Convert radians to degrees |
-| `RADIANS` | `radians(x)` | Convert degrees to radians |
-
-**Examples:**
-```
-=sin(radians(90))   # Returns 1 (sine of 90 degrees)
-=cos(PI())          # Returns -1
-=degrees(PI())      # Returns 180
-=atan2(1, 1)        # Returns π/4 ≈ 0.785
-```
-
----
-
-## Combinatorics
-
-| Function | Syntax | Description |
-|----------|--------|-------------|
-| `FACT` | `fact(n)` | Factorial: n! |
-| `COMBIN` | `combin(n, k)` | Combinations: n choose k = n! / (k!(n-k)!) |
-| `PERMUT` | `permut(n, k)` | Permutations: n! / (n-k)! |
-
-**Examples:**
-```
-=fact(5)            # Returns 120 (5! = 5×4×3×2×1)
-=combin(10, 3)      # Returns 120 (ways to choose 3 from 10)
-=permut(10, 3)      # Returns 720 (ordered arrangements of 3 from 10)
-```
-
----
-
-## Number Theory
-
-| Function | Syntax | Description |
-|----------|--------|-------------|
-| `GCD` | `gcd(a, b)` | Greatest common divisor |
-| `LCM` | `lcm(a, b)` | Least common multiple |
-
-**Examples:**
-```
-=gcd(48, 18)        # Returns 6
-=lcm(4, 6)          # Returns 12
 ```
 
 ---
@@ -300,7 +107,6 @@ These functions enable conditional logic and boolean operations in formulas.
 | Function | Syntax | Description |
 |----------|--------|-------------|
 | `IF` | `if(condition, true_val, false_val)` | Returns `true_val` if condition is true, `false_val` otherwise |
-| `IFERROR` | `iferror(value, fallback)` | Returns `value` if valid, `fallback` if error/NaN/Inf |
 
 **Examples:**
 ```

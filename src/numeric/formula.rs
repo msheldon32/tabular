@@ -29,13 +29,21 @@ pub fn evaluate_function<E: ExprEvaluator>(
             require_args(name, args, 1)?;
             let vals = evaluator.expand(&args[0], results)?;
 
+            if vals.len() == 0 {
+                return Err(CalcError::EvalError("Trying to use an array function on an empty array".to_string()));
+            }
+
             Ok(vals.iter().try_fold(CalcType::Int(0), |acc, v| {
                 CalcType::bin_op(BinOp::Add, acc, v.clone())
             })?)
         },
-        "AVG" => {
+        "AVG" | "AVERAGE" => {
             require_args(name, args, 1)?;
             let vals = evaluator.expand(&args[0], results)?;
+
+            if vals.len() == 0 {
+                return Err(CalcError::EvalError("Trying to use an array function on an empty array".to_string()));
+            }
 
             let sum = vals.iter().try_fold(CalcType::Int(0), |acc, v| {
                 CalcType::bin_op(BinOp::Add, acc, v.clone())
@@ -47,6 +55,10 @@ pub fn evaluate_function<E: ExprEvaluator>(
             require_args(name, args, 1)?;
             let vals = evaluator.expand(&args[0], results)?;
 
+            if vals.len() == 0 {
+                return Err(CalcError::EvalError("Trying to use an array function on an empty array".to_string()));
+            }
+
             Ok(vals.iter().try_fold(CalcType::Int(0), |acc, v| {
                 CalcType::min(acc, v.clone())
             })?)
@@ -54,6 +66,10 @@ pub fn evaluate_function<E: ExprEvaluator>(
         "MAX" => {
             require_args(name, args, 1)?;
             let vals = evaluator.expand(&args[0], results)?;
+
+            if vals.len() == 0 {
+                return Err(CalcError::EvalError("Trying to use an array function on an empty array".to_string()));
+            }
 
             Ok(vals.iter().try_fold(CalcType::Int(0), |acc, v| {
                 CalcType::max(acc, v.clone())
@@ -65,9 +81,13 @@ pub fn evaluate_function<E: ExprEvaluator>(
 
             Ok(CalcType::Int(vals.len() as i64))
         },
-        "PROD" => {
+        "PRODUCT" => {
             require_args(name, args, 1)?;
             let vals = evaluator.expand(&args[0], results)?;
+
+            if vals.len() == 0 {
+                return Err(CalcError::EvalError("Trying to use an array function on an empty array".to_string()));
+            }
 
             Ok(vals.iter().try_fold(CalcType::Int(0), |acc, v| {
                 CalcType::bin_op(BinOp::Mul, acc, v.clone())
@@ -108,6 +128,16 @@ pub fn evaluate_function<E: ExprEvaluator>(
                 _default => Err(CalcError::EvalError("Condition in IF() is not a boolean".to_string()))
             }
         },
+        "IFERROR" => {
+            require_args(name, args, 2)?;
+
+            let val = evaluator.eval(&args[0], results);
+
+            match val {
+                Err(x) => evaluator.eval(&args[1], results),
+                _default => _default
+            }
+        },
         "OR" => {
             require_args(name, args, 2)?;
             let cond1  = evaluator.eval(&args[0], results)?;
@@ -122,6 +152,29 @@ pub fn evaluate_function<E: ExprEvaluator>(
 
             return CalcType::bin_op(BinOp::And, cond1, cond2);
         },
+        "MEDIAN" => {
+            require_args(name, args, 1)?;
+            let mut vals = evaluator.expand(&args[0], results)?;
+            
+            vals.sort_by(|a, b| CalcType::compare(a.clone(),b.clone()));
+            if vals.len() == 0 {
+                Err(CalcError::EvalError("Trying to use an array function on an empty array".to_string()))
+            } else if vals.len() % 2 == 0 {
+                let midpoint = (vals.len()/2).saturating_sub(1);
+                let a = vals[midpoint].clone();
+                let b = vals[midpoint+1].clone();
+                let s = CalcType::bin_op(BinOp::Add, a, b)?;
+                CalcType::bin_op(BinOp::Div, s, CalcType::Int(2))
+            } else {
+                let midpoint = vals.len()/2;
+                Ok(vals[midpoint].clone())
+            }
+            
+        },
+        "PI" => Ok(CalcType::Float(std::f64::consts::PI)),
+        "E" => Ok(CalcType::Float(std::f64::consts::E)),
+        "TRUE" => Ok(CalcType::Bool(true)),
+        "FALSE" => Ok(CalcType::Bool(false)),
         // I am just killing this function entirely for now, this will require substantial revision
         _default => Err(CalcError::EvalError("(Most) functions have been removed for now".to_string()))
     }

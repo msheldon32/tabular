@@ -35,6 +35,14 @@ impl CalcType {
         }
     }
 
+    pub fn compare(l: CalcType, r: CalcType) -> std::cmp::Ordering {
+        match CalcType::numeric_precedence(l, r) {
+            Ok((CalcType::Int(a), CalcType::Int(b))) => a.cmp(&b),
+            Ok((CalcType::Float(a), CalcType::Float(b))) => a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal),
+            _default => std::cmp::Ordering::Equal
+        }
+    }
+
     pub fn not(x: CalcType) -> Result<CalcType, CalcError> {
         match x {
             CalcType::Bool(b) => Ok(CalcType::Bool(!b)),

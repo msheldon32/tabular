@@ -198,7 +198,6 @@ impl std::error::Error for ParseError {}
 // ============================================================================
 
 pub struct Lexer<'a> {
-    input: &'a str,
     chars: std::iter::Peekable<std::str::CharIndices<'a>>,
     pos: usize,
 }
@@ -206,7 +205,6 @@ pub struct Lexer<'a> {
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
         Self {
-            input,
             chars: input.char_indices().peekable(),
             pos: 0,
         }
