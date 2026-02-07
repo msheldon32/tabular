@@ -14,6 +14,11 @@ use crate::numeric::parser::BinOp;
 pub trait ExprEvaluator {
     fn eval(&self, expr: &super::parser::Expr, results: &HashMap<CellRef, CalcType>) -> Result<CalcType, CalcError>;
     fn expand(&self, expr: &super::parser::Expr, results: &HashMap<CellRef, CalcType>) -> Result<Vec<CalcType>, CalcError>;
+    /// Try to evaluate a plugin function by name with pre-evaluated arguments.
+    /// Returns None if no plugin provides this function.
+    fn call_plugin_function(&self, _name: &str, _args: &[CalcType]) -> Option<Result<CalcType, CalcError>> {
+        None
+    }
 }
 
 /// Evaluate a function call
@@ -175,8 +180,17 @@ pub fn evaluate_function<E: ExprEvaluator>(
         "E" => Ok(CalcType::Float(std::f64::consts::E)),
         "TRUE" => Ok(CalcType::Bool(true)),
         "FALSE" => Ok(CalcType::Bool(false)),
-        // I am just killing this function entirely for now, this will require substantial revision
-        _default => Err(CalcError::EvalError("(Most) functions have been removed for now".to_string()))
+        _default => {
+            // Try plugin functions: evaluate all args, then delegate
+            let evaluated_args: Result<Vec<CalcType>, CalcError> = args.iter()
+                .map(|arg| evaluator.eval(arg, results))
+                .collect();
+            let evaluated_args = evaluated_args?;
+            if let Some(result) = evaluator.call_plugin_function(name, &evaluated_args) {
+                return result;
+            }
+            Err(CalcError::EvalError(format!("Unknown function: {}", name)))
+        }
     }
 }
 

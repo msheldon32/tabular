@@ -143,6 +143,57 @@ impl PluginManager {
         self.commands.keys().collect()
     }
 
+    pub fn has_function(&self, name: &str) -> bool {
+        self.functions.contains_key(&name.to_uppercase())
+    }
+
+    pub fn list_functions(&self) -> Vec<&String> {
+        self.functions.keys().collect()
+    }
+
+    /// Execute a function plugin with evaluated arguments.
+    /// Returns a single CalcType value. Function plugins cannot mutate cells.
+    pub fn execute_function(
+        &self,
+        name: &str,
+        args: &[CalcType],
+    ) -> Result<CalcType, CalcError> {
+        let upper_name = name.to_uppercase();
+        let script = match self.functions.get(&upper_name) {
+            Some(s) => s,
+            None => return Err(CalcError::EvalError(format!("Unknown function plugin: {}", name))),
+        };
+
+        // Create args table for Lua
+        let args_table = self.lua.create_table().map_err(lua_to_calc_error)?;
+        for (i, arg) in args.iter().enumerate() {
+            match arg {
+                CalcType::Int(n) => args_table.set(i + 1, *n).map_err(lua_to_calc_error)?,
+                CalcType::Float(f) => args_table.set(i + 1, *f).map_err(lua_to_calc_error)?,
+                CalcType::Str(s) => args_table.set(i + 1, s.as_str()).map_err(lua_to_calc_error)?,
+                CalcType::Bool(b) => args_table.set(i + 1, *b).map_err(lua_to_calc_error)?,
+            }
+        }
+
+        // Load and execute the plugin
+        let chunk = self.lua.load(script);
+        let plugin: Value = chunk.eval().map_err(lua_to_calc_error)?;
+
+        if let Value::Table(table) = plugin {
+            if let Ok(compute_fn) = table.get::<Function>("compute") {
+                let result: Value = compute_fn.call(args_table).map_err(lua_to_calc_error)?;
+                return lua_value_to_calctype(result);
+            }
+            return Err(CalcError::EvalError(format!(
+                "Function plugin '{}' has no compute() function", name
+            )));
+        }
+
+        Err(CalcError::EvalError(format!(
+            "Function plugin '{}' did not return a table", name
+        )))
+    }
+
     pub fn execute(
         &self,
         command: &str,
@@ -651,6 +702,24 @@ impl PluginManager {
         let message: Option<String> = message_table.get("msg").ok();
 
         Ok(PluginResult { actions, message })
+    }
+}
+
+fn lua_to_calc_error(e: mlua::Error) -> CalcError {
+    CalcError::EvalError(format!("Plugin error: {}", e))
+}
+
+fn lua_value_to_calctype(value: Value) -> Result<CalcType, CalcError> {
+    match value {
+        Value::Integer(n) => Ok(CalcType::Int(n)),
+        Value::Number(f) => Ok(CalcType::Float(f)),
+        Value::String(s) => Ok(CalcType::Str(
+            s.to_str().map_err(|e| CalcError::EvalError(format!("Invalid UTF-8: {}", e)))?.to_string()
+        )),
+        Value::Boolean(b) => Ok(CalcType::Bool(b)),
+        _ => Err(CalcError::EvalError(
+            "Function plugin must return a number, string, or boolean".to_string()
+        )),
     }
 }
 
