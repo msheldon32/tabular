@@ -279,45 +279,36 @@ impl PluginManager {
             args_table.set(i + 1, arg.as_str())?;
         }
 
-        // Collect all cell values upfront for the get_cell function
-        // This avoids lifetime issues with closures
-        let mut cell_cache: HashMap<(usize, usize), String> = HashMap::new();
+        // Build a single shared Lua table as the cell store.
+        // All functions (get_cell, set_cell, get_range, get_column_type) share this table.
+        // Keys are "row:col" with 0-indexed coordinates.
+        let cell_store = self.lua.create_table()?;
         for row in 0..ctx.row_count {
             for col in 0..ctx.col_count {
                 if let Some(val) = get_cell(row, col) {
-                    cell_cache.insert((row, col), val);
+                    let key = format!("{}:{}", row, col);
+                    cell_store.set(key, val)?;
                 }
             }
         }
-        let cell_cache_for_range = cell_cache.clone();
-        let cell_cache_for_type = cell_cache.clone();
 
-        // Create an overlay table to hold pending writes (visible to Lua, not to actual data)
-        let overlay = self.lua.create_table()?;
-
-        // Create get_cell function that checks overlay first, then falls back to cache
-        let overlay_for_get = overlay.clone();
+        // Create get_cell function (1-indexed from Lua)
+        let store_for_get = cell_store.clone();
         let get_cell_fn = self.lua.create_function(move |_, (row, col): (usize, usize)| {
-            // First check the overlay for pending writes
-            let overlay_key = format!("{}:{}", row, col);
-            if let Ok(val) = overlay_for_get.get::<String>(overlay_key.as_str()) {
-                return Ok(val);
-            }
-            // Fall back to original cache (convert to 0-indexed)
-            let key = (row.saturating_sub(1), col.saturating_sub(1));
-            Ok(cell_cache.get(&key).cloned().unwrap_or_default())
+            let key = format!("{}:{}", row.saturating_sub(1), col.saturating_sub(1));
+            Ok(store_for_get.get::<String>(key.as_str()).unwrap_or_default())
         })?;
 
         // Create actions table to collect results
         let actions_table = self.lua.create_table()?;
 
-        // Create set_cell function that writes to overlay AND records the action
-        let overlay_for_set = overlay.clone();
+        // Create set_cell function that updates the shared cell store AND records the action
+        let store_for_set = cell_store.clone();
         let actions_ref = actions_table.clone();
         let set_cell_fn = self.lua.create_function(move |lua, (row, col, value): (usize, usize, String)| {
-            // Store in overlay so subsequent get_cell calls see it
-            let overlay_key = format!("{}:{}", row, col);
-            overlay_for_set.set(overlay_key, value.clone())?;
+            // Update the shared cell store so all readers see the new value
+            let key = format!("{}:{}", row.saturating_sub(1), col.saturating_sub(1));
+            store_for_set.set(key, value.clone())?;
 
             // Record the action for later application
             let action = lua.create_table()?;
@@ -396,6 +387,7 @@ impl PluginManager {
         })?;
 
         // get_range(r1, c1, r2, c2) function - returns 2D table of values
+        let store_for_range = cell_store.clone();
         let get_range_fn = self.lua.create_function(move |lua, (r1, c1, r2, c2): (usize, usize, usize, usize)| {
             let result = lua.create_table()?;
             let start_row = r1.saturating_sub(1);
@@ -406,7 +398,8 @@ impl PluginManager {
             for (i, row) in (start_row..=end_row).enumerate() {
                 let row_table = lua.create_table()?;
                 for (j, col) in (start_col..=end_col).enumerate() {
-                    let value = cell_cache_for_range.get(&(row, col)).cloned().unwrap_or_default();
+                    let key = format!("{}:{}", row, col);
+                    let value: String = store_for_range.get::<String>(key.as_str()).unwrap_or_default();
                     row_table.set(j + 1, value)?;
                 }
                 result.set(i + 1, row_table)?;
@@ -415,6 +408,7 @@ impl PluginManager {
         })?;
 
         // get_column_type(col) function - returns "numeric" or "text"
+        let store_for_type = cell_store.clone();
         let type_row_count = ctx.row_count;
         let get_column_type_fn = self.lua.create_function(move |_, col: usize| {
             let col_idx = col.saturating_sub(1);
@@ -422,7 +416,8 @@ impl PluginManager {
             let mut total_count = 0usize;
 
             for row in 0..type_row_count {
-                if let Some(value) = cell_cache_for_type.get(&(row, col_idx)) {
+                let key = format!("{}:{}", row, col_idx);
+                if let Ok(value) = store_for_type.get::<String>(key.as_str()) {
                     if !value.is_empty() {
                         total_count += 1;
                         if value.parse::<f64>().is_ok() {
