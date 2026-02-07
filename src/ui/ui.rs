@@ -292,6 +292,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_command_line(frame: &mut Frame, app: &App, area: Rect) {
+    let width = area.width.saturating_sub(4);
     let (content, style) = match app.mode {
         Mode::Command => {
             let line = Line::from(vec![
@@ -324,7 +325,7 @@ fn render_command_line(frame: &mut Frame, app: &App, area: Rect) {
                 let line = Line::from(bar);
                 (line, app.style.message_info())
             } else {
-                let msg = app.message.as_deref().unwrap_or("");
+                let msg : String = app.message.as_deref().unwrap_or("").chars().take(width as usize).collect();
                 let line = Line::from(msg);
                 (line, app.style.message_info())
             }
