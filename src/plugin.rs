@@ -115,9 +115,21 @@ impl PluginManager {
 
         if let Value::Table(table) = result {
             let name: Option<String> = table.get("name").ok();
-            if let Some(cmd_name) = name {
-                self.commands.insert(cmd_name.clone(), script.to_string());
-                return Ok(Some(cmd_name));
+            let plugin_type: Option<String> = table.get("type").ok();
+            if let Some(plugin_name) = name {
+                let ptype = match plugin_type.as_deref() {
+                    Some("function") => PluginType::Function,
+                    _ => PluginType::Command,
+                };
+                match ptype {
+                    PluginType::Function => {
+                        self.functions.insert(plugin_name.to_uppercase(), script.to_string());
+                    }
+                    PluginType::Command => {
+                        self.commands.insert(plugin_name.clone(), script.to_string());
+                    }
+                }
+                return Ok(Some(plugin_name));
             }
         }
         Ok(None)
