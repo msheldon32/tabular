@@ -151,12 +151,35 @@ impl PluginManager {
         self.functions.keys().collect()
     }
 
-    /// Create a generic function that is handled by dispatch
-    fn add_default_command(&self, actions_table: mlua::Table, name: String) -> LuaResult<mlua::Function> {
+    /// Create a command that takes a usize argument (insert_row, delete_row, etc.)
+    fn add_usize_command(&self, actions_table: mlua::Table, name: String) -> LuaResult<mlua::Function> {
         self.lua.create_function(move |lua, at: usize| {
             let action = lua.create_table()?;
             action.set("type", name.clone())?;
             action.set("at", at)?;
+            let len = actions_table.len()? + 1;
+            actions_table.set(len, action)?;
+            Ok(())
+        })
+    }
+
+    /// Create a command that takes no arguments (canvas_clear, canvas_show, etc.)
+    fn add_void_command(&self, actions_table: mlua::Table, name: String) -> LuaResult<mlua::Function> {
+        self.lua.create_function(move |lua, ()| {
+            let action = lua.create_table()?;
+            action.set("type", name.clone())?;
+            let len = actions_table.len()? + 1;
+            actions_table.set(len, action)?;
+            Ok(())
+        })
+    }
+
+    /// Create a command that takes a string argument (canvas_set_title, canvas_add_text, etc.)
+    fn add_string_command(&self, actions_table: mlua::Table, name: String) -> LuaResult<mlua::Function> {
+        self.lua.create_function(move |lua, text: String| {
+            let action = lua.create_table()?;
+            action.set("type", name.clone())?;
+            action.set("text", text)?;
             let len = actions_table.len()? + 1;
             actions_table.set(len, action)?;
             Ok(())
@@ -301,18 +324,18 @@ impl PluginManager {
             Ok(())
         })?;
 
-        let insert_row_fn = self.add_default_command(actions_table.clone(), "insert_row".to_string())?;
-        let insert_col_fn = self.add_default_command(actions_table.clone(), "insert_col".to_string())?;
-        let delete_row_fn = self.add_default_command(actions_table.clone(), "delete_row".to_string())?;
-        let delete_col_fn = self.add_default_command(actions_table.clone(), "delete_col".to_string())?;
-        let canvas_clear_fn = self.add_default_command(actions_table.clone(), "canvas_clear".to_string())?;
-        let canvas_show_fn = self.add_default_command(actions_table.clone(), "canvas_show".to_string())?;
-        let canvas_hide_fn = self.add_default_command(actions_table.clone(), "canvas_hide".to_string())?;
-        let canvas_set_title_fn = self.add_default_command(actions_table.clone(), "canvas_set_title".to_string())?;
-        let canvas_add_text_fn = self.add_default_command(actions_table.clone(), "canvas_add_text".to_string())?;
-        let canvas_add_separator_fn = self.add_default_command(actions_table.clone(), "canvas_add_separator".to_string())?;
-        let canvas_add_blank_fn = self.add_default_command(actions_table.clone(), "canvas_add_blank".to_string())?;
-        let canvas_add_header_fn = self.add_default_command(actions_table.clone(), "canvas_add_header".to_string())?;
+        let insert_row_fn = self.add_usize_command(actions_table.clone(), "insert_row".to_string())?;
+        let insert_col_fn = self.add_usize_command(actions_table.clone(), "insert_col".to_string())?;
+        let delete_row_fn = self.add_usize_command(actions_table.clone(), "delete_row".to_string())?;
+        let delete_col_fn = self.add_usize_command(actions_table.clone(), "delete_col".to_string())?;
+        let canvas_clear_fn = self.add_void_command(actions_table.clone(), "canvas_clear".to_string())?;
+        let canvas_show_fn = self.add_void_command(actions_table.clone(), "canvas_show".to_string())?;
+        let canvas_hide_fn = self.add_void_command(actions_table.clone(), "canvas_hide".to_string())?;
+        let canvas_set_title_fn = self.add_string_command(actions_table.clone(), "canvas_set_title".to_string())?;
+        let canvas_add_text_fn = self.add_string_command(actions_table.clone(), "canvas_add_text".to_string())?;
+        let canvas_add_separator_fn = self.add_void_command(actions_table.clone(), "canvas_add_separator".to_string())?;
+        let canvas_add_blank_fn = self.add_void_command(actions_table.clone(), "canvas_add_blank".to_string())?;
+        let canvas_add_header_fn = self.add_string_command(actions_table.clone(), "canvas_add_header".to_string())?;
 
         // Create message holder
         let message_table = self.lua.create_table()?;
@@ -548,7 +571,7 @@ impl PluginManager {
                         actions.push(PluginAction::CanvasHide);
                     }
                     "canvas_set_title" => {
-                        let title: String = action.get("title")?;
+                        let title: String = action.get("text")?;
                         actions.push(PluginAction::CanvasSetTitle { title });
                     }
                     "canvas_add_text" => {
