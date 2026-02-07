@@ -196,7 +196,7 @@ impl App {
                 self.clear_progress();
             }
             PendingOp::Calc { formula_count } => {
-                let calc = Calculator::new(&self.table, self.header_mode);
+                let calc = Calculator::with_plugins(&self.table, self.header_mode, &self.plugin_manager);
                 match calc.evaluate_all() {
                     Ok(updates) => {
                         if updates.is_empty() {

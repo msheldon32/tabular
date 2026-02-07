@@ -5,6 +5,7 @@ use crate::util::{CellRef, CalcError, col_from_letters, letters_from_col};
 use crate::numeric::parser::{self, Expr, ParseError};
 use crate::numeric::formula::{self as formula, ExprEvaluator};
 use crate::numeric::calctype::CalcType;
+use crate::plugin::PluginManager;
 
 
 /// Format a numeric value for display, removing unnecessary trailing zeros
@@ -47,11 +48,16 @@ impl From<ParseError> for CalcError {
 pub struct Calculator<'a> {
     table: &'a Table,
     skip_header: bool,
+    plugin_manager: Option<&'a PluginManager>,
 }
 
 impl<'a> Calculator<'a> {
     pub fn new(table: &'a Table, skip_header: bool) -> Self {
-        Self { table, skip_header }
+        Self { table, skip_header, plugin_manager: None }
+    }
+
+    pub fn with_plugins(table: &'a Table, skip_header: bool, plugin_manager: &'a PluginManager) -> Self {
+        Self { table, skip_header, plugin_manager: Some(plugin_manager) }
     }
 
     /// Evaluate all formula cells and return updates as (row, col, value)
@@ -371,6 +377,15 @@ impl ExprEvaluator for Calculator<'_> {
 
     fn expand(&self, expr: &Expr, results: &HashMap<CellRef, CalcType>) -> Result<Vec<CalcType>, CalcError> {
         self.expand_range(expr, results)
+    }
+
+    fn call_plugin_function(&self, name: &str, args: &[CalcType]) -> Option<Result<CalcType, CalcError>> {
+        let pm = self.plugin_manager?;
+        if pm.has_function(name) {
+            Some(pm.execute_function(name, args))
+        } else {
+            None
+        }
     }
 }
 
