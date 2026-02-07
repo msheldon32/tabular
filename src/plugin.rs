@@ -309,7 +309,6 @@ impl PluginManager {
         let canvas_show_fn = self.add_default_command(actions_table.clone(), "canvas_show".to_string())?;
         let canvas_hide_fn = self.add_default_command(actions_table.clone(), "canvas_hide".to_string())?;
         let canvas_set_title_fn = self.add_default_command(actions_table.clone(), "canvas_set_title".to_string())?;
-        let canvas_set_text_fn = self.add_default_command(actions_table.clone(), "canvas_set_text".to_string())?;
         let canvas_add_text_fn = self.add_default_command(actions_table.clone(), "canvas_add_text".to_string())?;
         let canvas_add_separator_fn = self.add_default_command(actions_table.clone(), "canvas_add_separator".to_string())?;
         let canvas_add_blank_fn = self.add_default_command(actions_table.clone(), "canvas_add_blank".to_string())?;

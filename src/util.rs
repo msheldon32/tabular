@@ -9,6 +9,7 @@ pub struct CellRef {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum CalcError {
     CircularReference(String),
     InvalidReference(String),

@@ -43,11 +43,13 @@ pub struct CommandTable {
 }
 
 impl CommandTable {
+    #[allow(dead_code)]
     pub fn new(basic_map: HashMap<KeySequence, SequenceAction>, 
                wildcard_map: HashMap<KeySequence, ActionBuilder>) -> Self {
         Self { basic_map, wildcard_map }
     }
 
+    #[allow(dead_code)]
     pub fn get(&self, seq: KeySequence) -> Option<SequenceAction> {
         self.basic_map.get(&seq).copied()
     }

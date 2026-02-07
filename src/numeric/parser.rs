@@ -889,49 +889,6 @@ pub fn parse(input: &str) -> Result<Expr, ParseError> {
     Parser::parse_formula(input)
 }
 
-/// Extract all cell references from an expression
-pub fn extract_cell_refs(expr: &Expr) -> Vec<(String, usize)> {
-    let mut refs = Vec::new();
-    collect_cell_refs(expr, &mut refs);
-    refs
-}
-
-fn collect_cell_refs(expr: &Expr, refs: &mut Vec<(String, usize)>) {
-    match expr {
-        Expr::CellRef { col, row } => {
-            refs.push((col.clone(), *row));
-        }
-        Expr::Range { start, end } => {
-            collect_cell_refs(start, refs);
-            collect_cell_refs(end, refs);
-        }
-        Expr::FnCall { args, .. } => {
-            for arg in args {
-                collect_cell_refs(arg, refs);
-            }
-        }
-        Expr::BinOp { left, right, .. } => {
-            collect_cell_refs(left, refs);
-            collect_cell_refs(right, refs);
-        }
-        Expr::Neg(inner) | Expr::Not(inner) => {
-            collect_cell_refs(inner, refs);
-        }
-        Expr::Literal(_) | Expr::RowRange { .. } | Expr::ColRange { .. } => {}
-    }
-}
-
-/// Check if an expression contains any ranges
-pub fn has_ranges(expr: &Expr) -> bool {
-    match expr {
-        Expr::Range { .. } | Expr::RowRange { .. } | Expr::ColRange { .. } => true,
-        Expr::FnCall { args, .. } => args.iter().any(has_ranges),
-        Expr::BinOp { left, right, .. } => has_ranges(left) || has_ranges(right),
-        Expr::Neg(inner) | Expr::Not(inner) => has_ranges(inner),
-        Expr::Literal(_) | Expr::CellRef { .. } => false,
-    }
-}
-
 // ============================================================================
 // Tests
 // ============================================================================

@@ -52,6 +52,7 @@ pub struct Calculator<'a> {
 }
 
 impl<'a> Calculator<'a> {
+    #[allow(dead_code)]
     pub fn new(table: &'a Table, skip_header: bool) -> Self {
         Self { table, skip_header, plugin_manager: None }
     }

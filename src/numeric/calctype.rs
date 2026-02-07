@@ -12,19 +12,6 @@ pub enum CalcType {
 }
 
 impl CalcType {
-    fn use_int(&self) -> Option<i64> {
-        if let CalcType::Int(i) = self { Some(*i) } else { None }
-    }
-    fn use_string(&self) -> Option<String> {
-        if let CalcType::Str(s) = self { Some(s.to_string()) } else { None }
-    }
-    fn use_float(&self) -> Option<f64> {
-        if let CalcType::Float(x) = self { Some(*x) } else { None }
-    }
-    fn use_bool(&self) -> Option<bool> {
-        if let CalcType::Bool(x) = self { Some(*x) } else { None }
-    }
-
     pub fn numeric_precedence(l: CalcType, r: CalcType) -> Result<(CalcType, CalcType), CalcError> {
         match (l,r) {
             (CalcType::Int(a), CalcType::Int(b)) => Ok((CalcType::Int(a), CalcType::Int(b))),
