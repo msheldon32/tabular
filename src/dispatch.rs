@@ -331,13 +331,21 @@ impl App {
             }
             Command::PluginList => {
                 let commands = self.plugin_manager.list_commands();
-                if commands.is_empty() {
+                let functions = self.plugin_manager.list_functions();
+                if commands.is_empty() && functions.is_empty() {
                     self.message = Some(format!(
                         "No plugins loaded. Add .lua files to {}",
                         crate::plugin::plugin_dir().display()
                     ));
                 } else {
-                    self.message = Some(format!("Plugins: {}", commands.into_iter().cloned().collect::<Vec<_>>().join(", ")));
+                    let mut parts = Vec::new();
+                    if !commands.is_empty() {
+                        parts.push(format!("Commands: {}", commands.into_iter().cloned().collect::<Vec<_>>().join(", ")));
+                    }
+                    if !functions.is_empty() {
+                        parts.push(format!("Functions: {}", functions.into_iter().cloned().collect::<Vec<_>>().join(", ")));
+                    }
+                    self.message = Some(parts.join(" | "));
                 }
             }
             Command::Precision(prec) => {
