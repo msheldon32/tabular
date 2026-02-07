@@ -123,7 +123,13 @@ impl PluginManager {
                 };
                 match ptype {
                     PluginType::Function => {
-                        self.functions.insert(plugin_name.to_uppercase(), script.to_string());
+                        if let Ok(func_list) = table.get::<mlua::Table>("functions") {
+                            for pair in func_list.sequence_values::<String>() {
+                                if let Ok(fname) = pair {
+                                    self.functions.insert(fname.to_uppercase(), script.to_string());
+                                }
+                            }
+                        }
                     }
                     PluginType::Command => {
                         self.commands.insert(plugin_name.clone(), script.to_string());
@@ -215,7 +221,7 @@ impl PluginManager {
         let plugin: Value = chunk.eval().map_err(lua_to_calc_error)?;
 
         if let Value::Table(table) = plugin {
-            if let Ok(compute_fn) = table.get::<Function>("compute") {
+            if let Ok(compute_fn) = table.get::<Function>(name.to_lowercase()) {
                 let result: Value = compute_fn.call(args_table).map_err(lua_to_calc_error)?;
                 return lua_value_to_calctype(result);
             }
@@ -436,7 +442,7 @@ impl PluginManager {
 
         // prompt(question, default) function - requests user input
         let prompt_results = self.prompt_results.clone();
-        let actions_ref15 = actions_table.clone();
+        let prompt_actions_ref = actions_table.clone();
         let prompt_fn = self.lua.create_function(move |lua, (question, default): (String, Option<String>)| {
             // Check if we have a stored result for this question
             if let Some(answer) = prompt_results.get(&question) {
@@ -448,20 +454,20 @@ impl PluginManager {
             action.set("type", "prompt_request")?;
             action.set("question", question)?;
             action.set("default", default.unwrap_or_default())?;
-            let len = actions_ref15.len()? + 1;
-            actions_ref15.set(len, action)?;
+            let len = prompt_actions_ref.len()? + 1;
+            prompt_actions_ref.set(len, action)?;
             Ok(Value::Nil)
         })?;
 
         // save_data(key, value) function - persistent plugin storage
-        let actions_ref16 = actions_table.clone();
+        let save_data_actions_ref = actions_table.clone();
         let save_data_fn = self.lua.create_function(move |lua, (key, value): (String, String)| {
             let action = lua.create_table()?;
             action.set("type", "save_data")?;
             action.set("key", key)?;
             action.set("value", value)?;
-            let len = actions_ref16.len()? + 1;
-            actions_ref16.set(len, action)?;
+            let len = save_data_actions_ref.len()? + 1;
+            save_data_actions_ref.set(len, action)?;
             Ok(())
         })?;
 
