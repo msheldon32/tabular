@@ -6,10 +6,19 @@ use std::path::PathBuf;
 use crate::mode::Mode;
 use crate::mode::visual::SelectionInfo;
 use crate::ui::canvas::CanvasColor;
+use crate::numeric::calctype::CalcType;
+use crate::util::CalcError;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginType {
+    Command,
+    Function,
+}
 
 pub struct PluginManager {
     lua: Lua,
     commands: HashMap<String, String>, // command_name -> script content
+    functions: HashMap<String, String>, // function_name -> script content (uppercase keys)
     prompt_results: HashMap<String, String>, // question -> answer for deferred prompts
 }
 
@@ -46,7 +55,7 @@ pub enum PluginAction {
 
 pub struct PluginResult {
     pub actions: Vec<PluginAction>,
-    pub message: Option<String>,
+    pub message: Option<String>
 }
 
 impl PluginManager {
@@ -55,6 +64,7 @@ impl PluginManager {
         Self {
             lua,
             commands: HashMap::new(),
+            functions: HashMap::new(),
             prompt_results: HashMap::new(),
         }
     }
