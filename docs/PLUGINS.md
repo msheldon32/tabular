@@ -364,6 +364,103 @@ return {
 }
 ```
 
+## Function Plugins
+
+In addition to command plugins, Tabular supports **function plugins** that extend the formula system. Function plugins are called from cell formulas (e.g. `=SIN(A1)`) and return a single value. They cannot mutate cells or use the canvas.
+
+### Structure
+
+A function plugin returns a table with `type = "function"` and a `functions` list declaring which functions it provides. Each function name maps to a Lua function that receives an `args` table of evaluated values and returns a single number, string, or boolean.
+
+```lua
+return {
+    name = "trig",
+    type = "function",
+    functions = {"sin", "cos", "tan"},
+    sin = function(args)
+        return math.sin(args[1])
+    end,
+    cos = function(args)
+        return math.cos(args[1])
+    end,
+    tan = function(args)
+        return math.tan(args[1])
+    end,
+}
+```
+
+A single plugin file can define multiple functions. The `functions` list controls which names are registered — each entry must match a function field on the same table.
+
+### Usage in Formulas
+
+Once loaded, function plugins are available in any cell formula:
+
+```
+=SIN(3.14159)
+=COS(A1)
+=SIN(A1) + COS(B1)
+```
+
+Function names are case-insensitive in formulas (`sin`, `SIN`, and `Sin` all work).
+
+### Arguments
+
+Arguments are passed as a Lua table. Cell references and expressions are evaluated before the plugin receives them:
+
+| Formula | args[1] | args[2] |
+|---------|---------|---------|
+| `=MYFUNC(5)` | `5` | — |
+| `=MYFUNC(A1)` | value of A1 | — |
+| `=MYFUNC(A1+B1, 10)` | sum of A1+B1 | `10` |
+
+Arguments can be numbers (int or float), strings, or booleans.
+
+### Return Values
+
+A function plugin must return one of:
+
+- **number** — stored as Int or Float
+- **string** — stored as Str
+- **boolean** — stored as Bool
+
+Returning `nil` or a table is an error.
+
+### Differences from Command Plugins
+
+| | Command Plugin | Function Plugin |
+|-|----------------|-----------------|
+| **Triggered by** | `:command` in command mode | `=FUNC()` in a cell formula |
+| **Defined with** | `run` function | Named functions + `functions` list |
+| **Can mutate cells** | Yes | No |
+| **Can use canvas** | Yes | No |
+| **Can insert/delete rows/cols** | Yes | No |
+| **Returns** | Actions (set_cell, etc.) | A single value |
+| **Multiple per file** | No (one command per plugin) | Yes (one file can define many functions) |
+
+### Example: Unit Conversion
+
+```lua
+return {
+    name = "convert",
+    type = "function",
+    functions = {"mi2km", "km2mi", "f2c", "c2f"},
+    mi2km = function(args)
+        return args[1] * 1.60934
+    end,
+    km2mi = function(args)
+        return args[1] / 1.60934
+    end,
+    f2c = function(args)
+        return (args[1] - 32) * 5 / 9
+    end,
+    c2f = function(args)
+        return args[1] * 9 / 5 + 32
+    end,
+}
+```
+
+Usage: `=MI2KM(A1)`, `=F2C(98.6)`
+
 ## Notes
 
 - Plugin changes are integrated with the undo system
@@ -372,3 +469,4 @@ return {
 - Invalid operations (out of bounds, etc.) are silently ignored
 - Canvas output is view-only and not recorded in undo history
 - Persistent data is stored per-key in `~/.config/tabular/data/`
+- Function plugins participate in formula evaluation via `:calc` — they are called during the normal calculation pass
