@@ -139,7 +139,7 @@ pub fn evaluate_function<E: ExprEvaluator>(
             let val = evaluator.eval(&args[0], results);
 
             match val {
-                Err(x) => evaluator.eval(&args[1], results),
+                Err(_) => evaluator.eval(&args[1], results),
                 _default => _default
             }
         },

@@ -151,6 +151,18 @@ impl PluginManager {
         self.functions.keys().collect()
     }
 
+    /// Create a generic function that is handled by dispatch
+    fn add_default_command(&self, actions_table: mlua::Table, name: String) -> LuaResult<mlua::Function> {
+        self.lua.create_function(move |lua, at: usize| {
+            let action = lua.create_table()?;
+            action.set("type", name.clone())?;
+            action.set("at", at)?;
+            let len = actions_table.len()? + 1;
+            actions_table.set(len, action)?;
+            Ok(())
+        })
+    }
+
     /// Execute a function plugin with evaluated arguments.
     /// Returns a single CalcType value. Function plugins cannot mutate cells.
     pub fn execute_function(
@@ -289,131 +301,25 @@ impl PluginManager {
             Ok(())
         })?;
 
-        // Create insert_row function
-        let actions_ref2 = actions_table.clone();
-        let insert_row_fn = self.lua.create_function(move |lua, at: usize| {
-            let action = lua.create_table()?;
-            action.set("type", "insert_row")?;
-            action.set("at", at)?;
-            let len = actions_ref2.len()? + 1;
-            actions_ref2.set(len, action)?;
-            Ok(())
-        })?;
-
-        // Create delete_row function
-        let actions_ref3 = actions_table.clone();
-        let delete_row_fn = self.lua.create_function(move |lua, at: usize| {
-            let action = lua.create_table()?;
-            action.set("type", "delete_row")?;
-            action.set("at", at)?;
-            let len = actions_ref3.len()? + 1;
-            actions_ref3.set(len, action)?;
-            Ok(())
-        })?;
-
-        // Create insert_col function
-        let actions_ref4 = actions_table.clone();
-        let insert_col_fn = self.lua.create_function(move |lua, at: usize| {
-            let action = lua.create_table()?;
-            action.set("type", "insert_col")?;
-            action.set("at", at)?;
-            let len = actions_ref4.len()? + 1;
-            actions_ref4.set(len, action)?;
-            Ok(())
-        })?;
-
-        // Create delete_col function
-        let actions_ref5 = actions_table.clone();
-        let delete_col_fn = self.lua.create_function(move |lua, at: usize| {
-            let action = lua.create_table()?;
-            action.set("type", "delete_col")?;
-            action.set("at", at)?;
-            let len = actions_ref5.len()? + 1;
-            actions_ref5.set(len, action)?;
-            Ok(())
-        })?;
+        let insert_row_fn = self.add_default_command(actions_table.clone(), "insert_row".to_string())?;
+        let insert_col_fn = self.add_default_command(actions_table.clone(), "insert_col".to_string())?;
+        let delete_row_fn = self.add_default_command(actions_table.clone(), "delete_row".to_string())?;
+        let delete_col_fn = self.add_default_command(actions_table.clone(), "delete_col".to_string())?;
+        let canvas_clear_fn = self.add_default_command(actions_table.clone(), "canvas_clear".to_string())?;
+        let canvas_show_fn = self.add_default_command(actions_table.clone(), "canvas_show".to_string())?;
+        let canvas_hide_fn = self.add_default_command(actions_table.clone(), "canvas_hide".to_string())?;
+        let canvas_set_title_fn = self.add_default_command(actions_table.clone(), "canvas_set_title".to_string())?;
+        let canvas_set_text_fn = self.add_default_command(actions_table.clone(), "canvas_set_text".to_string())?;
+        let canvas_add_text_fn = self.add_default_command(actions_table.clone(), "canvas_add_text".to_string())?;
+        let canvas_add_separator_fn = self.add_default_command(actions_table.clone(), "canvas_add_separator".to_string())?;
+        let canvas_add_blank_fn = self.add_default_command(actions_table.clone(), "canvas_add_blank".to_string())?;
+        let canvas_add_header_fn = self.add_default_command(actions_table.clone(), "canvas_add_header".to_string())?;
 
         // Create message holder
         let message_table = self.lua.create_table()?;
         let msg_ref = message_table.clone();
         let set_message_fn = self.lua.create_function(move |_, msg: String| {
             msg_ref.set("msg", msg)?;
-            Ok(())
-        })?;
-
-        // Canvas API functions
-        let actions_ref6 = actions_table.clone();
-        let canvas_clear_fn = self.lua.create_function(move |lua, ()| {
-            let action = lua.create_table()?;
-            action.set("type", "canvas_clear")?;
-            let len = actions_ref6.len()? + 1;
-            actions_ref6.set(len, action)?;
-            Ok(())
-        })?;
-
-        let actions_ref7 = actions_table.clone();
-        let canvas_show_fn = self.lua.create_function(move |lua, ()| {
-            let action = lua.create_table()?;
-            action.set("type", "canvas_show")?;
-            let len = actions_ref7.len()? + 1;
-            actions_ref7.set(len, action)?;
-            Ok(())
-        })?;
-
-        let actions_ref8 = actions_table.clone();
-        let canvas_hide_fn = self.lua.create_function(move |lua, ()| {
-            let action = lua.create_table()?;
-            action.set("type", "canvas_hide")?;
-            let len = actions_ref8.len()? + 1;
-            actions_ref8.set(len, action)?;
-            Ok(())
-        })?;
-
-        let actions_ref9 = actions_table.clone();
-        let canvas_set_title_fn = self.lua.create_function(move |lua, title: String| {
-            let action = lua.create_table()?;
-            action.set("type", "canvas_set_title")?;
-            action.set("title", title)?;
-            let len = actions_ref9.len()? + 1;
-            actions_ref9.set(len, action)?;
-            Ok(())
-        })?;
-
-        let actions_ref10 = actions_table.clone();
-        let canvas_add_text_fn = self.lua.create_function(move |lua, text: String| {
-            let action = lua.create_table()?;
-            action.set("type", "canvas_add_text")?;
-            action.set("text", text)?;
-            let len = actions_ref10.len()? + 1;
-            actions_ref10.set(len, action)?;
-            Ok(())
-        })?;
-
-        let actions_ref11 = actions_table.clone();
-        let canvas_add_header_fn = self.lua.create_function(move |lua, text: String| {
-            let action = lua.create_table()?;
-            action.set("type", "canvas_add_header")?;
-            action.set("text", text)?;
-            let len = actions_ref11.len()? + 1;
-            actions_ref11.set(len, action)?;
-            Ok(())
-        })?;
-
-        let actions_ref12 = actions_table.clone();
-        let canvas_add_separator_fn = self.lua.create_function(move |lua, ()| {
-            let action = lua.create_table()?;
-            action.set("type", "canvas_add_separator")?;
-            let len = actions_ref12.len()? + 1;
-            actions_ref12.set(len, action)?;
-            Ok(())
-        })?;
-
-        let actions_ref13 = actions_table.clone();
-        let canvas_add_blank_fn = self.lua.create_function(move |lua, ()| {
-            let action = lua.create_table()?;
-            action.set("type", "canvas_add_blank")?;
-            let len = actions_ref13.len()? + 1;
-            actions_ref13.set(len, action)?;
             Ok(())
         })?;
 
