@@ -532,96 +532,9 @@ impl PluginManager {
         let mut actions = Vec::new();
         for i in 1..=actions_table.len()? {
             if let Ok(action) = actions_table.get::<mlua::Table>(i) {
-                let action_type: String = action.get("type")?;
-                match action_type.as_str() {
-                    "set_cell" => {
-                        let row: usize = action.get("row")?;
-                        let col: usize = action.get("col")?;
-                        let value: String = action.get("value")?;
-                        actions.push(PluginAction::SetCell {
-                            row: row.saturating_sub(1),
-                            col: col.saturating_sub(1),
-                            value,
-                        });
-                    }
-                    "insert_row" => {
-                        let at: usize = action.get("at")?;
-                        actions.push(PluginAction::InsertRow { at: at.saturating_sub(1) });
-                    }
-                    "delete_row" => {
-                        let at: usize = action.get("at")?;
-                        actions.push(PluginAction::DeleteRow { at: at.saturating_sub(1) });
-                    }
-                    "insert_col" => {
-                        let at: usize = action.get("at")?;
-                        actions.push(PluginAction::InsertCol { at: at.saturating_sub(1) });
-                    }
-                    "delete_col" => {
-                        let at: usize = action.get("at")?;
-                        actions.push(PluginAction::DeleteCol { at: at.saturating_sub(1) });
-                    }
-                    // Canvas actions
-                    "canvas_clear" => {
-                        actions.push(PluginAction::CanvasClear);
-                    }
-                    "canvas_show" => {
-                        actions.push(PluginAction::CanvasShow);
-                    }
-                    "canvas_hide" => {
-                        actions.push(PluginAction::CanvasHide);
-                    }
-                    "canvas_set_title" => {
-                        let title: String = action.get("text")?;
-                        actions.push(PluginAction::CanvasSetTitle { title });
-                    }
-                    "canvas_add_text" => {
-                        let text: String = action.get("text")?;
-                        actions.push(PluginAction::CanvasAddText { text });
-                    }
-                    "canvas_add_header" => {
-                        let text: String = action.get("text")?;
-                        actions.push(PluginAction::CanvasAddHeader { text });
-                    }
-                    "canvas_add_separator" => {
-                        actions.push(PluginAction::CanvasAddSeparator);
-                    }
-                    "canvas_add_blank" => {
-                        actions.push(PluginAction::CanvasAddBlank);
-                    }
-                    "canvas_add_styled_text" => {
-                        let text: String = action.get("text")?;
-                        let fg: Option<String> = action.get("fg").ok();
-                        let bg: Option<String> = action.get("bg").ok();
-                        let bold: bool = action.get("bold").unwrap_or(false);
-                        actions.push(PluginAction::CanvasAddStyledText {
-                            text,
-                            fg: fg.and_then(|s| CanvasColor::from_str(&s)),
-                            bg: bg.and_then(|s| CanvasColor::from_str(&s)),
-                            bold,
-                        });
-                    }
-                    "prompt_request" => {
-                        let question: String = action.get("question")?;
-                        let default: String = action.get("default").unwrap_or_default();
-                        actions.push(PluginAction::PromptRequest { question, default });
-                    }
-                    "save_data" => {
-                        let key: String = action.get("key")?;
-                        let value: String = action.get("value")?;
-                        // Inline save logic
-                        let safe_key: String = key.chars()
-                            .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
-                            .collect();
-                        let data_dir = if let Some(home) = std::env::var_os("HOME") {
-                            PathBuf::from(home).join(".config/tabular/data")
-                        } else {
-                            PathBuf::from(".config/tabular/data")
-                        };
-                        let _ = fs::create_dir_all(&data_dir);
-                        let path = data_dir.join(&safe_key);
-                        let _ = fs::write(&path, &value);
-                    }
-                    _ => {}
+
+                if let Some(plugin_action) = match_action(action) {
+                    actions.push(plugin_action);
                 }
             }
         }
@@ -630,6 +543,101 @@ impl PluginManager {
         let message: Option<String> = message_table.get("msg").ok();
 
         Ok(PluginResult { actions, message })
+    }
+}
+
+fn match_action(action: mlua::Table) -> Option<PluginAction> {
+    let action_type: String = action.get("type").ok()?;
+    match action_type.as_str() {
+        "set_cell" => {
+            let row: usize = action.get("row").ok()?;
+            let col: usize = action.get("col").ok()?;
+            let value: String = action.get("value").ok()?;
+            Some(PluginAction::SetCell {
+                row: row.saturating_sub(1),
+                col: col.saturating_sub(1),
+                value,
+            })
+        }
+        "insert_row" => {
+            let at: usize = action.get("at").ok()?;
+            Some(PluginAction::InsertRow { at: at.saturating_sub(1) })
+        }
+        "delete_row" => {
+            let at: usize = action.get("at").ok()?;
+            Some(PluginAction::DeleteRow { at: at.saturating_sub(1) })
+        }
+        "insert_col" => {
+            let at: usize = action.get("at").ok()?;
+            Some(PluginAction::InsertCol { at: at.saturating_sub(1) })
+        }
+        "delete_col" => {
+            let at: usize = action.get("at").ok()?;
+            Some(PluginAction::DeleteCol { at: at.saturating_sub(1) })
+        }
+        // Canvas actions
+        "canvas_clear" => {
+            Some(PluginAction::CanvasClear)
+        }
+        "canvas_show" => {
+            Some(PluginAction::CanvasShow)
+        }
+        "canvas_hide" => {
+            Some(PluginAction::CanvasHide)
+        }
+        "canvas_set_title" => {
+            let title: String = action.get("text").ok()?;
+            Some(PluginAction::CanvasSetTitle { title })
+        }
+        "canvas_add_text" => {
+            let text: String = action.get("text").ok()?;
+            Some(PluginAction::CanvasAddText { text })
+        }
+        "canvas_add_header" => {
+            let text: String = action.get("text").ok()?;
+            Some(PluginAction::CanvasAddHeader { text })
+        }
+        "canvas_add_separator" => {
+            Some(PluginAction::CanvasAddSeparator)
+        }
+        "canvas_add_blank" => {
+            Some(PluginAction::CanvasAddBlank)
+        }
+        "canvas_add_styled_text" => {
+            let text: String = action.get("text").ok()?;
+            let fg: Option<String> = action.get("fg").ok();
+            let bg: Option<String> = action.get("bg").ok();
+            let bold: bool = action.get("bold").unwrap_or(false);
+            Some(PluginAction::CanvasAddStyledText {
+                text,
+                fg: fg.and_then(|s| CanvasColor::from_str(&s)),
+                bg: bg.and_then(|s| CanvasColor::from_str(&s)),
+                bold,
+            })
+        }
+        "prompt_request" => {
+            let question: String = action.get("question").ok()?;
+            let default: String = action.get("default").unwrap_or_default();
+            Some(PluginAction::PromptRequest { question, default })
+        }
+        "save_data" => {
+            let key: String = action.get("key").ok()?;
+            let value: String = action.get("value").ok()?;
+            // Inline save logic
+            let safe_key: String = key.chars()
+                .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+                .collect();
+            let data_dir = if let Some(home) = std::env::var_os("HOME") {
+                PathBuf::from(home).join(".config/tabular/data")
+            } else {
+                PathBuf::from(".config/tabular/data")
+            };
+            let _ = fs::create_dir_all(&data_dir);
+            let path = data_dir.join(&safe_key);
+            let _ = fs::write(&path, &value);
+            None
+        }
+        _ => {None}
     }
 }
 
