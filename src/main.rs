@@ -15,6 +15,8 @@ mod string;
 
 use std::io;
 use std::path::PathBuf;
+use tracing::{info};
+use tracing_subscriber;
 
 use crossterm::{
     execute,
@@ -103,6 +105,8 @@ fn print_help() {
 }
 
 fn main() -> io::Result<()> {
+    tracing_subscriber::fmt().init();
+
     let (file_path, delimiter, fork, read_only) = parse_args();
 
     let file_io = if fork {

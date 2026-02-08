@@ -18,3 +18,5 @@ toml = "0.8"
 arboard = "3"
 mlua = { version = "0.10", features = ["lua54", "vendored"] }
 rayon = "1.10"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.22"
