@@ -14,8 +14,9 @@ mod config;
 mod string;
 
 use std::io;
+use std::panic;
 use std::path::PathBuf;
-use tracing::{info};
+use tracing::{info, error};
 use tracing_subscriber;
 
 use crossterm::{
@@ -89,6 +90,33 @@ fn parse_delimiter(s: &str) -> Option<u8> {
     }
 }
 
+/// Handle panics gracefully
+fn install_panic_hook() {
+    let default_hook = panic::take_hook();
+
+    panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+
+        if let Some(location) = info.location() {
+            error!(
+                file = location.file(),
+                line = location.line(),
+                "panic occured"
+            );
+        } else {
+            error!("panic occured");
+        }
+
+        if let Some(s) = info.payload().downcast_ref::<&str>() {
+            error!(message = %s);
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            error!(message = %s);
+        }
+
+        default_hook(info);
+    }));
+}
+
 fn print_help() {
     eprintln!("tabular - A terminal-based CSV editor with vim-like keybindings");
     eprintln!();
@@ -107,6 +135,8 @@ fn print_help() {
 fn main() -> io::Result<()> {
     tracing_subscriber::fmt().init();
     info!("Tabular started");
+
+    install_panic_hook();
 
     let (file_path, delimiter, fork, read_only) = parse_args();
 
