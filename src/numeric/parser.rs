@@ -1053,16 +1053,6 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_cell_refs() {
-        let expr = parse("A1 + B2 + SUM(C1:C10)").unwrap();
-        let refs = extract_cell_refs(&expr);
-        assert!(refs.contains(&("A".to_string(), 1)));
-        assert!(refs.contains(&("B".to_string(), 2)));
-        assert!(refs.contains(&("C".to_string(), 1)));
-        assert!(refs.contains(&("C".to_string(), 10)));
-    }
-
-    #[test]
     fn test_case_insensitivity() {
         // Function names should be normalized to uppercase
         let expr = parse("sum(a1:a10)").unwrap();

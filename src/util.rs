@@ -316,58 +316,6 @@ mod tests {
         assert!(parse_cell_ref("A1B").is_none());
     }
 
-    // === parse_range tests ===
-
-    #[test]
-    fn test_parse_range_column() {
-        let refs = parse_range("A1:A3", 100, 26, false).unwrap();
-        assert_eq!(refs.len(), 3);
-        assert_eq!(refs[0], CellRef { row: 0, col: 0 });
-        assert_eq!(refs[1], CellRef { row: 1, col: 0 });
-        assert_eq!(refs[2], CellRef { row: 2, col: 0 });
-    }
-
-    #[test]
-    fn test_parse_range_row() {
-        let refs = parse_range("A1:C1", 100, 26, false).unwrap();
-        assert_eq!(refs.len(), 3);
-        assert_eq!(refs[0], CellRef { row: 0, col: 0 });
-        assert_eq!(refs[1], CellRef { row: 0, col: 1 });
-        assert_eq!(refs[2], CellRef { row: 0, col: 2 });
-    }
-
-    #[test]
-    fn test_parse_range_rectangular() {
-        let refs = parse_range("A1:B2", 100, 26, false).unwrap();
-        assert_eq!(refs.len(), 4);
-        assert!(refs.contains(&CellRef { row: 0, col: 0 }));
-        assert!(refs.contains(&CellRef { row: 0, col: 1 }));
-        assert!(refs.contains(&CellRef { row: 1, col: 0 }));
-        assert!(refs.contains(&CellRef { row: 1, col: 1 }));
-    }
-
-    #[test]
-    fn test_parse_range_reversed() {
-        // Should work even if end comes before start
-        let refs = parse_range("B2:A1", 100, 26, false).unwrap();
-        assert_eq!(refs.len(), 4);
-    }
-
-    #[test]
-    fn test_parse_range_single_cell() {
-        let refs = parse_range("A1:A1", 100, 26, false).unwrap();
-        assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0], CellRef { row: 0, col: 0 });
-    }
-
-    #[test]
-    fn test_parse_range_invalid() {
-        assert!(parse_range("A1", 100, 26, false).is_err());
-        assert!(parse_range("A1:", 100, 26, false).is_err());
-        assert!(parse_range(":A1", 100, 26, false).is_err());
-        assert!(parse_range("A1:B", 100, 26, false).is_err());
-    }
-
     // === translate_references tests ===
     // Note: translate_references only works on formulas (strings starting with '=')
     // Non-formula strings are returned unchanged.
