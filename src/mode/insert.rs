@@ -40,7 +40,7 @@ impl InsertHandler {
             let txn = Transaction::SetCell {
                 row: view.cursor_row,
                 col: view.cursor_col,
-                old_value: String::new(), // Will be filled by caller
+                old_value: self.true_val.clone(),
                 new_value: self.buffer.clone(),
             };
             return (KeyResult::ExecuteAndFinish(txn), None);
