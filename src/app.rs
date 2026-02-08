@@ -7,7 +7,6 @@ use std::sync::{
 use std::thread::JoinHandle;
 use std::rc::Rc;
 use std::cell::RefCell;
-use std::cmp;
 
 use crossterm::event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::CrosstermBackend, Terminal};
