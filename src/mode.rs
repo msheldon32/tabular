@@ -38,3 +38,6 @@ impl Default for Mode {
         Mode::Normal
     }
 }
+
+#[cfg(test)]
+mod test;
