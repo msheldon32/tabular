@@ -22,6 +22,7 @@ use tracing_subscriber::fmt::writer::MakeWriter;
 
 use crossterm::{
     execute,
+    cursor::MoveToColumn,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -136,7 +137,10 @@ impl Write for MainScreenWriterHandle {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         // Temporarily leave the alternate screen
         execute!(io::stdout(), LeaveAlternateScreen)?;
+        println!();
+        execute!(io::stdout(), MoveToColumn(0))?;
         let result = io::stdout().write(buf);
+        execute!(io::stdout(), MoveToColumn(0))?;
         io::stdout().flush()?; // flush immediately
         // Re-enter the alternate screen
         execute!(io::stdout(), EnterAlternateScreen)?;
@@ -182,7 +186,6 @@ fn main() -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
-    info!("Tabular started");
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
