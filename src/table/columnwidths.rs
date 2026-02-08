@@ -60,6 +60,10 @@ impl ColumnWidths {
         self.col_widths_dirty = false;
     } 
 
+    pub fn get_col_width(&mut self, col_idx: usize) -> usize {
+        self.col_widths[col_idx]
+    }
+
     pub fn col_widths(&mut self, table: &Table, parallel: bool) -> &[usize] {
         if self.col_widths_dirty {
             self.recompute(table, parallel);

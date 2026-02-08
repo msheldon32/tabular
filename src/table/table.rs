@@ -148,7 +148,7 @@ impl Table {
 
     /// Update width for a single column (when cell changes)
     #[inline]
-    fn update_col_width(&mut self, col: usize, new_len: usize) {
+    pub fn update_col_width(&mut self, col: usize, new_len: usize) {
         self.col_widths.lock().unwrap().update_col_width(col, new_len);
     }
 

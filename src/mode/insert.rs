@@ -12,7 +12,8 @@ pub struct InsertHandler {
     /// Cursor position as character index (not byte index)
     pub cursor: usize,
 
-    true_val: String
+    true_val: String,
+    pub old_width: usize
 }
 
 impl InsertHandler {
@@ -21,13 +22,15 @@ impl InsertHandler {
             buffer: String::new(),
             true_val: String::new(),
             cursor: 0,
+            old_width: 0
         }
     }
 
-    pub fn start_edit(&mut self, initial: String) {
+    pub fn start_edit(&mut self, initial: String, old_width: usize) {
         self.true_val = initial.clone();
         self.buffer = initial;
         self.cursor = crate::util::char_count(&self.buffer);
+        self.old_width = old_width
     }
 
     pub fn handle_key(&mut self, key: KeyEvent, view: &TableView) -> (KeyResult, Option<Transaction>) {

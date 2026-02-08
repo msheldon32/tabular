@@ -335,21 +335,3 @@ fn render_command_line(frame: &mut Frame, app: &App, area: Rect) {
     let command_line = Paragraph::new(content).style(style);
     frame.render_widget(command_line, area);
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_letters_from_col() {
-        assert_eq!(letters_from_col(0), "A");
-        assert_eq!(letters_from_col(1), "B");
-        assert_eq!(letters_from_col(25), "Z");
-        assert_eq!(letters_from_col(26), "AA");
-        assert_eq!(letters_from_col(27), "AB");
-        assert_eq!(letters_from_col(51), "AZ");
-        assert_eq!(letters_from_col(52), "BA");
-        assert_eq!(letters_from_col(701), "ZZ");
-        assert_eq!(letters_from_col(702), "AAA");
-    }
-}

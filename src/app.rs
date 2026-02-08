@@ -7,6 +7,7 @@ use std::sync::{
 use std::thread::JoinHandle;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::cmp;
 
 use crossterm::event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -483,12 +484,12 @@ impl App {
         match res {
             KeyResult::ExecuteAndFinish(txn) => {
                 self.execute_and_finish(txn);
-                self.table.recompute_col_widths();
+                self.table.recompute_col_widths(); 
             }
             KeyResult::Finish => {
                 self.mode = Mode::Normal;
                 self.calling_mode = None;
-                self.table.recompute_col_widths(); 
+                self.table.update_col_width(self.view.cursor_col, self.insert_handler.old_width);
             }
             _default => {
                 self.table.expand_col_width(self.view.cursor_col, self.insert_handler.buffer.len());

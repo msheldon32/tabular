@@ -170,7 +170,8 @@ impl App {
                     self.command_handler.start();
                 } else if mode == Mode::Insert {
                     let current = crate::table::operations::current_cell(&self.view, &self.table).clone();
-                    self.insert_handler.start_edit(current);
+                    let old_width = self.table.col_widths.lock().unwrap().get_col_width(self.view.cursor_col);
+                    self.insert_handler.start_edit(current, old_width);
                 } else if mode == Mode::Search {
                     self.search_handler.start_search();
                 }
