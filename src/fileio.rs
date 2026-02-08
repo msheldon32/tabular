@@ -277,6 +277,8 @@ impl FileIO {
         let file = fs::File::open(path)?;
         let reader = BufReader::with_capacity(1 << 20, file); // 1 MB
 
+        let mut has_padding = false;
+
         let mut csv_reader = csv::ReaderBuilder::new()
             .delimiter(delim)
             .has_headers(false)
@@ -302,6 +304,7 @@ impl FileIO {
             // Track if padding will be needed (O(1) instead of O(n²))
             if row.len() > max_cols {
                 max_cols = row.len();
+                has_padding = true;
             }
 
             current_chunk.push(row);
@@ -328,7 +331,11 @@ impl FileIO {
             table.add_chunk(vec![vec![String::new()]], max_cols);
         }
 
-        let warnings = Vec::new();
+        let mut warnings = Vec::new();
+
+        if has_padding {
+            warnings.push("Padded".to_string());
+        }
 
         Ok(LoadResult {
             table,
