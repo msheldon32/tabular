@@ -236,21 +236,11 @@ impl PluginManager {
         )))
     }
 
-    pub fn execute(
-        &self,
-        command: &str,
-        args: &[String],
-        ctx: &PluginContext,
-        get_cell: impl Fn(usize, usize) -> Option<String>,
-    ) -> LuaResult<PluginResult> {
-        let script = match self.commands.get(command) {
-            Some(s) => s,
-            None => return Ok(PluginResult {
-                actions: vec![],
-                message: Some(format!("Unknown plugin command: {}", command))
-            }),
-        };
-
+    fn build_api(&self, 
+                args: &[String],
+                ctx: &PluginContext,
+                get_cell: impl Fn(usize, usize) -> Option<String>,
+            ) -> LuaResult<(mlua::Table, mlua::Table)> {
         // Create the context table
         let ctx_table = self.lua.create_table()?;
         ctx_table.set("cursor_row", ctx.cursor_row + 1)?; // 1-indexed for Lua
@@ -520,6 +510,26 @@ impl PluginManager {
         api.set("load_data", load_data_fn)?;
 
         self.lua.globals().set("tabular", api)?;
+
+        Ok((actions_table, message_table))
+    }
+
+    pub fn execute(
+        &self,
+        command: &str,
+        args: &[String],
+        ctx: &PluginContext,
+        get_cell: impl Fn(usize, usize) -> Option<String>,
+    ) -> LuaResult<PluginResult> {
+        let script = match self.commands.get(command) {
+            Some(s) => s,
+            None => return Ok(PluginResult {
+                actions: vec![],
+                message: Some(format!("Unknown plugin command: {}", command))
+            }),
+        };
+
+        let (actions_table, message_table) = self.build_api(args, ctx, get_cell)?;
 
         // Load and execute the plugin
         let chunk = self.lua.load(script);
