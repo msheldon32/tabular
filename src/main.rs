@@ -137,9 +137,15 @@ impl Write for MainScreenWriterHandle {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         // Temporarily leave the alternate screen
         execute!(io::stdout(), LeaveAlternateScreen)?;
-        println!();
+
+        let mut buf = buf.to_vec();
+
+        if !buf.ends_with(b"\n") {
+            buf.push(b'\n');
+        }
+        
         execute!(io::stdout(), MoveToColumn(0))?;
-        let result = io::stdout().write(buf);
+        let result = io::stdout().write(&buf);
         execute!(io::stdout(), MoveToColumn(0))?;
         io::stdout().flush()?; // flush immediately
         // Re-enter the alternate screen
