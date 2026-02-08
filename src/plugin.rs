@@ -527,7 +527,7 @@ impl PluginManager {
 
         if let Value::Table(table) = plugin {
             if let Ok(run_fn) = table.get::<Function>("run") {
-                run_fn.call::<()>(())?;
+                run_fn.call::<()>(()).map_err(|e| {error!(error=%e, "Error in Lua plugin"); e} )?;
             }
         }
 

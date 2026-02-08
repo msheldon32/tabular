@@ -13,16 +13,15 @@ mod numeric;
 mod config;
 mod string;
 
-use std::io::{self,Write};
+use std::io;
 use std::panic;
 use std::path::PathBuf;
+use std::sync::{Arc, atomic::AtomicBool, Mutex};
 use tracing::{info, error};
-use tracing_subscriber;
-use tracing_subscriber::fmt::writer::MakeWriter;
+use signal_hook::flag;
 
 use crossterm::{
     execute,
-    cursor::MoveToColumn,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -119,51 +118,6 @@ fn install_panic_hook() {
     }));
 }
 
-/// A `MakeWriter` for `tracing` that logs to the **main screen** by leaving the alternate screen temporarily.
-pub struct MainScreenWriter;
-
-impl<'a> MakeWriter<'a> for MainScreenWriter {
-    type Writer = MainScreenWriterHandle;
-
-    fn make_writer(&'a self) -> Self::Writer {
-        MainScreenWriterHandle
-    }
-}
-
-/// A handle that writes to stdout outside the alternate screen
-pub struct MainScreenWriterHandle;
-
-impl Write for MainScreenWriterHandle {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        // Temporarily leave the alternate screen
-        execute!(io::stdout(), LeaveAlternateScreen)?;
-
-        let mut buf = buf.to_vec();
-
-        if !buf.ends_with(b"\n") {
-            buf.push(b'\n');
-        }
-        execute!(io::stdout(), MoveToColumn(0))?;
-
-        let buf_string = String::from_utf8_lossy(&buf);
-
-        for (i, line) in buf_string.lines().enumerate() {
-            io::stdout().write(&line.as_bytes());
-            io::stdout().write(b"\n");
-            execute!(io::stdout(), MoveToColumn(0))?;
-        }
-        io::stdout().flush()?; // flush immediately
-        
-        // Re-enter the alternate screen
-        execute!(io::stdout(), EnterAlternateScreen)?;
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        io::stdout().flush()
-    }
-}
-
 fn print_help() {
     eprintln!("tabular - A terminal-based CSV editor with vim-like keybindings");
     eprintln!();
@@ -179,9 +133,22 @@ fn print_help() {
     eprintln!("If no delimiter is specified, it will be auto-detected from the file content.");
 }
 
+
 fn main() -> io::Result<()> {
-    tracing_subscriber::fmt().with_writer(MainScreenWriter).init();
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/tabular.log")
+        .expect("Failed to open log file");
+    tracing_subscriber::fmt()
+        .with_writer(Mutex::new(log_file))
+        .init();
     info!("Tabular started");
+
+    // sigint/sigterm handling
+    let shutdown : Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    flag::register(signal_hook::consts::SIGINT, Arc::clone(&shutdown));
+    flag::register(signal_hook::consts::SIGTERM, Arc::clone(&shutdown));
 
     install_panic_hook();
 
@@ -196,10 +163,9 @@ fn main() -> io::Result<()> {
     let load_result = file_io.load_table().map_err(|e| {error!(error = %e, "Failed to load table"); e})?;
 
     enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(io::stdout(), EnterAlternateScreen)?;
 
-    let backend = CrosstermBackend::new(stdout);
+    let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
     // Show delimiter info if auto-detected (only when file exists and no explicit delimiter)
@@ -220,10 +186,10 @@ fn main() -> io::Result<()> {
         app.message = Some(messages.join("; "));
     }
 
-    let result = app.run(&mut terminal);
+    let result = app.run(&mut terminal, shutdown);
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(io::stdout(), LeaveAlternateScreen)?;
 
     result
 }

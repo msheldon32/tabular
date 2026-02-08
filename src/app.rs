@@ -1,6 +1,9 @@
 use std::io;
 use std::time::Duration;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::{
+    Arc, 
+    atomic::{AtomicBool, Ordering},
+    mpsc::{self, Receiver}};
 use std::thread::JoinHandle;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -224,8 +227,8 @@ impl App {
         }
     }
 
-    pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
-        while !self.should_quit {
+    pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, shutdown: Arc<AtomicBool>) -> io::Result<()> {
+        while !self.should_quit && !shutdown.load(Ordering::Relaxed) {
             // Check for completed background operations
             self.poll_background_result();
 
