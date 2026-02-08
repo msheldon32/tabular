@@ -2,6 +2,7 @@ use mlua::{Lua, Result as LuaResult, Function, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use tracing::error;
 
 use crate::mode::Mode;
 use crate::mode::visual::SelectionInfo;
@@ -111,7 +112,7 @@ impl PluginManager {
 
     fn register_plugin(&mut self, script: &str) -> LuaResult<Option<String>> {
         let chunk = self.lua.load(script);
-        let result: Value = chunk.eval()?;
+        let result: Value = chunk.eval().map_err(|e| {error!(error=%e, "Failed to load plugin"); e} )?;
 
         if let Value::Table(table) = result {
             let name: Option<String> = table.get("name").ok();

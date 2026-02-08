@@ -13,11 +13,12 @@ mod numeric;
 mod config;
 mod string;
 
-use std::io;
+use std::io::{self,Write};
 use std::panic;
 use std::path::PathBuf;
 use tracing::{info, error};
 use tracing_subscriber;
+use tracing_subscriber::fmt::writer::MakeWriter;
 
 use crossterm::{
     execute,
@@ -117,6 +118,36 @@ fn install_panic_hook() {
     }));
 }
 
+/// A `MakeWriter` for `tracing` that logs to the **main screen** by leaving the alternate screen temporarily.
+pub struct MainScreenWriter;
+
+impl<'a> MakeWriter<'a> for MainScreenWriter {
+    type Writer = MainScreenWriterHandle;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        MainScreenWriterHandle
+    }
+}
+
+/// A handle that writes to stdout outside the alternate screen
+pub struct MainScreenWriterHandle;
+
+impl Write for MainScreenWriterHandle {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        // Temporarily leave the alternate screen
+        execute!(io::stdout(), LeaveAlternateScreen)?;
+        let result = io::stdout().write(buf);
+        io::stdout().flush()?; // flush immediately
+        // Re-enter the alternate screen
+        execute!(io::stdout(), EnterAlternateScreen)?;
+        result
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        io::stdout().flush()
+    }
+}
+
 fn print_help() {
     eprintln!("tabular - A terminal-based CSV editor with vim-like keybindings");
     eprintln!();
@@ -133,7 +164,7 @@ fn print_help() {
 }
 
 fn main() -> io::Result<()> {
-    tracing_subscriber::fmt().init();
+    tracing_subscriber::fmt().with_writer(MainScreenWriter).init();
     info!("Tabular started");
 
     install_panic_hook();
@@ -146,11 +177,12 @@ fn main() -> io::Result<()> {
         FileIO::new(file_path, delimiter, read_only)?
     };
 
-    let load_result = file_io.load_table().map_err(|e| {tracing::error!(error = %e, "Failed to load table"); e})?;
+    let load_result = file_io.load_table().map_err(|e| {error!(error = %e, "Failed to load table"); e})?;
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
+    info!("Tabular started");
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
