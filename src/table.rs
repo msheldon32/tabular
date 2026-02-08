@@ -6,3 +6,6 @@ pub mod sort;
 pub mod columnwidths;
 
 pub use sort::SortDirection;
+
+#[cfg(test)]
+mod test;
