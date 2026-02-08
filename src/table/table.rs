@@ -143,21 +143,24 @@ impl Table {
         if size >= PARALLEL_THRESHOLD && self.col_count > 1 {
             // Parallel: compute each column's max width in parallel
             // Collect all cells first to enable parallel iteration
-            let all_rows: Vec<&Vec<String>> = self.rows_iter().collect();
-
-            self.col_widths = (0..self.col_count)
+            self.col_widths = (0..self.total_rows)
                 .into_par_iter()
-                .map(|col| {
-                    all_rows
-                        .iter()
-                        .filter_map(|row| row.get(col))
-                        .map(|s| crate::util::display_width(s))
-                        .max()
-                        .unwrap_or(3)
-                        .max(3)
-                        .min(self.max_col_width)
-                })
-                .collect();
+                .fold(|| vec![0; self.col_count],
+                      |mut acc : Vec<usize>, row_idx : usize |  {
+                        if let Some(row) = self.get_row(row_idx) {
+                            for (acc_w, x) in acc.iter_mut().zip(row.iter()) {
+                                *acc_w = cmp::max(*acc_w, crate::util::display_width(x));
+                            }
+                        }
+
+                        acc
+                }).reduce(
+                    || vec![0; self.col_count],
+                    |a,b| {
+                        a.iter().zip(b.iter())
+                            .map(|(x,y)| cmp::max(*x, *y)).collect()
+                    }
+                ).into_iter().map(|x| cmp::min(x, self.max_col_width)).collect();
         } else {
             // Sequential for small tables
             self.col_widths = (0..self.col_count)
