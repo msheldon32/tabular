@@ -167,8 +167,8 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<Re
                         let original_idx = crate::util::byte_index_of_char(buf, cursor_char);
                         let original_len = buf.chars().count();
 
-                        let endpoint = cmp::min(cmp::max(original_idx, app.table.max_col_width-1), original_len);
-                        let startpoint = endpoint.saturating_sub(app.table.max_col_width-1);
+                        let endpoint = cmp::min(cmp::max(original_idx, app.table.max_col_width()-1), original_len);
+                        let startpoint = endpoint.saturating_sub(app.table.max_col_width()-1);
                         buf = &buf[startpoint..cmp::min(endpoint+1, original_len)];
                         crate::util::byte_index_of_char(buf, cursor_char.saturating_sub(startpoint))
                     } else {

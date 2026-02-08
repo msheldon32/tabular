@@ -1,6 +1,9 @@
 use rayon::prelude::*;
-
 use std::cmp;
+
+use std::sync::{Arc, Mutex};
+
+use crate::table::columnwidths::ColumnWidths;
 
 /// Number of rows per chunk for memory-efficient storage
 pub const CHUNK_SIZE: usize = 1024;
@@ -18,10 +21,7 @@ pub struct Table {
     /// Number of columns
     col_count: usize,
     /// Cached column widths (max length of any cell in each column)
-    pub(crate) col_widths: Vec<usize>,
-    /// Whether col_widths needs full recompute
-    col_widths_dirty: bool,
-    pub max_col_width: usize
+    pub(crate) col_widths: Arc<Mutex<ColumnWidths>>
 }
 
 impl Table {
@@ -72,9 +72,7 @@ impl Table {
             chunks,
             total_rows,
             col_count,
-            col_widths: Vec::new(),
-            col_widths_dirty: true,
-            max_col_width: 30
+            col_widths: Arc::new(Mutex::new(ColumnWidths::new()))
         };
         table.recompute_col_widths();
         table
@@ -87,9 +85,7 @@ impl Table {
             chunks,
             total_rows,
             col_count,
-            col_widths: Vec::new(),
-            col_widths_dirty: true,
-            max_col_width: 30,
+            col_widths: Arc::new(Mutex::new(ColumnWidths::new()))
         };
         table.recompute_col_widths();
         table
@@ -100,9 +96,7 @@ impl Table {
             chunks: Vec::new(),
             total_rows: 0,
             col_count: 0,
-            col_widths: Vec::new(),
-            col_widths_dirty: true,
-            max_col_width: 30
+            col_widths: Arc::new(Mutex::new(ColumnWidths::new()))
         }
     }
 
@@ -128,11 +122,14 @@ impl Table {
     }
 
     /// Get cached column widths, recomputing if dirty
-    pub fn col_widths(&mut self) -> &[usize] {
-        if self.col_widths_dirty {
-            self.recompute_col_widths();
-        }
-        &self.col_widths
+    pub fn col_widths(&mut self) -> Vec<usize> {
+        let size = self.total_rows * self.col_count;
+
+        self.col_widths.lock().unwrap().col_widths(&self, size >= PARALLEL_THRESHOLD && self.col_count > 1).to_vec()
+    }
+
+    pub fn max_col_width(&self) -> usize {
+        self.col_widths.lock().unwrap().max_col_width
     }
 
     /// Force recompute of column widths
@@ -140,62 +137,25 @@ impl Table {
     pub fn recompute_col_widths(&mut self) {
         let size = self.total_rows * self.col_count;
 
-        if size >= PARALLEL_THRESHOLD && self.col_count > 1 {
-            // Parallel: compute each column's max width in parallel
-            // Collect all cells first to enable parallel iteration
-            self.col_widths = (0..self.total_rows)
-                .into_par_iter()
-                .fold(|| vec![0; self.col_count],
-                      |mut acc : Vec<usize>, row_idx : usize |  {
-                        if let Some(row) = self.get_row(row_idx) {
-                            for (acc_w, x) in acc.iter_mut().zip(row.iter()) {
-                                *acc_w = cmp::max(*acc_w, crate::util::display_width(x));
-                            }
-                        }
-
-                        acc
-                }).reduce(
-                    || vec![0; self.col_count],
-                    |a,b| {
-                        a.iter().zip(b.iter())
-                            .map(|(x,y)| cmp::max(*x, *y)).collect()
-                    }
-                ).into_iter().map(|x| cmp::min(x, self.max_col_width)).collect();
-        } else {
-            // Sequential for small tables
-            self.col_widths = (0..self.total_rows)
-                .fold(vec![0; self.col_count],
-                      |mut acc : Vec<usize>, row_idx : usize |  {
-                        if let Some(row) = self.get_row(row_idx) {
-                            for (acc_w, x) in acc.iter_mut().zip(row.iter()) {
-                                *acc_w = cmp::max(*acc_w, crate::util::display_width(x));
-                            }
-                        }
-
-                        acc
-                }).into_iter().map(|x| cmp::min(x, self.max_col_width)).collect();
-        }
-        self.col_widths_dirty = false;
+        self.col_widths.lock().unwrap().recompute(&self, size >= PARALLEL_THRESHOLD && self.col_count > 1);
     }
 
     /// Mark column widths as needing recompute
     #[inline]
     pub(crate) fn mark_widths_dirty(&mut self) {
-        self.col_widths_dirty = true;
+        self.col_widths.lock().unwrap().mark_widths_dirty();
     }
 
     /// Update width for a single column (when cell changes)
     #[inline]
     fn update_col_width(&mut self, col: usize, new_len: usize) {
-        if col < self.col_widths.len() {
-            self.col_widths[col] = cmp::min(self.col_widths[col].max(new_len).max(3), self.max_col_width)
-        }
+        self.col_widths.lock().unwrap().update_col_width(col, new_len);
     }
 
     /// Expand a column width if the new length is larger (public API for insert mode)
     #[inline]
     pub fn expand_col_width(&mut self, col: usize, new_len: usize) {
-        self.update_col_width(col, new_len);
+        self.col_widths.lock().unwrap().update_col_width(col, new_len);
     }
 
     pub fn get_cell(&self, row: usize, col: usize) -> Option<&String> {
@@ -562,10 +522,7 @@ impl Table {
             }
         }
         self.col_count += 1;
-        // Insert new column width (minimum width)
-        if idx <= self.col_widths.len() {
-            self.col_widths.insert(idx, 3);
-        }
+        self.col_widths.lock().unwrap().insert_at(idx, 3);
     }
 
     pub fn delete_col_at(&mut self, idx: usize) -> Option<Vec<String>> {
@@ -593,10 +550,7 @@ impl Table {
             }
         }
         self.col_count -= 1;
-        // Remove the column width entry
-        if idx < self.col_widths.len() {
-            self.col_widths.remove(idx);
-        }
+        self.col_widths.lock().unwrap().remove_at(idx);
         Some(col)
     }
 
@@ -663,9 +617,7 @@ impl Table {
                 }
             }
             // Extend col_widths if we added columns
-            while self.col_widths.len() < cols {
-                self.col_widths.push(3);
-            }
+            self.col_widths.lock().unwrap().ensure_size(cols, 3);
             self.col_count = cols;
         }
     }
@@ -690,9 +642,7 @@ impl Table {
             }
         }
         self.col_count += 1;
-        if idx <= self.col_widths.len() {
-            self.col_widths.insert(idx, max_width);
-        }
+        self.col_widths.lock().unwrap().insert_at(idx, max_width);
     }
 }
 
@@ -702,9 +652,7 @@ impl Default for Table {
             chunks: vec![vec![vec![String::new()]]],
             total_rows: 1,
             col_count: 1,
-            col_widths: vec![3],
-            col_widths_dirty: false,
-            max_col_width: 30,
+            col_widths: Arc::new(Mutex::new(ColumnWidths::new()))
         }
     }
 }

@@ -360,14 +360,8 @@ impl Table {
                 }
             }
         }
-
-        // Reorder column widths to match
-        let old_widths = self.col_widths.clone();
-        for (new_col, &src_col) in permutation.iter().enumerate() {
-            if new_col < self.col_widths.len() && src_col < old_widths.len() {
-                self.col_widths[new_col] = old_widths[src_col];
-            }
-        }
+        
+        self.col_widths.lock().unwrap().apply_permutation(permutation);
     }
 
     /// Get the permutation needed to sort rows by a column
