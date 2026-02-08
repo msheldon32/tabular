@@ -21,7 +21,6 @@ use crate::input::{
 };
 use crate::mode::search::SearchHandler;
 use crate::mode::Mode;
-use crate::table::operations;
 use crate::plugin::PluginManager;
 use crate::table::table::Table;
 use crate::table::SortDirection;
@@ -479,7 +478,7 @@ impl App {
     }
 
     fn handle_insert_mode(&mut self, key: KeyEvent) {
-        let (res, txn_option) = self.insert_handler.handle_key(key, &self.view);
+        let (res, _txn_option) = self.insert_handler.handle_key(key, &self.view);
 
         match res {
             KeyResult::ExecuteAndFinish(txn) => {

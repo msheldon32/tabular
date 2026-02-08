@@ -96,7 +96,6 @@ impl Table {
     }
 
     pub fn from_empty() -> Self {
-        let chunks: Vec<Vec<Vec<String>>> = Vec::new();
         Self {
             chunks: Vec::new(),
             total_rows: 0,

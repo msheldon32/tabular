@@ -147,8 +147,8 @@ fn main() -> io::Result<()> {
 
     // sigint/sigterm handling
     let shutdown : Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-    flag::register(signal_hook::consts::SIGINT, Arc::clone(&shutdown));
-    flag::register(signal_hook::consts::SIGTERM, Arc::clone(&shutdown));
+    flag::register(signal_hook::consts::SIGINT, Arc::clone(&shutdown))?;
+    flag::register(signal_hook::consts::SIGTERM, Arc::clone(&shutdown))?;
 
     install_panic_hook();
 

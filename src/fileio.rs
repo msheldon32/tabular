@@ -285,10 +285,8 @@ impl FileIO {
             .from_reader(reader);
 
         // Stream directly into chunks to avoid intermediate Vec allocation
-        //let mut chunks: Vec<Vec<Vec<String>>> = Vec::new();
         let mut current_chunk: Vec<Vec<String>> = Vec::with_capacity(CHUNK_SIZE);
         let mut max_cols: usize = 0;
-        let mut needs_padding = false;
         let mut row_no: usize = 0;
 
         let mut table = Table::from_empty();
@@ -303,12 +301,7 @@ impl FileIO {
 
             // Track if padding will be needed (O(1) instead of O(n²))
             if row.len() > max_cols {
-                if max_cols > 0 {
-                    needs_padding = true;
-                }
                 max_cols = row.len();
-            } else if row.len() < max_cols {
-                needs_padding = true;
             }
 
             current_chunk.push(row);
@@ -331,33 +324,12 @@ impl FileIO {
         // Handle empty file
         if table.is_empty() {
             //chunks.push(vec![vec![String::new()]]);
-            table.add_chunk(vec![vec![String::new()]], max_cols);
             max_cols = 1;
+            table.add_chunk(vec![vec![String::new()]], max_cols);
         }
 
-        let mut warnings = Vec::new();
+        let warnings = Vec::new();
 
-        // Pad short rows if needed
-        /*if needs_padding {
-            warnings.push(format!(
-                "Padded rows with empty cells (max width: {} columns)",
-                max_cols
-            ));
-
-            // Pad all rows to max_cols
-            for chunk in chunks.iter_mut() {
-                for row in chunk.iter_mut() {
-                    if row.len() < max_cols {
-                        row.resize(max_cols, String::new());
-                    }
-                }
-            }
-        }*/
-
-        /*Ok(LoadResult {
-            table: Table::from_chunks(chunks, max_cols),
-            warnings,
-        })*/
         Ok(LoadResult {
             table,
             warnings
