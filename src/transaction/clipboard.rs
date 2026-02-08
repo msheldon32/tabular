@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::table::table::Table;
-use crate::transaction::Transaction;
+use crate::transaction::transaction::Transaction;
 
 /// Where yanked data should be anchored when pasting
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -60,13 +60,13 @@ impl RegisterContent {
 /// - `+` - system clipboard register
 pub struct Clipboard {
     /// Named registers (a-z) and special registers
-    registers: HashMap<char, RegisterContent>,
+    pub registers: HashMap<char, RegisterContent>,
     /// The unnamed register (default)
-    unnamed: Option<RegisterContent>,
+    pub unnamed: Option<RegisterContent>,
     /// Yank register (register 0) - last yank, unaffected by deletes
-    yank_register: Option<RegisterContent>,
+    pub yank_register: Option<RegisterContent>,
     /// Currently selected register for next operation (None = unnamed)
-    selected: Option<char>,
+    pub selected: Option<char>,
 }
 
 impl Clipboard {
@@ -402,57 +402,5 @@ fn paste_from_system_clipboard() -> Result<String, String> {
         clipboard
             .get_text()
             .map_err(|e| format!("Clipboard error: {}", e))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn make_table(data: Vec<Vec<&str>>) -> Table {
-        Table::new(
-            data.into_iter()
-                .map(|row| row.into_iter().map(|s| s.to_string()).collect())
-                .collect()
-        )
-    }
-
-
-    #[test]
-    fn test_clipboard_new() {
-        let clipboard = Clipboard::new();
-        assert!(clipboard.unnamed.is_none());
-        assert!(clipboard.yank_register.is_none());
-        assert!(clipboard.selected.is_none());
-    }
-
-    #[test]
-    fn test_paste_as_transaction_nothing() {
-        let mut clipboard = Clipboard::new();
-        let table = make_table(vec![vec!["a"]]);
-
-        let (msg, txn) = clipboard.paste_as_transaction(0, 0, &table);
-
-        assert_eq!(msg, "Nothing to paste");
-        assert!(txn.is_none());
-    }
-
-    #[test]
-    fn test_select_invalid_register() {
-        let mut clipboard = Clipboard::new();
-        assert!(clipboard.select_register('!').is_err());
-        assert!(clipboard.select_register('1').is_err()); // Only 0 is valid number
-    }
-
-    #[test]
-    fn test_select_valid_registers() {
-        let mut clipboard = Clipboard::new();
-        assert!(clipboard.select_register('a').is_ok());
-        assert!(clipboard.select_register('z').is_ok());
-        assert!(clipboard.select_register('A').is_ok()); // Uppercase treated as lowercase
-        assert!(clipboard.select_register('0').is_ok());
-        assert!(clipboard.select_register('_').is_ok());
-        assert!(clipboard.select_register('+').is_ok());
-        assert!(clipboard.select_register('"').is_ok());
     }
 }

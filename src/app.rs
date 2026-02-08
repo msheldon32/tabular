@@ -13,7 +13,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::numeric::calculator::Calculator;
 use crate::ui::canvas::Canvas;
-use crate::clipboard::Clipboard;
+use crate::transaction::clipboard::Clipboard;
 use crate::mode::command::{Command, CommandHandler};
 use crate::mode::insert::InsertHandler;
 use crate::input::{
@@ -25,7 +25,8 @@ use crate::plugin::PluginManager;
 use crate::table::table::Table;
 use crate::table::SortDirection;
 use crate::table::tableview::TableView;
-use crate::transaction::{History, Transaction};
+use crate::transaction::history::History;
+use crate::transaction::transaction::Transaction;
 use crate::ui;
 use crate::fileio::FileIO;
 use crate::ui::style::Style;

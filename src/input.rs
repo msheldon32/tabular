@@ -6,7 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::table::table::Table;
 use crate::table::tableview::TableView;
-use crate::transaction::Transaction;
+use crate::transaction::transaction::Transaction;
 use crate::config::AppConfig;
 
 /// Result of handling a key event

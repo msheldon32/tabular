@@ -4,8 +4,8 @@ use crate::input::{KeyResult, NavigationHandler};
 use crate::table::table::Table;
 use crate::table::tableview::TableView;
 use crate::mode::Mode;
-use crate::transaction::Transaction;
-use crate::clipboard::Clipboard;
+use crate::transaction::transaction::Transaction;
+use crate::transaction::clipboard::{Clipboard, RegisterContent, PasteAnchor};
 use crate::mode::search::SearchHandler;
 
 pub struct NormalHandler {
@@ -103,9 +103,9 @@ impl NormalHandler {
             }
             KeyCode::Char('x') => {
                 let old_value = crate::table::operations::current_cell(view, table).clone();
-                clipboard.store_deleted(crate::clipboard::RegisterContent{
+                clipboard.store_deleted(RegisterContent{
                     data: vec![vec![old_value.clone()]],
-                    anchor: crate::clipboard::PasteAnchor::Cursor
+                    anchor: PasteAnchor::Cursor
                 });
 
                 let txn = Transaction::SetCell {

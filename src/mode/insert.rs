@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::input::{KeyResult, is_escape};
-use crate::transaction::Transaction;
+use crate::transaction::transaction::Transaction;
 use crate::table::tableview::TableView;
 use crate::string::{get_word_start, get_word_end};
 

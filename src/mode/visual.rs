@@ -1,11 +1,11 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::mode::Mode;
-use crate::transaction::Transaction;
+use crate::transaction::transaction::Transaction;
 use crate::input::{KeyResult, KeyBufferResult, SequenceAction, is_escape, NavigationHandler, KeyBuffer};
 use crate::table::table::Table;
 use crate::table::tableview::TableView;
-use crate::clipboard::{Clipboard, RegisterContent, PasteAnchor};
+use crate::transaction::clipboard::{Clipboard, RegisterContent, PasteAnchor};
 use crate::numeric::format::{format_scientific, format_percentage, format_currency, format_commas, format_default };
 
 /// Selection information for visual mode

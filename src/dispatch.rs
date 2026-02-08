@@ -16,8 +16,9 @@ use crate::input::{KeyResult, SequenceAction};
 use crate::plugin::{PluginAction, PluginContext};
 use crate::table::SortDirection;
 use crate::table::rowmanager::FilterType;
-use crate::transaction::Transaction;
+use crate::transaction::transaction::Transaction;
 use crate::util::ColumnType;
+use crate::transaction::clipboard::RegisterContent;
 
 impl App {
     pub fn execute_sequence_action(&mut self, action: SequenceAction, count: usize) {
@@ -41,7 +42,6 @@ impl App {
                 }
                 let rows = self.table.get_rows_cloned(start_row, actual_count);
                 if !rows.is_empty() {
-                    use crate::clipboard::RegisterContent;
                     self.clipboard.store_deleted(RegisterContent::from_rows(rows.clone()));
 
                     let txn = Transaction::DeleteRowsBulk {
@@ -67,7 +67,6 @@ impl App {
                     })
                     .collect();
                 if !cols.is_empty() {
-                    use crate::clipboard::RegisterContent;
                     self.clipboard.store_deleted(RegisterContent::from_cols(cols));
                 }
 
@@ -130,7 +129,6 @@ impl App {
                     return;
                 }
                 if let Some(row_data) = self.table.get_row_cloned(self.view.cursor_row) {
-                    use crate::clipboard::RegisterContent;
                     self.clipboard.store_deleted(RegisterContent::from_rows(vec![row_data.clone()]));
                     let txn = Transaction::DeleteRow {
                         idx: self.view.cursor_row,
