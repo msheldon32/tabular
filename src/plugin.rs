@@ -321,6 +321,7 @@ impl PluginManager {
             Ok(())
         })?;
 
+        // TODO: update the following 4 functions to mutate the table as well
         let insert_row_fn = self.add_usize_command(actions_table.clone(), "insert_row".to_string())?;
         let insert_col_fn = self.add_usize_command(actions_table.clone(), "insert_col".to_string())?;
         let delete_row_fn = self.add_usize_command(actions_table.clone(), "delete_row".to_string())?;
