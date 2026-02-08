@@ -106,6 +106,7 @@ fn print_help() {
 
 fn main() -> io::Result<()> {
     tracing_subscriber::fmt().init();
+    info!("Tabular started");
 
     let (file_path, delimiter, fork, read_only) = parse_args();
 
@@ -115,7 +116,7 @@ fn main() -> io::Result<()> {
         FileIO::new(file_path, delimiter, read_only)?
     };
 
-    let load_result = file_io.load_table()?;
+    let load_result = file_io.load_table().map_err(|e| {tracing::error!(error = %e, "Failed to load table"); e})?;
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
