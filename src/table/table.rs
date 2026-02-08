@@ -163,17 +163,17 @@ impl Table {
                 ).into_iter().map(|x| cmp::min(x, self.max_col_width)).collect();
         } else {
             // Sequential for small tables
-            self.col_widths = (0..self.col_count)
-                .map(|col| {
-                    self.rows_iter()
-                        .filter_map(|row| row.get(col))
-                        .map(|s| crate::util::display_width(s))
-                        .max()
-                        .unwrap_or(3)
-                        .max(3)
-                        .min(self.max_col_width)
-                })
-                .collect();
+            self.col_widths = (0..self.total_rows)
+                .fold(vec![0; self.col_count],
+                      |mut acc : Vec<usize>, row_idx : usize |  {
+                        if let Some(row) = self.get_row(row_idx) {
+                            for (acc_w, x) in acc.iter_mut().zip(row.iter()) {
+                                *acc_w = cmp::max(*acc_w, crate::util::display_width(x));
+                            }
+                        }
+
+                        acc
+                }).into_iter().map(|x| cmp::min(x, self.max_col_width)).collect();
         }
         self.col_widths_dirty = false;
     }
