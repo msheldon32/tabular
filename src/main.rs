@@ -143,14 +143,20 @@ impl Write for MainScreenWriterHandle {
         if !buf.ends_with(b"\n") {
             buf.push(b'\n');
         }
-        
         execute!(io::stdout(), MoveToColumn(0))?;
-        let result = io::stdout().write(&buf);
-        execute!(io::stdout(), MoveToColumn(0))?;
+
+        let buf_string = String::from_utf8_lossy(&buf);
+
+        for (i, line) in buf_string.lines().enumerate() {
+            io::stdout().write(&line.as_bytes());
+            io::stdout().write(b"\n");
+            execute!(io::stdout(), MoveToColumn(0))?;
+        }
         io::stdout().flush()?; // flush immediately
+        
         // Re-enter the alternate screen
         execute!(io::stdout(), EnterAlternateScreen)?;
-        result
+        Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
