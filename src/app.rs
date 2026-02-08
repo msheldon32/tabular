@@ -484,7 +484,10 @@ impl App {
         match res {
             KeyResult::ExecuteAndFinish(txn) => {
                 self.execute_and_finish(txn);
-                self.table.recompute_col_widths(); 
+
+                if self.insert_handler.old_width > self.insert_handler.buffer.len() {
+                    self.table.recompute_col_widths(); 
+                }
             }
             KeyResult::Finish => {
                 self.mode = Mode::Normal;
