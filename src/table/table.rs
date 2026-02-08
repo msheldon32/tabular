@@ -95,19 +95,37 @@ impl Table {
         table
     }
 
-    /// Create a table from pre-chunked data, deferring column width computation
-    /// until first render. Use this for faster file loading.
-    #[allow(dead_code)]
-    pub fn from_chunks_lazy(chunks: Vec<Vec<Vec<String>>>, col_count: usize) -> Self {
-        let total_rows: usize = chunks.iter().map(|c| c.len()).sum();
+    pub fn from_empty() -> Self {
+        let chunks: Vec<Vec<Vec<String>>> = Vec::new();
         Self {
-            chunks,
-            total_rows,
-            col_count,
+            chunks: Vec::new(),
+            total_rows: 0,
+            col_count: 0,
             col_widths: Vec::new(),
             col_widths_dirty: true,
-            max_col_width: 30,
+            max_col_width: 30
         }
+    }
+
+    pub fn expand_columns(&mut self, col_count: usize) {
+        for chunk in self.chunks.iter_mut() {
+            for row in chunk.iter_mut() {
+                row.resize(col_count, String::new());
+            }
+        }
+        self.col_count = col_count;
+    }
+
+    pub fn add_chunk(&mut self, chunk: Vec<Vec<String>>, col_count: usize) {
+        if col_count > self.col_count {
+            self.expand_columns(col_count);
+        }
+        self.total_rows += chunk.len();
+        self.chunks.push(chunk);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.chunks.is_empty()
     }
 
     /// Get cached column widths, recomputing if dirty

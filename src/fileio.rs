@@ -285,11 +285,13 @@ impl FileIO {
             .from_reader(reader);
 
         // Stream directly into chunks to avoid intermediate Vec allocation
-        let mut chunks: Vec<Vec<Vec<String>>> = Vec::new();
+        //let mut chunks: Vec<Vec<Vec<String>>> = Vec::new();
         let mut current_chunk: Vec<Vec<String>> = Vec::with_capacity(CHUNK_SIZE);
         let mut max_cols: usize = 0;
         let mut needs_padding = false;
         let mut row_no: usize = 0;
+
+        let mut table = Table::from_empty();
 
         for result in csv_reader.records() {
             let record = result.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -314,26 +316,29 @@ impl FileIO {
 
             // Flush full chunk
             if current_chunk.len() == CHUNK_SIZE {
-                chunks.push(std::mem::take(&mut current_chunk));
+                //chunks.push(std::mem::take(&mut current_chunk));
+                table.add_chunk(std::mem::take(&mut current_chunk), max_cols);
                 current_chunk = Vec::with_capacity(CHUNK_SIZE);
             }
         }
 
         // Push remaining rows
         if !current_chunk.is_empty() {
-            chunks.push(current_chunk);
+            //chunks.push(current_chunk);
+            table.add_chunk(current_chunk, max_cols);
         }
 
         // Handle empty file
-        if chunks.is_empty() {
-            chunks.push(vec![vec![String::new()]]);
+        if table.is_empty() {
+            //chunks.push(vec![vec![String::new()]]);
+            table.add_chunk(vec![vec![String::new()]], max_cols);
             max_cols = 1;
         }
 
         let mut warnings = Vec::new();
 
         // Pad short rows if needed
-        if needs_padding {
+        /*if needs_padding {
             warnings.push(format!(
                 "Padded rows with empty cells (max width: {} columns)",
                 max_cols
@@ -347,11 +352,15 @@ impl FileIO {
                     }
                 }
             }
-        }
+        }*/
 
-        Ok(LoadResult {
+        /*Ok(LoadResult {
             table: Table::from_chunks(chunks, max_cols),
             warnings,
+        })*/
+        Ok(LoadResult {
+            table,
+            warnings
         })
     }
 
