@@ -479,21 +479,22 @@ impl App {
     }
 
     fn handle_insert_mode(&mut self, key: KeyEvent) {
-        if is_escape(key) || key.code == KeyCode::Enter {
-            let old_value = operations::current_cell(&self.view, &self.table).clone();
-            let txn = Transaction::SetCell {
-                row: self.view.cursor_row,
-                col: self.view.cursor_col,
-                old_value,
-                new_value: self.insert_handler.buffer.clone(),
-            };
-            self.execute_and_finish(txn);
-            self.table.recompute_col_widths();
-            return;
-        }
+        let (res, txn_option) = self.insert_handler.handle_key(key, &self.view);
 
-        self.insert_handler.handle_key(key, &self.view);
-        self.table.expand_col_width(self.view.cursor_col, self.insert_handler.buffer.len());
+        match res {
+            KeyResult::ExecuteAndFinish(txn) => {
+                self.execute_and_finish(txn);
+                self.table.recompute_col_widths();
+            }
+            KeyResult::Finish => {
+                self.mode = Mode::Normal;
+                self.calling_mode = None;
+                self.table.recompute_col_widths(); 
+            }
+            _default => {
+                self.table.expand_col_width(self.view.cursor_col, self.insert_handler.buffer.len());
+            }
+        }
     }
 
     fn handle_command_mode(&mut self, key: KeyEvent) {

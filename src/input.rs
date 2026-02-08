@@ -11,6 +11,7 @@ use crate::config::AppConfig;
 
 /// Result of handling a key event
 #[allow(dead_code)]
+#[derive(PartialEq)]
 pub enum KeyResult {
     /// Continue in current mode
     Continue,

@@ -2,7 +2,7 @@ use crate::table::table::Table;
 use crate::table::rowmanager::FilterState;
 
 /// Represents a reversible operation on the table
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
 pub enum Transaction {
     /// Set a single cell value

@@ -11,23 +11,32 @@ pub struct InsertHandler {
     pub buffer: String,
     /// Cursor position as character index (not byte index)
     pub cursor: usize,
+
+    true_val: String
 }
 
 impl InsertHandler {
     pub fn new() -> Self {
         Self {
             buffer: String::new(),
+            true_val: String::new(),
             cursor: 0,
         }
     }
 
     pub fn start_edit(&mut self, initial: String) {
+        self.true_val = initial.clone();
         self.buffer = initial;
         self.cursor = crate::util::char_count(&self.buffer);
     }
 
     pub fn handle_key(&mut self, key: KeyEvent, view: &TableView) -> (KeyResult, Option<Transaction>) {
-        if is_escape(key) || key.code == KeyCode::Enter {
+        if is_escape(key) {
+            self.buffer = self.true_val.clone();
+            return (KeyResult::Finish, None);
+        }
+
+        if key.code == KeyCode::Enter {
             let txn = Transaction::SetCell {
                 row: view.cursor_row,
                 col: view.cursor_col,

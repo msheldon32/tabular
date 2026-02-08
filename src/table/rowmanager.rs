@@ -11,7 +11,7 @@ pub enum FilterType {
 }
 
 /// Snapshot of filter state for undo/redo
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FilterState {
     pub is_filtered: bool,
     pub active_rows: Vec<usize>,

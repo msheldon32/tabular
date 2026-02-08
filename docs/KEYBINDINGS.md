@@ -76,7 +76,7 @@
 
 | Key | Action |
 |-----|--------|
-| `Escape` / `Ctrl+[` | Save cell, return to normal mode |
+| `Escape` / `Ctrl+[` | Return to normal mode (do not save) |
 | `Enter` | Save cell, return to normal mode |
 | `Backspace` | Delete character |
 | Any character | Insert character |

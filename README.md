@@ -27,7 +27,8 @@ tabular data.csv
 |-----|--------|
 | `h` `j` `k` `l` | Navigate |
 | `i` | Edit cell |
-| `Enter` or `Esc` | Finish editing |
+| `Enter` | Finish editing |
+| `Esc` | Finish editing (cancel changes) |
 | `o` / `O` | Insert row below/above |
 | `dr` / `dc` | Delete row/column |
 | `yr` / `yc` | Yank row/column |
