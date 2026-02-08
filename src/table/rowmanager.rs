@@ -88,6 +88,17 @@ impl RowManager {
         }
     }
 
+    pub fn should_scroll(&self, cursor_row: usize, viewport_row: usize, viewport_height: usize) -> bool {
+        if self.is_filtered {
+            let cursor_idx = self.active_rows.partition_point(|&val| val < cursor_row);
+            let viewport_idx = self.active_rows.partition_point(|&val| val < viewport_row);
+
+            cursor_idx >= viewport_idx + viewport_height
+        } else {
+            cursor_row >= viewport_row + viewport_height
+        }
+    }
+
     pub fn predicate_filter(&mut self, table: &Table, col: usize, predicate: Predicate, col_type: ColumnType, keep_header: bool) {
         let idxs: Box<dyn Iterator<Item = usize>> = if self.is_filtered {
             Box::new(self.active_rows.iter().map(|&i| i))

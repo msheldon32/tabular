@@ -89,7 +89,7 @@ impl TableView {
         // Vertical scrolling
         if self.cursor_row < self.viewport_row {
             self.viewport_row = self.cursor_row;
-        } else if self.cursor_row >= self.viewport_row + self.viewport_height {
+        } else if self.row_manager.borrow().should_scroll(self.cursor_row, self.viewport_row, self.viewport_height) {
             self.viewport_row = self.row_manager.borrow().jump_up(self.cursor_row, self.viewport_height-1);
         }
 
