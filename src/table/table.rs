@@ -1,4 +1,3 @@
-use rayon::prelude::*;
 use std::cmp;
 
 use std::sync::{Arc, Mutex};
@@ -79,6 +78,7 @@ impl Table {
     }
 
     /// Create a table from pre-chunked data (avoids intermediate allocation)
+    #[allow(dead_code)]
     pub fn from_chunks(chunks: Vec<Vec<Vec<String>>>, col_count: usize) -> Self {
         let total_rows: usize = chunks.iter().map(|c| c.len()).sum();
         let mut table = Self {

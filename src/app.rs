@@ -2,9 +2,7 @@ use std::io;
 use std::time::Duration;
 use std::sync::{
     Arc, 
-    atomic::{AtomicBool, Ordering},
-    mpsc::{self, Receiver}};
-use std::thread::JoinHandle;
+    atomic::{AtomicBool, Ordering}};
 use std::rc::Rc;
 use std::cell::RefCell;
 
@@ -12,7 +10,6 @@ use crossterm::event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::numeric::calculator::Calculator;
-use crate::ui::canvas::Canvas;
 use crate::transaction::clipboard::Clipboard;
 use crate::mode::command::{Command, CommandHandler};
 use crate::mode::insert::InsertHandler;
@@ -23,14 +20,10 @@ use crate::mode::search::SearchHandler;
 use crate::mode::Mode;
 use crate::plugin::PluginManager;
 use crate::table::table::Table;
-use crate::table::SortDirection;
-use crate::table::tableview::TableView;
 use crate::transaction::history::History;
 use crate::transaction::transaction::Transaction;
 use crate::ui;
 use crate::fileio::FileIO;
-use crate::ui::style::Style;
-use crate::util::ColumnType;
 use crate::mode::visual::{VisualType, VisualHandler};
 use crate::config::AppConfig;
 use crate::mode::normal::NormalHandler;
@@ -43,6 +36,7 @@ pub struct App {
     pub mode: Mode,
     pub view_state: ViewState,
     pub file_io: FileIO,
+    #[allow(dead_code)]
     pub config: Rc<RefCell<AppConfig>>,
     pub dirty: bool,
     pub calling_mode: Option<Mode>,
@@ -69,8 +63,6 @@ impl App {
 
         let config = Rc::new(RefCell::new(AppConfig::new()));
         let key_buffer = KeyBuffer::new(config.clone());
-
-        let view_state = ViewState::new();
 
         Self {
             table,

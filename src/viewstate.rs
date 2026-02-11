@@ -1,10 +1,7 @@
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::thread::JoinHandle;
-use std::sync::{
-    Arc, 
-    atomic::{AtomicBool, Ordering},
-    mpsc::{self, Receiver}};
+use std::sync::mpsc::{self, Receiver};
 
 use crate::table::tableview::TableView;
 use crate::table::rowmanager::RowManager;
@@ -141,7 +138,5 @@ impl ViewState {
                 }
             }
         }
-
-        (None, false)
     }
 }
