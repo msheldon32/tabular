@@ -2,7 +2,7 @@ use std::sync::mpsc;
 use std::thread;
 
 use crate::table::table::Table;
-use crate::viewstate::{BackgroundResult, PendingOp};
+use crate::viewstate::BackgroundResult;
 use crate::table::tableview::TableView;
 use crate::table::SortDirection;
 use crate::transaction::transaction::Transaction;
@@ -20,6 +20,7 @@ pub fn current_cell<'a>(view: &TableView, table: &'a Table) -> &'a String {
 // === Sorting ===
 /// Sort key for background sorting
 #[derive(Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum SortKey {
     Numeric(f64),
     Text(String),
@@ -144,20 +145,10 @@ fn sort_by_column_sync(sort_col: usize, skip_header: bool, table: &mut Table, di
     table.apply_row_permutation(&permutation);
     let txn = Transaction::PermuteRows { permutation };
 
-    let sort_type = table.probe_column_type(sort_col, skip_header);
-    let type_str = match sort_type {
-        ColumnType::Numeric => "numeric",
-        ColumnType::Text => "text",
-    };
-    let dir_str = match direction {
-        SortDirection::Ascending => "ascending",
-        SortDirection::Descending => "descending",
-    };
-
     Some(txn)
 }
 
-pub fn sort_by_row(sort_row: usize, skip_first: bool, table: &mut Table, direction: SortDirection) -> Option<Transaction> {
+pub fn sort_by_row(sort_row: usize, table: &mut Table, direction: SortDirection) -> Option<Transaction> {
     let permutation = match table.get_col_sort_permutation(sort_row, direction, false) {
         Some(p) => p,
         None => {
@@ -167,16 +158,6 @@ pub fn sort_by_row(sort_row: usize, skip_first: bool, table: &mut Table, directi
 
     table.apply_col_permutation(&permutation);
     let txn = Transaction::PermuteCols { permutation };
-
-    let sort_type = table.probe_row_type(sort_row, skip_first);
-    let type_str = match sort_type {
-        ColumnType::Numeric => "numeric",
-        ColumnType::Text => "text",
-    };
-    let dir_str = match direction {
-        SortDirection::Ascending => "ascending",
-        SortDirection::Descending => "descending",
-    };
     
     Some(txn)
 }

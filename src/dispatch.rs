@@ -4,11 +4,9 @@
 //! including command dispatch, plugin execution, sorting, and replace operations.
 
 use std::cmp;
-use std::sync::mpsc;
-use std::thread;
 
 use crate::app::App;
-use crate::viewstate::{BackgroundResult, PendingOp};
+use crate::viewstate::PendingOp;
 use crate::numeric::calculator::Calculator;
 use crate::mode::command::{Command, ReplaceCommand, ReplaceScope};
 use crate::mode::visual::SelectionInfo;
@@ -19,7 +17,6 @@ use crate::table::SortDirection;
 use crate::table::rowmanager::FilterType;
 use crate::table::operations::{sort_by_column, sort_by_row};
 use crate::transaction::transaction::Transaction;
-use crate::util::ColumnType;
 use crate::transaction::clipboard::RegisterContent;
 
 impl App {
@@ -310,7 +307,6 @@ impl App {
             }
             Command::SortRow => {
                 let res = sort_by_row(self.view_state.view.cursor_row, 
-                                                 self.header_mode, 
                                                  &mut self.table,
                                                  SortDirection::Ascending);
                 if let Some(txn) = res {
@@ -320,7 +316,6 @@ impl App {
             }
             Command::SortRowDesc => {
                 let res = sort_by_row(self.view_state.view.cursor_row,
-                                                 self.header_mode, 
                                                  &mut self.table,
                                                  SortDirection::Descending);
                 if let Some(txn) = res {
@@ -643,34 +638,3 @@ impl App {
     }
 }
 
-/// Sort key for background sorting
-#[derive(Clone, PartialEq)]
-pub enum SortKey {
-    Numeric(f64),
-    Text(String),
-}
-
-impl Eq for SortKey {}
-
-impl Ord for SortKey {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match (self, other) {
-            (SortKey::Numeric(a), SortKey::Numeric(b)) => {
-                match (a.is_nan(), b.is_nan()) {
-                    (true, true) => std::cmp::Ordering::Equal,
-                    (true, false) => std::cmp::Ordering::Greater,
-                    (false, true) => std::cmp::Ordering::Less,
-                    (false, false) => a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal),
-                }
-            }
-            (SortKey::Text(a), SortKey::Text(b)) => a.cmp(b),
-            _ => std::cmp::Ordering::Equal,
-        }
-    }
-}
-
-impl PartialOrd for SortKey {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
