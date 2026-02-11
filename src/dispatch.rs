@@ -17,6 +17,7 @@ use crate::input::{KeyResult, SequenceAction};
 use crate::plugin::{PluginAction, PluginContext};
 use crate::table::SortDirection;
 use crate::table::rowmanager::FilterType;
+use crate::table::operations::{sort_by_column, sort_by_row};
 use crate::transaction::transaction::Transaction;
 use crate::util::ColumnType;
 use crate::transaction::clipboard::RegisterContent;
@@ -285,10 +286,48 @@ impl App {
                 self.view_state.view.cursor_row = cell.row;
                 self.view_state.view.cursor_col = cell.col;
             }
-            Command::Sort => self.sort_by_column(SortDirection::Ascending),
-            Command::SortDesc => self.sort_by_column(SortDirection::Descending),
-            Command::SortRow => self.sort_by_row(SortDirection::Ascending),
-            Command::SortRowDesc => self.sort_by_row(SortDirection::Descending),
+            Command::Sort => {
+                let res = sort_by_column(self.view_state.view.cursor_col,
+                                                 self.header_mode, 
+                                                 &mut self.table,
+                                                 &mut self.view_state,
+                                                 SortDirection::Ascending);
+                if let Some(txn) = res {
+                    self.history.record(txn);
+                    self.dirty = true;
+                }
+            }
+            Command::SortDesc => {
+                let res = sort_by_column(self.view_state.view.cursor_col,
+                                                 self.header_mode, 
+                                                 &mut self.table,
+                                                 &mut self.view_state,
+                                                 SortDirection::Descending);
+                if let Some(txn) = res {
+                    self.history.record(txn);
+                    self.dirty = true;
+                }
+            }
+            Command::SortRow => {
+                let res = sort_by_row(self.view_state.view.cursor_row, 
+                                                 self.header_mode, 
+                                                 &mut self.table,
+                                                 SortDirection::Ascending);
+                if let Some(txn) = res {
+                    self.history.record(txn);
+                    self.dirty = true;
+                }
+            }
+            Command::SortRowDesc => {
+                let res = sort_by_row(self.view_state.view.cursor_row,
+                                                 self.header_mode, 
+                                                 &mut self.table,
+                                                 SortDirection::Descending);
+                if let Some(txn) = res {
+                    self.history.record(txn);
+                    self.dirty = true;
+                }
+            }
             Command::Replace(ref replace_cmd) => {
                 self.execute_replace(replace_cmd.clone());
             }
@@ -601,154 +640,6 @@ impl App {
             self.execute(Transaction::Batch(txns));
             self.message = Some(format!("{} replacement(s) made", replacements));
         }
-    }
-
-    pub fn sort_by_column(&mut self, direction: SortDirection) {
-        if self.view_state.bg_receiver.is_some() {
-            self.message = Some("Sort already in progress".to_string());
-            return;
-        }
-
-        let sort_col = self.view_state.view.cursor_col;
-        let skip_header = self.header_mode;
-        let row_count = self.table.row_count();
-
-        if row_count < 50_000 {
-            self.sort_by_column_sync(direction);
-            return;
-        }
-
-        let sort_type = self.table.probe_column_type(sort_col, skip_header);
-        let col_data: Vec<String> = (0..row_count)
-            .map(|row| {
-                self.table.get_cell(row, sort_col)
-                    .cloned()
-                    .unwrap_or_default()
-            })
-            .collect();
-
-        let progress = self.view_state.start_progress("Sorting", row_count);
-        let (tx, rx) = mpsc::channel();
-        self.view_state.bg_receiver = Some(rx);
-
-        let handle = thread::spawn(move || {
-            let start_row = if skip_header { 1 } else { 0 };
-            let mut keyed: Vec<(usize, SortKey)> = Vec::with_capacity(row_count - start_row);
-
-            for (i, row) in (start_row..row_count).enumerate() {
-                let key = match sort_type {
-                    ColumnType::Numeric => {
-                        let val = crate::numeric::format::parse_numeric(col_data[row].trim())
-                            .unwrap_or(f64::NAN);
-                        SortKey::Numeric(val)
-                    }
-                    ColumnType::Text => {
-                        SortKey::Text(col_data[row].to_lowercase())
-                    }
-                };
-                keyed.push((row, key));
-
-                if i % 10000 == 0 {
-                    progress.set(i);
-                }
-            }
-
-            progress.set(row_count / 2);
-
-            keyed.sort_unstable_by(|(idx_a, key_a), (idx_b, key_b)| {
-                let cmp = key_a.cmp(key_b);
-                match direction {
-                    SortDirection::Ascending => cmp.then(idx_a.cmp(idx_b)),
-                    SortDirection::Descending => cmp.reverse().then(idx_a.cmp(idx_b)),
-                }
-            });
-
-            progress.set(row_count);
-
-            let mut permutation: Vec<usize> = if skip_header {
-                vec![0]
-            } else {
-                Vec::new()
-            };
-            permutation.extend(keyed.into_iter().map(|(row, _)| row));
-
-            let already_sorted = permutation.iter().enumerate().all(|(i, &idx)| i == idx);
-            if already_sorted {
-                let _ = tx.send(BackgroundResult::SortComplete {
-                    permutation: Vec::new(),
-                    direction,
-                    sort_type,
-                    is_column_sort: false,
-                });
-            } else {
-                let _ = tx.send(BackgroundResult::SortComplete {
-                    permutation,
-                    direction,
-                    sort_type,
-                    is_column_sort: false,
-                });
-            }
-        });
-
-        self.view_state.bg_handle = Some(handle);
-    }
-
-    fn sort_by_column_sync(&mut self, direction: SortDirection) {
-        let sort_col = self.view_state.view.cursor_col;
-        let skip_header = self.header_mode;
-
-        let permutation = match self.table.get_sort_permutation(sort_col, direction, skip_header) {
-            Some(p) => p,
-            None => {
-                self.message = Some("Already sorted".to_string());
-                return;
-            }
-        };
-
-        self.table.apply_row_permutation(&permutation);
-        let txn = Transaction::PermuteRows { permutation };
-        self.history.record(txn);
-        self.dirty = true;
-
-        let sort_type = self.table.probe_column_type(sort_col, skip_header);
-        let type_str = match sort_type {
-            ColumnType::Numeric => "numeric",
-            ColumnType::Text => "text",
-        };
-        let dir_str = match direction {
-            SortDirection::Ascending => "ascending",
-            SortDirection::Descending => "descending",
-        };
-        self.message = Some(format!("Sorted {} ({})", dir_str, type_str));
-    }
-
-    pub fn sort_by_row(&mut self, direction: SortDirection) {
-        let sort_row = self.view_state.view.cursor_row;
-        let skip_first = self.header_mode;
-
-        let permutation = match self.table.get_col_sort_permutation(sort_row, direction, false) {
-            Some(p) => p,
-            None => {
-                self.message = Some("Already sorted".to_string());
-                return;
-            }
-        };
-
-        self.table.apply_col_permutation(&permutation);
-        let txn = Transaction::PermuteCols { permutation };
-        self.history.record(txn);
-        self.dirty = true;
-
-        let sort_type = self.table.probe_row_type(sort_row, skip_first);
-        let type_str = match sort_type {
-            ColumnType::Numeric => "numeric",
-            ColumnType::Text => "text",
-        };
-        let dir_str = match direction {
-            SortDirection::Ascending => "ascending",
-            SortDirection::Descending => "descending",
-        };
-        self.message = Some(format!("Columns sorted {} ({})", dir_str, type_str));
     }
 }
 
