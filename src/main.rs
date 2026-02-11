@@ -11,6 +11,7 @@ mod util;
 mod numeric;
 mod config;
 mod string;
+mod viewstate;
 
 use std::io;
 use std::panic;

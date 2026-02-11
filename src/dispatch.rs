@@ -7,7 +7,8 @@ use std::cmp;
 use std::sync::mpsc;
 use std::thread;
 
-use crate::app::{App, BackgroundResult, PendingOp};
+use crate::app::App;
+use crate::viewstate::{BackgroundResult, PendingOp};
 use crate::numeric::calculator::Calculator;
 use crate::mode::command::{Command, ReplaceCommand, ReplaceScope};
 use crate::mode::visual::SelectionInfo;
@@ -29,14 +30,14 @@ impl App {
                 }
             }
             SequenceAction::DeleteRow => {
-                let start_row = self.view.cursor_row;
+                let start_row = self.view_state.view.cursor_row;
                 let actual_count = count.min(self.table.row_count().saturating_sub(start_row));
 
                 if actual_count == 0 {
                     return;
                 }
 
-                if self.row_manager.borrow().is_filtered {
+                if self.view_state.row_manager.borrow().is_filtered {
                     self.message = Some("Delete is forbidden in filtered views.".to_string());
                     return;
                 }
@@ -50,12 +51,12 @@ impl App {
                     };
                     self.execute(txn);
                 }
-                self.view.clamp_cursor(&self.table);
+                self.view_state.view.clamp_cursor(&self.table);
                 let msg = if actual_count == 1 { "Row deleted".to_string() } else { format!("{} rows deleted", actual_count) };
                 self.message = Some(msg);
             }
             SequenceAction::DeleteCol => {
-                let start_col = self.view.cursor_col;
+                let start_col = self.view_state.view.cursor_col;
                 let end_col = (start_col + count).min(self.table.col_count());
                 let actual_count = end_col - start_col;
 
@@ -79,16 +80,16 @@ impl App {
                         self.execute(txn);
                     }
                 }
-                self.view.clamp_cursor(&self.table);
+                self.view_state.view.clamp_cursor(&self.table);
                 let msg = if actual_count == 1 { "Column deleted".to_string() } else { format!("{} columns deleted", actual_count) };
                 self.message = Some(msg);
             }
             SequenceAction::YankRow => {
-                let start_row = self.view.cursor_row;
+                let start_row = self.view_state.view.cursor_row;
                 let actual_count = count.min(self.table.row_count().saturating_sub(start_row));
 
-                let rows = if self.row_manager.borrow().is_filtered {
-                    let it = (start_row..self.table.row_count()).filter(|&i| self.row_manager.borrow().is_row_live(i)).take(actual_count);
+                let rows = if self.view_state.row_manager.borrow().is_filtered {
+                    let it = (start_row..self.table.row_count()).filter(|&i| self.view_state.row_manager.borrow().is_row_live(i)).take(actual_count);
                     it.filter_map(|i| self.table.get_row_cloned(i)).collect()
                 } else {
                     self.table.get_rows_cloned(start_row, actual_count)
@@ -100,7 +101,7 @@ impl App {
                 self.message = Some(msg);
             }
             SequenceAction::YankCol => {
-                let start_col = self.view.cursor_col;
+                let start_col = self.view_state.view.cursor_col;
                 let end_col = (start_col + count).min(self.table.col_count());
                 let actual_count = end_col - start_col;
 
@@ -118,24 +119,24 @@ impl App {
                 self.message = Some(msg);
             }
             SequenceAction::Yank => {
-                if let Some(row) = self.table.get_row_cloned(self.view.cursor_row) {
-                    self.clipboard.yank_span(vec![vec![row[self.view.cursor_col].clone()]]);
+                if let Some(row) = self.table.get_row_cloned(self.view_state.view.cursor_row) {
+                    self.clipboard.yank_span(vec![vec![row[self.view_state.view.cursor_col].clone()]]);
                     self.message = Some("Row yanked".to_string());
                 }
             }
             SequenceAction::Delete => {
-                if self.row_manager.borrow().is_filtered {
+                if self.view_state.row_manager.borrow().is_filtered {
                     self.message = Some("Adding rows is forbidden in filtered views.".to_string());
                     return;
                 }
-                if let Some(row_data) = self.table.get_row_cloned(self.view.cursor_row) {
+                if let Some(row_data) = self.table.get_row_cloned(self.view_state.view.cursor_row) {
                     self.clipboard.store_deleted(RegisterContent::from_rows(vec![row_data.clone()]));
                     let txn = Transaction::DeleteRow {
-                        idx: self.view.cursor_row,
+                        idx: self.view_state.view.cursor_row,
                         data: row_data,
                     };
                     self.execute(txn);
-                    self.view.clamp_cursor(&self.table);
+                    self.view_state.view.clamp_cursor(&self.table);
                     self.message = Some("Row deleted".to_string());
                 }
             }
@@ -144,7 +145,7 @@ impl App {
             | SequenceAction::MoveUp
             | SequenceAction::MoveLeft
             | SequenceAction::MoveRight => {
-                self.nav_handler.handle_sequence(action, count, &mut self.view, &self.table);
+                self.nav_handler.handle_sequence(action, count, &mut self.view_state.view, &self.table);
             }
             SequenceAction::FormatDefault
             | SequenceAction::FormatCommas
@@ -167,8 +168,8 @@ impl App {
                     self.calling_mode = prev_mode;
                     self.command_handler.start();
                 } else if mode == Mode::Insert {
-                    let current = crate::table::operations::current_cell(&self.view, &self.table).clone();
-                    let old_width = self.table.col_widths.lock().unwrap().get_col_width(self.view.cursor_col);
+                    let current = crate::table::operations::current_cell(&self.view_state.view, &self.table).clone();
+                    let old_width = self.table.col_widths.lock().unwrap().get_col_width(self.view_state.view.cursor_col);
                     self.insert_handler.start_edit(current, old_width);
                 } else if mode == Mode::Search {
                     self.search_handler.start_search();
@@ -226,18 +227,18 @@ impl App {
                 self.should_quit = true;
             }
             Command::AddColumn => {
-                let txn = Transaction::InsertCol { idx: self.view.cursor_col + 1 };
+                let txn = Transaction::InsertCol { idx: self.view_state.view.cursor_col + 1 };
                 self.execute(txn);
                 self.message = Some("Column added".to_string());
             }
             Command::DeleteColumn => {
-                if let Some(col_data) = self.table.get_col_cloned(self.view.cursor_col) {
+                if let Some(col_data) = self.table.get_col_cloned(self.view_state.view.cursor_col) {
                     let txn = Transaction::DeleteCol {
-                        idx: self.view.cursor_col,
+                        idx: self.view_state.view.cursor_col,
                         data: col_data,
                     };
                     self.execute(txn);
-                    self.view.clamp_cursor(&self.table);
+                    self.view_state.view.clamp_cursor(&self.table);
                     self.message = Some("Column deleted".to_string());
                 }
             }
@@ -251,8 +252,8 @@ impl App {
             Command::Calc => {
                 let cell_count = self.table.row_count() * self.table.col_count();
                 if cell_count >= 50_000 {
-                    self.start_progress("Calculating", cell_count);
-                    self.pending_op = Some(PendingOp::Calc { formula_count: cell_count });
+                    self.view_state.start_progress("Calculating", cell_count);
+                    self.view_state.pending_op = Some(PendingOp::Calc { formula_count: cell_count });
                 } else {
                     let calc = Calculator::with_plugins(&self.table, self.header_mode, &self.plugin_manager);
                     match calc.evaluate_all() {
@@ -278,11 +279,11 @@ impl App {
                     }
                 }
             }
-            Command::Grid => self.style.toggle_grid(),
-            Command::NavigateRow(row) => self.view.cursor_row = row,
+            Command::Grid => self.view_state.style.toggle_grid(),
+            Command::NavigateRow(row) => self.view_state.view.cursor_row = row,
             Command::NavigateCell(cell) => {
-                self.view.cursor_row = cell.row;
-                self.view.cursor_col = cell.col;
+                self.view_state.view.cursor_row = cell.row;
+                self.view_state.view.cursor_col = cell.col;
             }
             Command::Sort => self.sort_by_column(SortDirection::Ascending),
             Command::SortDesc => self.sort_by_column(SortDirection::Descending),
@@ -294,7 +295,7 @@ impl App {
             Command::Theme(name) => {
                 use crate::ui::style::Theme;
                 if let Some(theme) = Theme::by_name(&name) {
-                    self.style.set_theme(theme);
+                    self.view_state.style.set_theme(theme);
                     self.message = Some(format!("Theme set to '{}'", name));
                 } else {
                     self.message = Some(format!(
@@ -348,7 +349,7 @@ impl App {
                 }
             }
             Command::Precision(prec) => {
-                self.precision = prec;
+                self.view_state.precision = prec;
                 let msg = match prec {
                     Some(n) => format!("Display precision set to {} decimal places", n),
                     None => "Display precision set to auto".to_string(),
@@ -370,48 +371,48 @@ impl App {
                 self.message = Some(format!("Unknown command: {}", s));
             }
             Command::Filter(filter_type) => {
-                let old_state = self.row_manager.borrow().snapshot();
-                self.view.move_to_top();
+                let old_state = self.view_state.row_manager.borrow().snapshot();
+                self.view_state.view.move_to_top();
                 if filter_type == FilterType::Default {
-                    self.row_manager.borrow_mut().remove_filter();
+                    self.view_state.row_manager.borrow_mut().remove_filter();
                     self.message = Some("Filter removed".to_string());
                 } else if let FilterType::PredicateFilter(pred) = filter_type {
-                    let active_col = self.view.cursor_col;
+                    let active_col = self.view_state.view.cursor_col;
                     let column_type = self.table.probe_column_type(active_col, self.header_mode);
-                    self.row_manager.borrow_mut().predicate_filter(&self.table, active_col, pred, column_type, self.header_mode);
+                    self.view_state.row_manager.borrow_mut().predicate_filter(&self.table, active_col, pred, column_type, self.header_mode);
                     self.message = Some("Filter applied".to_string());
                 } else {
                     self.message = Some("Filter not recognized".to_string());
                 }
-                let new_state = self.row_manager.borrow().snapshot();
+                let new_state = self.view_state.row_manager.borrow().snapshot();
                 let txn = Transaction::SetFilter { old_state, new_state };
                 self.history.record(txn);
             }
             Command::Canvas => {
-                self.canvas.clear();
-                self.canvas.set_title("Debug Canvas");
-                self.canvas.add_header("Canvas Overlay Demo");
-                self.canvas.add_separator();
-                self.canvas.add_text(format!("Table: {} rows x {} cols", self.table.row_count(), self.table.col_count()));
-                self.canvas.add_text(format!("Cursor: row {}, col {}", self.view.cursor_row + 1, self.view.cursor_col + 1));
-                self.canvas.add_text(format!("Header mode: {}", if self.header_mode { "on" } else { "off" }));
-                self.canvas.add_blank();
-                self.canvas.add_header("Sample ASCII Art");
-                self.canvas.add_box(20, 5, ' ');
-                self.canvas.add_blank();
-                self.canvas.add_styled_text(
+                self.view_state.canvas.clear();
+                self.view_state.canvas.set_title("Debug Canvas");
+                self.view_state.canvas.add_header("Canvas Overlay Demo");
+                self.view_state.canvas.add_separator();
+                self.view_state.canvas.add_text(format!("Table: {} rows x {} cols", self.table.row_count(), self.table.col_count()));
+                self.view_state.canvas.add_text(format!("Cursor: row {}, col {}", self.view_state.view.cursor_row + 1, self.view_state.view.cursor_col + 1));
+                self.view_state.canvas.add_text(format!("Header mode: {}", if self.header_mode { "on" } else { "off" }));
+                self.view_state.canvas.add_blank();
+                self.view_state.canvas.add_header("Sample ASCII Art");
+                self.view_state.canvas.add_box(20, 5, ' ');
+                self.view_state.canvas.add_blank();
+                self.view_state.canvas.add_styled_text(
                     "This is styled text (cyan)",
                     Some(ratatui::style::Color::Cyan),
                     None,
                     false
                 );
-                self.canvas.add_styled_text(
+                self.view_state.canvas.add_styled_text(
                     "This is bold text",
                     None,
                     None,
                     true
                 );
-                self.canvas.show();
+                self.view_state.canvas.show();
                 self.message = Some("Canvas opened (q/Esc to close, j/k to scroll)".to_string());
             }
         }
@@ -426,17 +427,17 @@ impl App {
         };
         SelectionInfo {
             mode,
-            start_row: cmp::min(self.view.support_row, self.view.cursor_row),
-            end_row: cmp::max(self.view.support_row, self.view.cursor_row),
-            start_col: cmp::min(self.view.support_col, self.view.cursor_col),
-            end_col: cmp::max(self.view.support_col, self.view.cursor_col),
+            start_row: cmp::min(self.view_state.view.support_row, self.view_state.view.cursor_row),
+            end_row: cmp::max(self.view_state.view.support_row, self.view_state.view.cursor_row),
+            start_col: cmp::min(self.view_state.view.support_col, self.view_state.view.cursor_col),
+            end_col: cmp::max(self.view_state.view.support_col, self.view_state.view.cursor_col),
         }
     }
 
     pub fn execute_plugin(&mut self, name: &str, args: &[String]) {
         let ctx = PluginContext {
-            cursor_row: self.view.cursor_row,
-            cursor_col: self.view.cursor_col,
+            cursor_row: self.view_state.view.cursor_row,
+            cursor_col: self.view_state.view.cursor_col,
             row_count: self.table.row_count(),
             col_count: self.table.col_count(),
             selection: self.get_selection_info()
@@ -477,31 +478,31 @@ impl App {
                             txns.push(Transaction::DeleteCol { idx: at, data });
                         }
                         PluginAction::CanvasClear => {
-                            self.canvas.clear();
+                            self.view_state.canvas.clear();
                         }
                         PluginAction::CanvasShow => {
-                            self.canvas.show();
+                            self.view_state.canvas.show();
                         }
                         PluginAction::CanvasHide => {
-                            self.canvas.hide();
+                            self.view_state.canvas.hide();
                         }
                         PluginAction::CanvasSetTitle { title } => {
-                            self.canvas.set_title(title);
+                            self.view_state.canvas.set_title(title);
                         }
                         PluginAction::CanvasAddText { text } => {
-                            self.canvas.add_text(text);
+                            self.view_state.canvas.add_text(text);
                         }
                         PluginAction::CanvasAddHeader { text } => {
-                            self.canvas.add_header(text);
+                            self.view_state.canvas.add_header(text);
                         }
                         PluginAction::CanvasAddSeparator => {
-                            self.canvas.add_separator();
+                            self.view_state.canvas.add_separator();
                         }
                         PluginAction::CanvasAddBlank => {
-                            self.canvas.add_blank();
+                            self.view_state.canvas.add_blank();
                         }
                         PluginAction::CanvasAddStyledText { text, fg, bg, bold } => {
-                            self.canvas.add_styled_text(
+                            self.view_state.canvas.add_styled_text(
                                 text,
                                 fg.map(|c| c.to_ratatui()),
                                 bg.map(|c| c.to_ratatui()),
@@ -509,7 +510,7 @@ impl App {
                             );
                         }
                         PluginAction::CanvasAddImage { rows, title } => {
-                            self.canvas.add_image(rows, title);
+                            self.view_state.canvas.add_image(rows, title);
                         }
                         PluginAction::PromptRequest { question, default: _ } => {
                             // TODO: Implement full prompt UI with deferred execution
@@ -540,20 +541,20 @@ impl App {
             ReplaceScope::Selection => {
                 if self.calling_mode.map_or(false, |x| x.is_visual()) {
                     let (start_row, end_row) = if self.calling_mode != Some(Mode::VisualCol) {
-                        (std::cmp::min(self.view.cursor_row, self.view.support_row),
-                            std::cmp::max(self.view.cursor_row, self.view.support_row))
+                        (std::cmp::min(self.view_state.view.cursor_row, self.view_state.view.support_row),
+                            std::cmp::max(self.view_state.view.cursor_row, self.view_state.view.support_row))
                     } else {
                         (0, self.table.row_count()-1)
                     };
                     let (start_col, end_col) = if self.calling_mode != Some(Mode::VisualRow) {
-                        (std::cmp::min(self.view.cursor_col, self.view.support_col),
-                            std::cmp::max(self.view.cursor_col, self.view.support_col))
+                        (std::cmp::min(self.view_state.view.cursor_col, self.view_state.view.support_col),
+                            std::cmp::max(self.view_state.view.cursor_col, self.view_state.view.support_col))
                     } else {
                         (0, self.table.col_count()-1)
                     };
                     (start_row..end_row + 1, start_col..end_col + 1)
                 } else {
-                    (self.view.cursor_row..self.view.cursor_row+1, self.view.cursor_col..self.view.cursor_col+1)
+                    (self.view_state.view.cursor_row..self.view_state.view.cursor_row+1, self.view_state.view.cursor_col..self.view_state.view.cursor_col+1)
                 }
             }
         };
@@ -603,12 +604,12 @@ impl App {
     }
 
     pub fn sort_by_column(&mut self, direction: SortDirection) {
-        if self.bg_receiver.is_some() {
+        if self.view_state.bg_receiver.is_some() {
             self.message = Some("Sort already in progress".to_string());
             return;
         }
 
-        let sort_col = self.view.cursor_col;
+        let sort_col = self.view_state.view.cursor_col;
         let skip_header = self.header_mode;
         let row_count = self.table.row_count();
 
@@ -626,9 +627,9 @@ impl App {
             })
             .collect();
 
-        let progress = self.start_progress("Sorting", row_count);
+        let progress = self.view_state.start_progress("Sorting", row_count);
         let (tx, rx) = mpsc::channel();
-        self.bg_receiver = Some(rx);
+        self.view_state.bg_receiver = Some(rx);
 
         let handle = thread::spawn(move || {
             let start_row = if skip_header { 1 } else { 0 };
@@ -689,11 +690,11 @@ impl App {
             }
         });
 
-        self.bg_handle = Some(handle);
+        self.view_state.bg_handle = Some(handle);
     }
 
     fn sort_by_column_sync(&mut self, direction: SortDirection) {
-        let sort_col = self.view.cursor_col;
+        let sort_col = self.view_state.view.cursor_col;
         let skip_header = self.header_mode;
 
         let permutation = match self.table.get_sort_permutation(sort_col, direction, skip_header) {
@@ -722,7 +723,7 @@ impl App {
     }
 
     pub fn sort_by_row(&mut self, direction: SortDirection) {
-        let sort_row = self.view.cursor_row;
+        let sort_row = self.view_state.view.cursor_row;
         let skip_first = self.header_mode;
 
         let permutation = match self.table.get_col_sort_permutation(sort_row, direction, false) {

@@ -18,7 +18,7 @@ use crate::table::rowmanager::RowManager;
 
 pub fn render(frame: &mut Frame, app: &mut App, row_manager: Rc<RefCell<RowManager>>) {
     // Apply background color if set
-    if let Some(bg_color) = app.style.background() {
+    if let Some(bg_color) = app.view_state.style.background() {
         let bg_style = Style::default().bg(bg_color);
         frame.render_widget(Clear, frame.size());
         frame.render_widget(Block::default().style(bg_style), frame.size());
@@ -38,7 +38,7 @@ pub fn render(frame: &mut Frame, app: &mut App, row_manager: Rc<RefCell<RowManag
     render_command_line(frame, app, chunks[2]);
 
     // Render canvas overlay if visible
-    app.canvas.render(frame, frame.size());
+    app.view_state.canvas.render(frame, frame.size());
 }
 
 fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<RefCell<RowManager>>) {
@@ -59,7 +59,7 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<Re
     // Calculate how many columns fit in available width
     let mut total_width = 0u16;
     let mut visible_cols = 0usize;
-    for col in app.view.viewport_col..col_count {
+    for col in app.view_state.view.viewport_col..col_count {
         let col_width = app.table.col_widths().get(col).copied().unwrap_or(3);
         let cell_width = col_width as u16 + 2; // padding
         if total_width + cell_width > available_width && visible_cols > 0 {
@@ -68,32 +68,32 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<Re
         total_width += cell_width;
         visible_cols += 1;
     }
-    app.view.viewport_width = visible_cols;
+    app.view_state.view.viewport_width = visible_cols;
 
     // Ensure cursor is visible
-    app.view.scroll_to_cursor();
+    app.view_state.view.scroll_to_cursor();
 
     // Calculate column widths for visible columns
     let mut col_widths: Vec<Constraint> = Vec::with_capacity(visible_cols + 1);
     col_widths.push(Constraint::Length(row_num_width as u16 + 1)); // Row number column
 
-    let end_col = (app.view.viewport_col + visible_cols).min(col_count);
-    for col in app.view.viewport_col..end_col {
+    let end_col = (app.view_state.view.viewport_col + visible_cols).min(col_count);
+    for col in app.view_state.view.viewport_col..end_col {
         let w = app.table.col_widths().get(col).copied().unwrap_or(3);
         let header_w = letters_from_col(col).len();
         col_widths.push(Constraint::Length(w.max(header_w) as u16 + 2));
     }
 
     // Build header row with column letters
-    let header_style = app.style.header_col();
+    let header_style = app.view_state.style.header_col();
 
     let mut header_cells: Vec<Cell> = Vec::with_capacity(visible_cols + 1);
     header_cells.push(Cell::from("").style(header_style)); // Empty corner cell
 
-    for col in app.view.viewport_col..end_col {
+    for col in app.view_state.view.viewport_col..end_col {
         let letter = letters_from_col(col);
-        let style = if col == app.view.cursor_col {
-            app.style.row_number_cursor()
+        let style = if col == app.view_state.view.cursor_col {
+            app.view_state.style.row_number_cursor()
         } else {
             header_style
         };
@@ -102,11 +102,11 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<Re
     let header_row = Row::new(header_cells);
 
     // Selected row indices
-    let selected_indices: Box<dyn Iterator<Item = usize>> = if app.header_mode && app.view.viewport_row > 0 {
+    let selected_indices: Box<dyn Iterator<Item = usize>> = if app.header_mode && app.view_state.view.viewport_row > 0 {
         // this hangs without the row count end, guess iters aren't that lazy after all
-        Box::new((0..1).chain(app.view.viewport_row..app.table.row_count()).filter(|&i| row_manager.borrow().is_row_live(i)).take(visible_rows))
+        Box::new((0..1).chain(app.view_state.view.viewport_row..app.table.row_count()).filter(|&i| row_manager.borrow().is_row_live(i)).take(visible_rows))
     } else {
-        Box::new((app.view.viewport_row..app.table.row_count()).filter(|&i| row_manager.borrow().is_row_live(i)).take(visible_rows))
+        Box::new((app.view_state.view.viewport_row..app.table.row_count()).filter(|&i| row_manager.borrow().is_row_live(i)).take(visible_rows))
     };
 
     let mut end_row = 0;
@@ -121,24 +121,24 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<Re
             let mut cells: Vec<Cell> = Vec::with_capacity(visible_cols + 1);
 
             // Row number cell
-            let row_num_style = if row_idx == app.view.cursor_row {
-                app.style.row_number_cursor()
+            let row_num_style = if row_idx == app.view_state.view.cursor_row {
+                app.view_state.style.row_number_cursor()
             } else {
-                app.style.row_number()
+                app.view_state.style.row_number()
             };
             cells.push(Cell::from(format!("{}", row_idx + 1)).style(row_num_style));
 
             // Data cells (only visible columns)
-            for col_idx in app.view.viewport_col..end_col {
+            for col_idx in app.view_state.view.viewport_col..end_col {
                 let raw_content = app.table.get_cell(row_idx, col_idx)
                     .map(|s| s.as_str())
                     .unwrap_or("");
                 // Apply precision formatting for display
-                let content = format_display(raw_content, app.precision);
+                let content = format_display(raw_content, app.view_state.precision);
 
-                let is_cursor = row_idx == app.view.cursor_row && col_idx == app.view.cursor_col;
+                let is_cursor = row_idx == app.view_state.view.cursor_row && col_idx == app.view_state.view.cursor_col;
                 let is_selected = matches!(app.mode, Mode::Visual | Mode::VisualCol | Mode::VisualRow)
-                    && app.view.is_selected(row_idx, col_idx, app.mode);
+                    && app.view_state.view.is_selected(row_idx, col_idx, app.mode);
 
                 // Check if this cell matches the search pattern
                 let is_search_match = app.search_pattern()
@@ -146,15 +146,15 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<Re
                     .unwrap_or(false);
 
                 let style = if is_cursor {
-                    app.style.cell_cursor()
+                    app.view_state.style.cell_cursor()
                 } else if is_selected {
-                    app.style.cell_selection()
+                    app.view_state.style.cell_selection()
                 } else if is_search_match {
-                    app.style.cell_match()
+                    app.view_state.style.cell_match()
                 } else if is_header_row {
-                    app.style.header_row()
+                    app.view_state.style.header_row()
                 } else {
-                    app.style.cell()
+                    app.view_state.style.cell()
                 };
 
                 let display_content = if is_cursor && app.mode == Mode::Insert {
@@ -206,16 +206,16 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<Re
         .collect();
     
     // update viewport
-    app.view.viewport_height = visible_rows-1;
+    app.view_state.view.viewport_height = visible_rows-1;
 
     // Build title with scroll indicator
-    let title = if app.view.viewport_row > 0 || app.view.viewport_col > 0 {
+    let title = if app.view_state.view.viewport_row > 0 || app.view_state.view.viewport_col > 0 {
         format!(
             "Table [{}-{}/{} rows, {}-{}/{} cols]",
-            app.view.viewport_row + 1,
+            app.view_state.view.viewport_row + 1,
             end_row,
             row_count,
-            letters_from_col(app.view.viewport_col),
+            letters_from_col(app.view_state.view.viewport_col),
             letters_from_col(end_col.saturating_sub(1)),
             letters_from_col(col_count.saturating_sub(1))
         )
@@ -224,7 +224,7 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<Re
     };
 
     let mut table_block = Block::default().borders(Borders::ALL).title(title);
-    if let Some(bg_color) = app.style.background() {
+    if let Some(bg_color) = app.view_state.style.background() {
         table_block = table_block.style(Style::default().bg(bg_color));
     }
 
@@ -236,11 +236,11 @@ fn render_table(frame: &mut Frame, app: &mut App, area: Rect, row_manager: Rc<Re
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let mode_style = app.style.status_mode(&app.mode);
+    let mode_style = app.view_state.style.status_mode(&app.mode);
 
     let dirty_indicator = if app.dirty { "[+]" } else { "" };
 
-    let row_manager = app.row_manager.borrow();
+    let row_manager = app.view_state.row_manager.borrow();
 
     let filter_status = if row_manager.is_filtered { row_manager.filter_string.clone() } else { String::new() };
 
@@ -253,8 +253,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let position = format!(
         "{}{} ",
-        letters_from_col(app.view.cursor_col),
-        app.view.cursor_row + 1
+        letters_from_col(app.view_state.view.cursor_col),
+        app.view_state.view.cursor_row + 1
     );
 
     let key_buffer = app.key_buffer_display();
@@ -274,19 +274,19 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Span::raw(" "),
         Span::raw(file_name),
         Span::raw(" "),
-        Span::styled(filter_status, app.style.filter_status()),
+        Span::styled(filter_status, app.view_state.style.filter_status()),
         Span::raw(" "),
-        Span::styled(dirty_indicator, app.style.message_error()),
+        Span::styled(dirty_indicator, app.view_state.style.message_error()),
         Span::raw(" ".repeat(
             area.width
                 .saturating_sub(30)
                 .saturating_sub(right_side_len as u16) as usize,
         )),
-        Span::styled(key_buffer_display, app.style.status_mode(&app.mode)),
+        Span::styled(key_buffer_display, app.view_state.style.status_mode(&app.mode)),
         Span::raw(position),
     ]);
 
-    let status_bar = Paragraph::new(status).style(app.style.status_bar());
+    let status_bar = Paragraph::new(status).style(app.view_state.style.status_bar());
 
     frame.render_widget(status_bar, area);
 }
@@ -296,21 +296,21 @@ fn render_command_line(frame: &mut Frame, app: &App, area: Rect) {
     let (content, style) = match app.mode {
         Mode::Command => {
             let line = Line::from(vec![
-                Span::styled(":", app.style.command_prompt()),
-                Span::styled(app.command_buffer(), app.style.command_line()),
+                Span::styled(":", app.view_state.style.command_prompt()),
+                Span::styled(app.command_buffer(), app.view_state.style.command_line()),
             ]);
-            (line, app.style.command_line())
+            (line, app.view_state.style.command_line())
         }
         Mode::Search => {
             let line = Line::from(vec![
-                Span::styled("/", app.style.command_prompt()),
-                Span::styled(app.search_buffer(), app.style.command_line()),
+                Span::styled("/", app.view_state.style.command_prompt()),
+                Span::styled(app.search_buffer(), app.view_state.style.command_line()),
             ]);
-            (line, app.style.command_line())
+            (line, app.view_state.style.command_line())
         }
         _ => {
             // Check for active progress first
-            if let Some((ref op_name, ref progress)) = app.progress {
+            if let Some((ref op_name, ref progress)) = app.view_state.progress {
                 let pct = progress.percent();
                 let bar_width = 20usize;
                 let filled = (pct * bar_width) / 100;
@@ -323,11 +323,11 @@ fn render_command_line(frame: &mut Frame, app: &App, area: Rect) {
                     pct
                 );
                 let line = Line::from(bar);
-                (line, app.style.message_info())
+                (line, app.view_state.style.message_info())
             } else {
                 let msg : String = app.message.as_deref().unwrap_or("").chars().take(width as usize).collect();
                 let line = Line::from(msg);
-                (line, app.style.message_info())
+                (line, app.view_state.style.message_info())
             }
         }
     };

@@ -30,54 +30,25 @@ use crate::transaction::transaction::Transaction;
 use crate::ui;
 use crate::fileio::FileIO;
 use crate::ui::style::Style;
-use crate::ui::progress::Progress;
-use crate::table::rowmanager::RowManager;
 use crate::util::ColumnType;
 use crate::mode::visual::{VisualType, VisualHandler};
 use crate::config::AppConfig;
 use crate::mode::normal::NormalHandler;
-
-/// Result from a background operation
-pub enum BackgroundResult {
-    SortComplete {
-        permutation: Vec<usize>,
-        direction: SortDirection,
-        sort_type: ColumnType,
-        is_column_sort: bool,
-    },
-}
-
-/// Pending operation to be executed after the next render
-/// This allows progress to be displayed before the operation runs
-pub enum PendingOp {
-    Undo,
-    Redo,
-    Calc { formula_count: usize },
-}
+use crate::viewstate::{ViewState, PendingOp};
 
 pub struct App {
     pub table: Table,
-    pub view: TableView,
     pub clipboard: Clipboard,
     pub history: History,
-    pub style: Style,
     pub mode: Mode,
+    pub view_state: ViewState,
     pub file_io: FileIO,
     pub config: Rc<RefCell<AppConfig>>,
-    pub row_manager: Rc<RefCell<RowManager>>,
     pub dirty: bool,
     pub calling_mode: Option<Mode>,
     pub message: Option<String>,
     pub should_quit: bool,
     pub header_mode: bool,
-    pub precision: Option<usize>,  // Display precision for numbers (None = auto)
-    pub progress: Option<(String, Progress)>,  // Optional progress indicator (operation name, progress)
-    pub canvas: Canvas,  // Canvas overlay for displaying text/images
-    pub(crate) pending_op: Option<PendingOp>,  // Pending operation to execute after next render
-    // Background task handling
-    pub(crate) bg_receiver: Option<Receiver<BackgroundResult>>,
-    #[allow(dead_code)]
-    pub(crate) bg_handle: Option<JoinHandle<()>>,
     // Mode handlers
     key_buffer: KeyBuffer,
     pub(crate) nav_handler: NavigationHandler,
@@ -91,8 +62,6 @@ pub struct App {
 
 impl App {
     pub fn new(table: Table, file_io: FileIO) -> Self {
-        let row_manager = Rc::new(RefCell::new(RowManager::new()));
-        let view = TableView::new(row_manager.clone());
         let clipboard = Clipboard::new();
 
         let mut plugin_manager = PluginManager::new();
@@ -101,27 +70,21 @@ impl App {
         let config = Rc::new(RefCell::new(AppConfig::new()));
         let key_buffer = KeyBuffer::new(config.clone());
 
+        let view_state = ViewState::new();
+
         Self {
             table,
-            view,
             clipboard,
             history: History::new(),
-            style: Style::new(),
             mode: Mode::Normal,
+            view_state: ViewState::new(),
             file_io,
             config,
-            row_manager,
             dirty: false,
             calling_mode: None,
             message: None,
             should_quit: false,
             header_mode: true,
-            precision: None,
-            progress: None,
-            canvas: Canvas::new(),
-            pending_op: None,
-            bg_receiver: None,
-            bg_handle: None,
             key_buffer,
             nav_handler: NavigationHandler::new(),
             search_handler: SearchHandler::new(),
@@ -157,18 +120,6 @@ impl App {
         self.key_buffer.display()
     }
 
-    /// Start a progress indicator for a long-running operation
-    pub fn start_progress(&mut self, operation: &str, total: usize) -> Progress {
-        let progress = Progress::new(total);
-        self.progress = Some((operation.to_string(), progress.clone()));
-        progress
-    }
-
-    /// Clear the progress indicator
-    pub fn clear_progress(&mut self) {
-        self.progress = None;
-    }
-
     /// Execute a pending operation (called after render so progress is visible)
     fn execute_pending_op(&mut self, op: PendingOp) {
         match op {
@@ -176,27 +127,27 @@ impl App {
                 if let Some(inverse) = self.history.undo() {
                     // Handle filter state if this is a SetFilter transaction
                     if let Some(filter_state) = inverse.filter_state() {
-                        self.row_manager.borrow_mut().restore(filter_state.clone());
-                        self.view.move_to_top();
+                        self.view_state.row_manager.borrow_mut().restore(filter_state.clone());
+                        self.view_state.view.move_to_top();
                     }
                     inverse.apply(&mut self.table);
-                    self.view.clamp_cursor(&self.table);
+                    self.view_state.view.clamp_cursor(&self.table);
                     self.message = Some("Undo".to_string());
                 }
-                self.clear_progress();
+                self.view_state.clear_progress();
             }
             PendingOp::Redo => {
                 if let Some(txn) = self.history.redo() {
                     // Handle filter state if this is a SetFilter transaction
                     if let Some(filter_state) = txn.filter_state() {
-                        self.row_manager.borrow_mut().restore(filter_state.clone());
-                        self.view.move_to_top();
+                        self.view_state.row_manager.borrow_mut().restore(filter_state.clone());
+                        self.view_state.view.move_to_top();
                     }
                     txn.apply(&mut self.table);
-                    self.view.clamp_cursor(&self.table);
+                    self.view_state.view.clamp_cursor(&self.table);
                     self.message = Some("Redo".to_string());
                 }
-                self.clear_progress();
+                self.view_state.clear_progress();
             }
             PendingOp::Calc { formula_count } => {
                 let calc = Calculator::with_plugins(&self.table, self.header_mode, &self.plugin_manager);
@@ -221,7 +172,7 @@ impl App {
                     }
                     Err(e) => self.message = Some(format!("{}", e)),
                 }
-                self.clear_progress();
+                self.view_state.clear_progress();
                 let _ = formula_count; // Suppress unused warning
             }
         }
@@ -230,12 +181,14 @@ impl App {
     pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, shutdown: Arc<AtomicBool>) -> io::Result<()> {
         while !self.should_quit && !shutdown.load(Ordering::Relaxed) {
             // Check for completed background operations
-            self.poll_background_result();
+            let (msg, is_dirty) = self.view_state.poll_background_result(&mut self.table, &mut self.history);
+            self.message = msg;
+            self.dirty |= is_dirty;
 
-            terminal.draw(|f| ui::ui::render(f, self, self.row_manager.clone()))?;
+            terminal.draw(|f| ui::ui::render(f, self, self.view_state.row_manager.clone()))?;
 
             // Execute pending operation after render (so progress bar is visible)
-            if let Some(op) = self.pending_op.take() {
+            if let Some(op) = self.view_state.pending_op.take() {
                 self.execute_pending_op(op);
                 continue; // Re-render immediately after
             }
@@ -250,68 +203,6 @@ impl App {
         Ok(())
     }
 
-    /// Check for and handle completed background operations
-    fn poll_background_result(&mut self) {
-        if let Some(ref receiver) = self.bg_receiver {
-            match receiver.try_recv() {
-                Ok(result) => {
-                    self.handle_background_result(result);
-                    self.bg_receiver = None;
-                    self.bg_handle = None;
-                    self.clear_progress();
-                }
-                Err(mpsc::TryRecvError::Empty) => {
-                    // Still working, progress is updated by the background thread
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    // Thread died unexpectedly
-                    self.bg_receiver = None;
-                    self.bg_handle = None;
-                    self.clear_progress();
-                    self.message = Some("Operation failed".to_string());
-                }
-            }
-        }
-    }
-
-    /// Handle a completed background operation
-    fn handle_background_result(&mut self, result: BackgroundResult) {
-        match result {
-            BackgroundResult::SortComplete { permutation, direction, sort_type, is_column_sort } => {
-                // Empty permutation means already sorted
-                if permutation.is_empty() {
-                    self.message = Some("Already sorted".to_string());
-                    return;
-                }
-
-                if is_column_sort {
-                    self.table.apply_col_permutation(&permutation);
-                    let txn = Transaction::PermuteCols { permutation };
-                    self.history.record(txn);
-                } else {
-                    self.table.apply_row_permutation(&permutation);
-                    let txn = Transaction::PermuteRows { permutation };
-                    self.history.record(txn);
-                }
-                self.dirty = true;
-
-                let type_str = match sort_type {
-                    ColumnType::Numeric => "numeric",
-                    ColumnType::Text => "text",
-                };
-                let dir_str = match direction {
-                    SortDirection::Ascending => "ascending",
-                    SortDirection::Descending => "descending",
-                };
-                if is_column_sort {
-                    self.message = Some(format!("Columns sorted {} ({})", dir_str, type_str));
-                } else {
-                    self.message = Some(format!("Sorted {} ({})", dir_str, type_str));
-                }
-            }
-        }
-    }
-
     // === Transaction helpers ===
 
     /// Execute a transaction, record it in history, and mark dirty
@@ -321,16 +212,16 @@ impl App {
             if let Some(txn) = self.history.peek_undo() {
                 if txn.is_large() {
                     let size = txn.estimated_size();
-                    self.start_progress("Undoing", size);
-                    self.pending_op = Some(PendingOp::Undo);
+                    self.view_state.start_progress("Undoing", size);
+                    self.view_state.pending_op = Some(PendingOp::Undo);
                 } else if let Some(inverse) = self.history.undo() {
                     // Handle filter state if this is a SetFilter transaction
                     if let Some(filter_state) = inverse.filter_state() {
-                        self.row_manager.borrow_mut().restore(filter_state.clone());
-                        self.view.move_to_top();
+                        self.view_state.row_manager.borrow_mut().restore(filter_state.clone());
+                        self.view_state.view.move_to_top();
                     }
                     inverse.apply(&mut self.table);
-                    self.view.clamp_cursor(&self.table);
+                    self.view_state.view.clamp_cursor(&self.table);
                     self.message = Some("Undo".to_string());
                 }
             } else {
@@ -341,16 +232,16 @@ impl App {
             if let Some(txn) = self.history.peek_redo() {
                 if txn.is_large() {
                     let size = txn.estimated_size();
-                    self.start_progress("Redoing", size);
-                    self.pending_op = Some(PendingOp::Redo);
+                    self.view_state.start_progress("Redoing", size);
+                    self.view_state.pending_op = Some(PendingOp::Redo);
                 } else if let Some(txn) = self.history.redo() {
                     // Handle filter state if this is a SetFilter transaction
                     if let Some(filter_state) = txn.filter_state() {
-                        self.row_manager.borrow_mut().restore(filter_state.clone());
-                        self.view.move_to_top();
+                        self.view_state.row_manager.borrow_mut().restore(filter_state.clone());
+                        self.view_state.view.move_to_top();
                     }
                     txn.apply(&mut self.table);
-                    self.view.clamp_cursor(&self.table);
+                    self.view_state.view.clamp_cursor(&self.table);
                     self.message = Some("Redo".to_string());
                 }
             } else {
@@ -378,26 +269,26 @@ impl App {
 
     fn handle_key(&mut self, key: KeyEvent) {
         // If canvas is visible, handle canvas-specific keys first
-        if self.canvas.visible {
+        if self.view_state.canvas.visible {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => {
-                    self.canvas.hide();
+                    self.view_state.canvas.hide();
                     return;
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
-                    self.canvas.scroll_down(1);
+                    self.view_state.canvas.scroll_down(1);
                     return;
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
-                    self.canvas.scroll_up(1);
+                    self.view_state.canvas.scroll_up(1);
                     return;
                 }
                 KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.canvas.scroll_down(10);
+                    self.view_state.canvas.scroll_down(10);
                     return;
                 }
                 KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.canvas.scroll_up(10);
+                    self.view_state.canvas.scroll_up(10);
                     return;
                 }
                 _ => {
@@ -422,7 +313,7 @@ impl App {
         let handler = VisualHandler::new(visual_type);
         let result = handler.handle_key(
             key,
-            &mut self.view,
+            &mut self.view_state.view,
             &self.table,
             &mut self.clipboard,
             &self.nav_handler,
@@ -446,11 +337,11 @@ impl App {
                 // Process as single key
                 //self.handle_normal_key(key, count);
                 let result = self.normal_handler.handle_key(key, 
-                                                            &mut self.view,
+                                                            &mut self.view_state.view,
                                                             &mut self.table,
                                                             count,
                                                             &self.nav_handler,
-                                                            self.row_manager.borrow().is_filtered,
+                                                            self.view_state.row_manager.borrow().is_filtered,
                                                             &mut self.clipboard,
                                                             &mut self.search_handler
                                                             );
@@ -467,7 +358,7 @@ impl App {
                     if let Some(msg) = self.search_handler.perform_search(&self.table) {
                         self.message = Some(msg);
                     }
-                    if let Some(msg) = self.search_handler.goto_next(&mut self.view) {
+                    if let Some(msg) = self.search_handler.goto_next(&mut self.view_state.view) {
                         self.message = Some(msg);
                     }
                 }
@@ -479,7 +370,7 @@ impl App {
     }
 
     fn handle_insert_mode(&mut self, key: KeyEvent) {
-        let (res, _txn_option) = self.insert_handler.handle_key(key, &self.view);
+        let (res, _txn_option) = self.insert_handler.handle_key(key, &self.view_state.view);
 
         match res {
             KeyResult::ExecuteAndFinish(txn) => {
@@ -492,10 +383,10 @@ impl App {
             KeyResult::Finish => {
                 self.mode = Mode::Normal;
                 self.calling_mode = None;
-                self.table.update_col_width(self.view.cursor_col, self.insert_handler.old_width);
+                self.table.update_col_width(self.view_state.view.cursor_col, self.insert_handler.old_width);
             }
             _default => {
-                self.table.expand_col_width(self.view.cursor_col, self.insert_handler.buffer.len());
+                self.table.expand_col_width(self.view_state.view.cursor_col, self.insert_handler.buffer.len());
             }
         }
     }
