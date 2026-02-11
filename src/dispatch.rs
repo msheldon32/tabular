@@ -24,7 +24,7 @@ impl App {
         match action {
             SequenceAction::SelectRegister(reg) => {
                 if let Err(e) = self.clipboard.select_register(reg) {
-                    self.message = Some(e);
+                    self.view_state.message = Some(e);
                 }
             }
             SequenceAction::DeleteRow => {
@@ -36,7 +36,7 @@ impl App {
                 }
 
                 if self.view_state.row_manager.borrow().is_filtered {
-                    self.message = Some("Delete is forbidden in filtered views.".to_string());
+                    self.view_state.message = Some("Delete is forbidden in filtered views.".to_string());
                     return;
                 }
                 let rows = self.table.get_rows_cloned(start_row, actual_count);
@@ -51,7 +51,7 @@ impl App {
                 }
                 self.view_state.view.clamp_cursor(&self.table);
                 let msg = if actual_count == 1 { "Row deleted".to_string() } else { format!("{} rows deleted", actual_count) };
-                self.message = Some(msg);
+                self.view_state.message = Some(msg);
             }
             SequenceAction::DeleteCol => {
                 let start_col = self.view_state.view.cursor_col;
@@ -80,7 +80,7 @@ impl App {
                 }
                 self.view_state.view.clamp_cursor(&self.table);
                 let msg = if actual_count == 1 { "Column deleted".to_string() } else { format!("{} columns deleted", actual_count) };
-                self.message = Some(msg);
+                self.view_state.message = Some(msg);
             }
             SequenceAction::YankRow => {
                 let start_row = self.view_state.view.cursor_row;
@@ -96,7 +96,7 @@ impl App {
                     self.clipboard.yank_rows(rows);
                 }
                 let msg = if actual_count == 1 { "Row yanked".to_string() } else { format!("{} rows yanked", actual_count) };
-                self.message = Some(msg);
+                self.view_state.message = Some(msg);
             }
             SequenceAction::YankCol => {
                 let start_col = self.view_state.view.cursor_col;
@@ -114,17 +114,17 @@ impl App {
                     self.clipboard.yank_cols(cols);
                 }
                 let msg = if actual_count == 1 { "Column yanked".to_string() } else { format!("{} columns yanked", actual_count) };
-                self.message = Some(msg);
+                self.view_state.message = Some(msg);
             }
             SequenceAction::Yank => {
                 if let Some(row) = self.table.get_row_cloned(self.view_state.view.cursor_row) {
                     self.clipboard.yank_span(vec![vec![row[self.view_state.view.cursor_col].clone()]]);
-                    self.message = Some("Row yanked".to_string());
+                    self.view_state.message = Some("Row yanked".to_string());
                 }
             }
             SequenceAction::Delete => {
                 if self.view_state.row_manager.borrow().is_filtered {
-                    self.message = Some("Adding rows is forbidden in filtered views.".to_string());
+                    self.view_state.message = Some("Adding rows is forbidden in filtered views.".to_string());
                     return;
                 }
                 if let Some(row_data) = self.table.get_row_cloned(self.view_state.view.cursor_row) {
@@ -135,7 +135,7 @@ impl App {
                     };
                     self.execute(txn);
                     self.view_state.view.clamp_cursor(&self.table);
-                    self.message = Some("Row deleted".to_string());
+                    self.view_state.message = Some("Row deleted".to_string());
                 }
             }
             SequenceAction::MoveToTop
@@ -180,11 +180,11 @@ impl App {
                 self.execute_and_finish(txn);
             }
             KeyResult::Message(msg) => {
-                self.message = Some(msg);
+                self.view_state.message = Some(msg);
             }
             KeyResult::Quit => {
                 if self.dirty {
-                    self.message = Some("Unsaved changes! Use :q! to force quit".to_string());
+                    self.view_state.message = Some("Unsaved changes! Use :q! to force quit".to_string());
                 } else {
                     self.should_quit = true;
                 }
@@ -201,14 +201,14 @@ impl App {
                 match self.file_io.write(&mut self.table) {
                     Ok(()) => {
                         self.dirty = false;
-                        self.message = Some(format!("Saved to {}", self.file_io.file_name()));
+                        self.view_state.message = Some(format!("Saved to {}", self.file_io.file_name()));
                     }
-                    Err(e) => self.message = Some(format!("Error saving: {}", e)),
+                    Err(e) => self.view_state.message = Some(format!("Error saving: {}", e)),
                 }
             }
             Command::Quit => {
                 if self.dirty {
-                    self.message = Some("Unsaved changes! Use :q! to force quit".to_string());
+                    self.view_state.message = Some("Unsaved changes! Use :q! to force quit".to_string());
                 } else {
                     self.should_quit = true;
                 }
@@ -218,16 +218,16 @@ impl App {
                 match self.file_io.write(&mut self.table) {
                     Ok(()) => {
                         self.dirty = false;
-                        self.message = Some(format!("Saved to {}", self.file_io.file_name()));
+                        self.view_state.message = Some(format!("Saved to {}", self.file_io.file_name()));
                     }
-                    Err(e) => self.message = Some(format!("Error saving: {}", e)),
+                    Err(e) => self.view_state.message = Some(format!("Error saving: {}", e)),
                 }
                 self.should_quit = true;
             }
             Command::AddColumn => {
                 let txn = Transaction::InsertCol { idx: self.view_state.view.cursor_col + 1 };
                 self.execute(txn);
-                self.message = Some("Column added".to_string());
+                self.view_state.message = Some("Column added".to_string());
             }
             Command::DeleteColumn => {
                 if let Some(col_data) = self.table.get_col_cloned(self.view_state.view.cursor_col) {
@@ -237,12 +237,12 @@ impl App {
                     };
                     self.execute(txn);
                     self.view_state.view.clamp_cursor(&self.table);
-                    self.message = Some("Column deleted".to_string());
+                    self.view_state.message = Some("Column deleted".to_string());
                 }
             }
             Command::ToggleHeader => {
                 self.header_mode = !self.header_mode;
-                self.message = Some(format!(
+                self.view_state.message = Some(format!(
                     "Header mode {}",
                     if self.header_mode { "on" } else { "off" }
                 ));
@@ -257,7 +257,7 @@ impl App {
                     match calc.evaluate_all() {
                         Ok(updates) => {
                             if updates.is_empty() {
-                                self.message = Some("No formulas found".to_string());
+                                self.view_state.message = Some("No formulas found".to_string());
                                 return;
                             }
                             let txns: Vec<Transaction> = updates
@@ -271,9 +271,9 @@ impl App {
                                 .collect();
                             let count = txns.len();
                             self.execute(Transaction::Batch(txns));
-                            self.message = Some(format!("Evaluated {} formula(s)", count));
+                            self.view_state.message = Some(format!("Evaluated {} formula(s)", count));
                         }
-                        Err(e) => self.message = Some(format!("{}", e)),
+                        Err(e) => self.view_state.message = Some(format!("{}", e)),
                     }
                 }
             }
@@ -331,16 +331,16 @@ impl App {
                 }
 
                 if let Some(msg) = res.1 {
-                    self.message = Some(msg);
+                    self.view_state.message = Some(msg);
                 }
             }
             Command::Theme(name) => {
                 use crate::ui::style::Theme;
                 if let Some(theme) = Theme::by_name(&name) {
                     self.view_state.style.set_theme(theme);
-                    self.message = Some(format!("Theme set to '{}'", name));
+                    self.view_state.message = Some(format!("Theme set to '{}'", name));
                 } else {
-                    self.message = Some(format!(
+                    self.view_state.message = Some(format!(
                         "Unknown theme '{}'. Available: {}",
                         name,
                         Theme::builtin_names().join(", ")
@@ -349,33 +349,33 @@ impl App {
             }
             Command::ThemeList => {
                 use crate::ui::style::Theme;
-                self.message = Some(format!(
+                self.view_state.message = Some(format!(
                     "Available themes: {}",
                     Theme::builtin_names().join(", ")
                 ));
             }
             Command::Clip => {
                 match self.clipboard.to_system() {
-                    Ok(msg) => self.message = Some(msg),
-                    Err(e) => self.message = Some(e),
+                    Ok(msg) => self.view_state.message = Some(msg),
+                    Err(e) => self.view_state.message = Some(e),
                 }
             }
             Command::Fork => {
                 self.file_io = self.file_io.fork();
                 let fname = self.file_io.file_name();
-                self.message = Some(format!("File forked successfully, you are now editing: {}", fname));
+                self.view_state.message = Some(format!("File forked successfully, you are now editing: {}", fname));
             }
             Command::SysPaste => {
                 match self.clipboard.from_system() {
-                    Ok(msg) => self.message = Some(msg),
-                    Err(e) => self.message = Some(e),
+                    Ok(msg) => self.view_state.message = Some(msg),
+                    Err(e) => self.view_state.message = Some(e),
                 }
             }
             Command::PluginList => {
                 let commands = self.plugin_manager.list_commands();
                 let functions = self.plugin_manager.list_functions();
                 if commands.is_empty() && functions.is_empty() {
-                    self.message = Some(format!(
+                    self.view_state.message = Some(format!(
                         "No plugins loaded. Add .lua files to {}",
                         crate::plugin::plugin_dir().display()
                     ));
@@ -387,7 +387,7 @@ impl App {
                     if !functions.is_empty() {
                         parts.push(format!("Functions: {}", functions.into_iter().cloned().collect::<Vec<_>>().join(", ")));
                     }
-                    self.message = Some(parts.join(" | "));
+                    self.view_state.message = Some(parts.join(" | "));
                 }
             }
             Command::Precision(prec) => {
@@ -396,7 +396,7 @@ impl App {
                     Some(n) => format!("Display precision set to {} decimal places", n),
                     None => "Display precision set to auto".to_string(),
                 };
-                self.message = Some(msg);
+                self.view_state.message = Some(msg);
             }
             Command::Custom { name, args } => {
                 self.execute_plugin(&name, &args);
@@ -410,21 +410,21 @@ impl App {
                         return;
                     }
                 }
-                self.message = Some(format!("Unknown command: {}", s));
+                self.view_state.message = Some(format!("Unknown command: {}", s));
             }
             Command::Filter(filter_type) => {
                 let old_state = self.view_state.row_manager.borrow().snapshot();
                 self.view_state.view.move_to_top();
                 if filter_type == FilterType::Default {
                     self.view_state.row_manager.borrow_mut().remove_filter();
-                    self.message = Some("Filter removed".to_string());
+                    self.view_state.message = Some("Filter removed".to_string());
                 } else if let FilterType::PredicateFilter(pred) = filter_type {
                     let active_col = self.view_state.view.cursor_col;
                     let column_type = self.table.probe_column_type(active_col, self.header_mode);
                     self.view_state.row_manager.borrow_mut().predicate_filter(&self.table, active_col, pred, column_type, self.header_mode);
-                    self.message = Some("Filter applied".to_string());
+                    self.view_state.message = Some("Filter applied".to_string());
                 } else {
-                    self.message = Some("Filter not recognized".to_string());
+                    self.view_state.message = Some("Filter not recognized".to_string());
                 }
                 let new_state = self.view_state.row_manager.borrow().snapshot();
                 let txn = Transaction::SetFilter { old_state, new_state };
@@ -455,7 +455,7 @@ impl App {
                     true
                 );
                 self.view_state.canvas.show();
-                self.message = Some("Canvas opened (q/Esc to close, j/k to scroll)".to_string());
+                self.view_state.message = Some("Canvas opened (q/Esc to close, j/k to scroll)".to_string());
             }
         }
         self.calling_mode = None;
@@ -556,7 +556,7 @@ impl App {
                         }
                         PluginAction::PromptRequest { question, default: _ } => {
                             // TODO: Implement full prompt UI with deferred execution
-                            self.message = Some(format!("Prompt requested: {} (use :cmd args instead)", question));
+                            self.view_state.message = Some(format!("Prompt requested: {} (use :cmd args instead)", question));
                         }
                     }
                 }
@@ -566,11 +566,11 @@ impl App {
                 }
 
                 if let Some(msg) = result.message {
-                    self.message = Some(msg);
+                    self.view_state.message = Some(msg);
                 }
             }
             Err(e) => {
-                self.message = Some(format!("Plugin error: {}", e));
+                self.view_state.message = Some(format!("Plugin error: {}", e));
             }
         }
     }

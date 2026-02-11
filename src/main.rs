@@ -183,7 +183,7 @@ fn main() -> io::Result<()> {
         messages.push(msg);
     }
     if !messages.is_empty() {
-        app.message = Some(messages.join("; "));
+        app.view_state.message = Some(messages.join("; "));
     }
 
     let result = app.run(&mut terminal, shutdown);

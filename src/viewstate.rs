@@ -45,6 +45,8 @@ pub struct ViewState {
     pub(crate) bg_receiver: Option<Receiver<BackgroundResult>>,
     #[allow(dead_code)]
     pub(crate) bg_handle: Option<JoinHandle<()>>,
+
+    pub message: Option<String>
 }
 
 impl ViewState {
@@ -61,7 +63,8 @@ impl ViewState {
             progress: None,
             pending_op: None,
             bg_receiver: None,
-            bg_handle: None
+            bg_handle: None,
+            message: None
         }
     }
 

@@ -40,7 +40,6 @@ pub struct App {
     pub config: Rc<RefCell<AppConfig>>,
     pub dirty: bool,
     pub calling_mode: Option<Mode>,
-    pub message: Option<String>,
     pub should_quit: bool,
     pub header_mode: bool,
     // Mode handlers
@@ -74,7 +73,6 @@ impl App {
             config,
             dirty: false,
             calling_mode: None,
-            message: None,
             should_quit: false,
             header_mode: true,
             key_buffer,
@@ -124,7 +122,7 @@ impl App {
                     }
                     inverse.apply(&mut self.table);
                     self.view_state.view.clamp_cursor(&self.table);
-                    self.message = Some("Undo".to_string());
+                    self.view_state.message = Some("Undo".to_string());
                 }
                 self.view_state.clear_progress();
             }
@@ -137,7 +135,7 @@ impl App {
                     }
                     txn.apply(&mut self.table);
                     self.view_state.view.clamp_cursor(&self.table);
-                    self.message = Some("Redo".to_string());
+                    self.view_state.message = Some("Redo".to_string());
                 }
                 self.view_state.clear_progress();
             }
@@ -146,7 +144,7 @@ impl App {
                 match calc.evaluate_all() {
                     Ok(updates) => {
                         if updates.is_empty() {
-                            self.message = Some("No formulas found".to_string());
+                            self.view_state.message = Some("No formulas found".to_string());
                         } else {
                             let txns: Vec<Transaction> = updates
                                 .into_iter()
@@ -159,10 +157,10 @@ impl App {
                                 .collect();
                             let count = txns.len();
                             self.execute(Transaction::Batch(txns));
-                            self.message = Some(format!("Evaluated {} formula(s)", count));
+                            self.view_state.message = Some(format!("Evaluated {} formula(s)", count));
                         }
                     }
-                    Err(e) => self.message = Some(format!("{}", e)),
+                    Err(e) => self.view_state.message = Some(format!("{}", e)),
                 }
                 self.view_state.clear_progress();
                 let _ = formula_count; // Suppress unused warning
@@ -174,7 +172,7 @@ impl App {
         while !self.should_quit && !shutdown.load(Ordering::Relaxed) {
             // Check for completed background operations
             let (msg, is_dirty) = self.view_state.poll_background_result(&mut self.table, &mut self.history);
-            self.message = msg;
+            self.view_state.message = msg;
             self.dirty |= is_dirty;
 
             terminal.draw(|f| ui::ui::render(f, self, self.view_state.row_manager.clone()))?;
@@ -187,7 +185,7 @@ impl App {
 
             if poll(Duration::from_millis(16))? {
                 if let Event::Key(key) = event::read()? {
-                    self.message = None;
+                    self.view_state.message = None;
                     self.handle_key(key);
                 }
             }
@@ -214,10 +212,10 @@ impl App {
                     }
                     inverse.apply(&mut self.table);
                     self.view_state.view.clamp_cursor(&self.table);
-                    self.message = Some("Undo".to_string());
+                    self.view_state.message = Some("Undo".to_string());
                 }
             } else {
-                self.message = Some(String::from("Cannot undo."));
+                self.view_state.message = Some(String::from("Cannot undo."));
             }
         } else if matches!(txn, Transaction::Redo) {
             // Check if redo is large before executing
@@ -234,10 +232,10 @@ impl App {
                     }
                     txn.apply(&mut self.table);
                     self.view_state.view.clamp_cursor(&self.table);
-                    self.message = Some("Redo".to_string());
+                    self.view_state.message = Some("Redo".to_string());
                 }
             } else {
-                self.message = Some(String::from("Cannot redo."));
+                self.view_state.message = Some(String::from("Cannot redo."));
             }
         } else {
             txn.apply(&mut self.table);
@@ -348,10 +346,10 @@ impl App {
             KeyResult::Finish => {
                 if self.search_handler.pattern.is_some() {
                     if let Some(msg) = self.search_handler.perform_search(&self.table) {
-                        self.message = Some(msg);
+                        self.view_state.message = Some(msg);
                     }
                     if let Some(msg) = self.search_handler.goto_next(&mut self.view_state.view) {
-                        self.message = Some(msg);
+                        self.view_state.message = Some(msg);
                     }
                 }
                 self.mode = Mode::Normal;

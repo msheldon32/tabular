@@ -325,7 +325,7 @@ fn render_command_line(frame: &mut Frame, app: &App, area: Rect) {
                 let line = Line::from(bar);
                 (line, app.view_state.style.message_info())
             } else {
-                let msg : String = app.message.as_deref().unwrap_or("").chars().take(width as usize).collect();
+                let msg : String = app.view_state.message.as_deref().unwrap_or("").chars().take(width as usize).collect();
                 let line = Line::from(msg);
                 (line, app.view_state.style.message_info())
             }
