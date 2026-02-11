@@ -8,6 +8,8 @@ use crate::table::SortDirection;
 use crate::transaction::transaction::Transaction;
 use crate::util::ColumnType;
 use crate::viewstate::ViewState;
+use crate::mode::Mode;
+use crate::mode::command::{ReplaceCommand, ReplaceScope};
 
 // === Cell Access ===
 /// Get current cell content
@@ -160,4 +162,75 @@ pub fn sort_by_row(sort_row: usize, table: &mut Table, direction: SortDirection)
     let txn = Transaction::PermuteCols { permutation };
     
     Some(txn)
+}
+
+
+pub fn replace(cmd: ReplaceCommand, table: &mut Table, view: &mut TableView, calling_mode: Option<Mode>) -> (Option<Transaction>, Option<String>) {
+    let (row_range, col_range) = match cmd.scope {
+        ReplaceScope::All => {
+            (0..table.row_count(), 0..table.col_count())
+        }
+        ReplaceScope::Selection => {
+            if calling_mode.map_or(false, |x| x.is_visual()) {
+                let (start_row, end_row) = if calling_mode != Some(Mode::VisualCol) {
+                    (std::cmp::min(view.cursor_row, view.support_row),
+                        std::cmp::max(view.cursor_row, view.support_row))
+                } else {
+                    (0, table.row_count()-1)
+                };
+                let (start_col, end_col) = if calling_mode != Some(Mode::VisualRow) {
+                    (std::cmp::min(view.cursor_col, view.support_col),
+                        std::cmp::max(view.cursor_col, view.support_col))
+                } else {
+                    (0, table.col_count()-1)
+                };
+                (start_row..end_row + 1, start_col..end_col + 1)
+            } else {
+                (view.cursor_row..view.cursor_row+1, view.cursor_col..view.cursor_col+1)
+            }
+        }
+    };
+
+    let mut replacements = 0;
+    let mut txns: Vec<Transaction> = Vec::new();
+    let mut found = false;
+
+    for row in row_range.clone() {
+        for col in col_range.clone() {
+            if let Some(cell) = table.get_cell(row, col) {
+                found = true;
+
+                let old_value = cell.clone();
+                let new_value = if cmd.global {
+                    old_value.replace(&cmd.pattern, &cmd.replacement)
+                } else {
+                    old_value.replacen(&cmd.pattern, &cmd.replacement, 1)
+                };
+
+                if new_value != old_value {
+                    replacements += 1;
+                    txns.push(Transaction::SetCell {
+                        row,
+                        col,
+                        old_value,
+                        new_value,
+                    });
+                }
+            }
+
+            if found && !cmd.global {
+                break;
+            }
+        }
+        if found && !cmd.global {
+            break;
+        }
+    }
+
+    if txns.is_empty() {
+        (None, Some(format!("Pattern not found: {}", cmd.pattern)))
+
+    } else {
+        (Some(Transaction::Batch(txns)), Some(format!("{} replacement(s) made", replacements)))
+    }
 }

@@ -8,14 +8,14 @@ use std::cmp;
 use crate::app::App;
 use crate::viewstate::PendingOp;
 use crate::numeric::calculator::Calculator;
-use crate::mode::command::{Command, ReplaceCommand, ReplaceScope};
+use crate::mode::command::Command;
 use crate::mode::visual::SelectionInfo;
 use crate::mode::Mode;
 use crate::input::{KeyResult, SequenceAction};
 use crate::plugin::{PluginAction, PluginContext};
 use crate::table::SortDirection;
 use crate::table::rowmanager::FilterType;
-use crate::table::operations::{sort_by_column, sort_by_row};
+use crate::table::operations::{sort_by_column, sort_by_row, replace};
 use crate::transaction::transaction::Transaction;
 use crate::transaction::clipboard::RegisterContent;
 
@@ -324,7 +324,15 @@ impl App {
                 }
             }
             Command::Replace(ref replace_cmd) => {
-                self.execute_replace(replace_cmd.clone());
+                let res = replace(replace_cmd.clone(), &mut self.table, &mut self.view_state.view, self.calling_mode);
+
+                if let Some(txn) = res.0 {
+                    self.execute(txn);
+                }
+
+                if let Some(msg) = res.1 {
+                    self.message = Some(msg);
+                }
             }
             Command::Theme(name) => {
                 use crate::ui::style::Theme;
@@ -567,74 +575,5 @@ impl App {
         }
     }
 
-    pub fn execute_replace(&mut self, cmd: ReplaceCommand) {
-        let (row_range, col_range) = match cmd.scope {
-            ReplaceScope::All => {
-                (0..self.table.row_count(), 0..self.table.col_count())
-            }
-            ReplaceScope::Selection => {
-                if self.calling_mode.map_or(false, |x| x.is_visual()) {
-                    let (start_row, end_row) = if self.calling_mode != Some(Mode::VisualCol) {
-                        (std::cmp::min(self.view_state.view.cursor_row, self.view_state.view.support_row),
-                            std::cmp::max(self.view_state.view.cursor_row, self.view_state.view.support_row))
-                    } else {
-                        (0, self.table.row_count()-1)
-                    };
-                    let (start_col, end_col) = if self.calling_mode != Some(Mode::VisualRow) {
-                        (std::cmp::min(self.view_state.view.cursor_col, self.view_state.view.support_col),
-                            std::cmp::max(self.view_state.view.cursor_col, self.view_state.view.support_col))
-                    } else {
-                        (0, self.table.col_count()-1)
-                    };
-                    (start_row..end_row + 1, start_col..end_col + 1)
-                } else {
-                    (self.view_state.view.cursor_row..self.view_state.view.cursor_row+1, self.view_state.view.cursor_col..self.view_state.view.cursor_col+1)
-                }
-            }
-        };
-
-        let mut replacements = 0;
-        let mut txns: Vec<Transaction> = Vec::new();
-        let mut found = false;
-
-        for row in row_range.clone() {
-            for col in col_range.clone() {
-                if let Some(cell) = self.table.get_cell(row, col) {
-                    found = true;
-
-                    let old_value = cell.clone();
-                    let new_value = if cmd.global {
-                        old_value.replace(&cmd.pattern, &cmd.replacement)
-                    } else {
-                        old_value.replacen(&cmd.pattern, &cmd.replacement, 1)
-                    };
-
-                    if new_value != old_value {
-                        replacements += 1;
-                        txns.push(Transaction::SetCell {
-                            row,
-                            col,
-                            old_value,
-                            new_value,
-                        });
-                    }
-                }
-
-                if found && !cmd.global {
-                    break;
-                }
-            }
-            if found && !cmd.global {
-                break;
-            }
-        }
-
-        if txns.is_empty() {
-            self.message = Some(format!("Pattern not found: {}", cmd.pattern));
-        } else {
-            self.execute(Transaction::Batch(txns));
-            self.message = Some(format!("{} replacement(s) made", replacements));
-        }
-    }
 }
 
