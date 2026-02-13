@@ -2,6 +2,7 @@ use std::path::{PathBuf, Path};
 use std::fs;
 use std::ffi::OsStr;
 use std::io::{self, BufRead, BufReader, BufWriter};
+use std::time::SystemTime;
 
 use crate::table::table::{Table, CHUNK_SIZE};
 
@@ -145,6 +146,7 @@ pub struct LoadResult {
 
 pub struct FileIO {
     pub file_path: Option<PathBuf>,
+    open_time: SystemTime,
     format: Option<FileFormat>,
     delimiter: u8,
     max_dim: (usize, usize),
@@ -181,8 +183,10 @@ impl FileIO {
             b','
         };
 
+        let open_time = SystemTime::now();
+
         let max_dim = (50000000, 50000000);
-        Ok(Self { file_path, format, delimiter, max_dim, read_only })
+        Ok(Self { file_path, open_time, format, delimiter, max_dim, read_only })
     }
 
     pub fn fork(&self) -> FileIO {
@@ -194,6 +198,7 @@ impl FileIO {
         let fpath = self.file_path.clone().unwrap_or_else(|| PathBuf::from(default_fname));
         FileIO {
             file_path: Some(next_fork_filename_suffix_wins(&fpath)),
+            open_time: SystemTime::now(),
             format: self.format,
             delimiter: self.delimiter,
             max_dim: self.max_dim,
@@ -231,7 +236,7 @@ impl FileIO {
     }
 
     /// Load table from file, returning warnings about any modifications
-    pub fn load_table(&self) -> io::Result<LoadResult> {
+    pub fn load_table(&mut self) -> io::Result<LoadResult> {
         if self.file_path.is_none() {
             return Ok(LoadResult {
                 table: Table::new(vec![vec![String::new()]]),
@@ -249,7 +254,7 @@ impl FileIO {
     }
 
     /// Write table to file
-    pub fn write(&self, table: &Table) -> io::Result<()> {
+    pub fn write(&mut self, table: &Table) -> io::Result<()> {
         if self.file_path.is_none() {
             return Err(io::Error::new(io::ErrorKind::NotFound, "No file path specified"));
         }
@@ -260,11 +265,17 @@ impl FileIO {
         }
     }
 
+    pub fn has_changed(&self) -> bool {
+        false
+    }
+
     // === CSV/TSV ===
 
-    fn read_csv(&self) -> io::Result<LoadResult> {
+    fn read_csv(&mut self) -> io::Result<LoadResult> {
         let path = self.file_path.as_ref().ok_or(io::ErrorKind::NotFound)?;
         let delim = self.delimiter;
+
+        self.open_time = SystemTime::now();
 
         // Check if file exists - if not, create empty table
         if !path.exists() {
@@ -343,7 +354,21 @@ impl FileIO {
         })
     }
 
-    fn write_csv(&self, table: &Table) -> io::Result<()> {
+    fn has_mutated(&self) -> io::Result<bool> {
+        match self.file_path.as_deref() {
+            Some(path) => {
+                let metadata = fs::metadata(path)?;
+                let last_modified: SystemTime = metadata.modified()?;
+
+                Ok(self.open_time.le(&last_modified))
+            },
+            None => {
+                Ok(false)
+            }
+        }
+    }
+
+    fn write_csv(&mut self, table: &Table) -> io::Result<()> {
         if self.read_only {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "file opened in read-only mode (use ':fork' to save your work)"));
         }
@@ -365,6 +390,8 @@ impl FileIO {
         csv_writer
             .flush()
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        self.open_time = SystemTime::now();
 
         Ok(())
     }

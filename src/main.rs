@@ -154,7 +154,7 @@ fn main() -> io::Result<()> {
 
     let (file_path, delimiter, fork, read_only) = parse_args();
 
-    let file_io = if fork {
+    let mut file_io = if fork {
         (FileIO::new(file_path, delimiter, read_only)?).fork()
     } else {
         FileIO::new(file_path, delimiter, read_only)?
