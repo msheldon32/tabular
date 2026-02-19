@@ -19,7 +19,8 @@ use crate::input::{
 use crate::mode::search::SearchHandler;
 use crate::mode::Mode;
 use crate::plugin::PluginManager;
-use crate::table::table::Table;
+use crate::table::{
+    table::Table, rowmanager::FilterState};
 use crate::transaction::history::History;
 use crate::transaction::transaction::Transaction;
 use crate::ui;
@@ -110,6 +111,11 @@ impl App {
         self.key_buffer.display()
     }
 
+    fn restore_filter_state(&mut self, filter_state: &FilterState) {
+        self.view_state.row_manager.borrow_mut().restore(filter_state.clone());
+        self.view_state.view.move_to_top();
+    }
+
     /// Execute a pending operation (called after render so progress is visible)
     fn execute_pending_op(&mut self, op: PendingOp) {
         match op {
@@ -117,8 +123,7 @@ impl App {
                 if let Some(inverse) = self.history.undo() {
                     // Handle filter state if this is a SetFilter transaction
                     if let Some(filter_state) = inverse.filter_state() {
-                        self.view_state.row_manager.borrow_mut().restore(filter_state.clone());
-                        self.view_state.view.move_to_top();
+                        self.restore_filter_state(filter_state);
                     }
                     inverse.apply(&mut self.table);
                     self.view_state.view.clamp_cursor(&self.table);
@@ -130,8 +135,7 @@ impl App {
                 if let Some(txn) = self.history.redo() {
                     // Handle filter state if this is a SetFilter transaction
                     if let Some(filter_state) = txn.filter_state() {
-                        self.view_state.row_manager.borrow_mut().restore(filter_state.clone());
-                        self.view_state.view.move_to_top();
+                        self.restore_filter_state(filter_state);
                     }
                     txn.apply(&mut self.table);
                     self.view_state.view.clamp_cursor(&self.table);
@@ -207,8 +211,7 @@ impl App {
                 } else if let Some(inverse) = self.history.undo() {
                     // Handle filter state if this is a SetFilter transaction
                     if let Some(filter_state) = inverse.filter_state() {
-                        self.view_state.row_manager.borrow_mut().restore(filter_state.clone());
-                        self.view_state.view.move_to_top();
+                        self.restore_filter_state(filter_state);
                     }
                     inverse.apply(&mut self.table);
                     self.view_state.view.clamp_cursor(&self.table);
@@ -227,8 +230,7 @@ impl App {
                 } else if let Some(txn) = self.history.redo() {
                     // Handle filter state if this is a SetFilter transaction
                     if let Some(filter_state) = txn.filter_state() {
-                        self.view_state.row_manager.borrow_mut().restore(filter_state.clone());
-                        self.view_state.view.move_to_top();
+                        self.restore_filter_state(filter_state);
                     }
                     txn.apply(&mut self.table);
                     self.view_state.view.clamp_cursor(&self.table);
