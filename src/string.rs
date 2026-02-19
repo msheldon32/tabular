@@ -21,19 +21,24 @@ impl CharType {
 }
 
 pub fn get_word_start(s: &String, idx: usize) -> usize{
-    if s.len() <= 1 {
-        return 0usize;
+    if s.chars().count() <= 1 {
+        return 0;
     }
     let cur_char = s.chars().nth(idx.saturating_sub(1)).unwrap_or('0');
     let cur_type = CharType::from(cur_char);
     let mut pass = false;
 
-    for (i, c) in s[..idx.saturating_sub(1)].char_indices().rev() {
+    let chars_before: Vec<(usize, char)> = s.chars()
+        .enumerate()
+        .take(idx.saturating_sub(1))
+        .collect();
+
+    for (i, c) in chars_before.into_iter().rev() {
         if CharType::from(c) != cur_type {
             if cur_type == CharType::Whitespace {
                 return i;
             }
-            return i+1;
+            return i + 1;
         }
         if CharType::from(c) == CharType::Whitespace {
             pass = true;
@@ -44,32 +49,33 @@ pub fn get_word_start(s: &String, idx: usize) -> usize{
         }
     }
 
-    0usize
+    0
 }
 
 pub fn get_word_end(s: &String, idx: usize) -> usize{
-    if s.len() <= 1 {
+    let char_count = s.chars().count();
+    if char_count <= 1 {
         return idx;
     }
     let cur_char = s.chars().nth(idx+1).unwrap_or('0');
     let cur_type = CharType::from(cur_char);
     let mut pass = false;
 
-    for (i, c) in s[idx+1..].char_indices() {
+    for (i, c) in s.chars().enumerate().skip(idx+1) {
         if CharType::from(c) != cur_type {
             if cur_type == CharType::Whitespace {
-                return i+idx+1;
+                return i;
             }
-            return i+idx;
+            return i.saturating_sub(1);
         }
         if CharType::from(c) == CharType::Whitespace {
             pass = true;
             continue;
         }
         if pass {
-            return i+idx;
+            return i;
         }
     }
 
-    s.len().saturating_sub(1)
+    char_count.saturating_sub(1)
 }

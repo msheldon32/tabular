@@ -215,7 +215,7 @@ impl App {
                     self.view_state.message = Some("Undo".to_string());
                 }
             } else {
-                self.view_state.message = Some(String::from("Cannot undo."));
+                self.view_state.message = Some("Cannot undo.".to_string());
             }
         } else if matches!(txn, Transaction::Redo) {
             // Check if redo is large before executing
@@ -235,7 +235,7 @@ impl App {
                     self.view_state.message = Some("Redo".to_string());
                 }
             } else {
-                self.view_state.message = Some(String::from("Cannot redo."));
+                self.view_state.message = Some("Cannot redo.".to_string());
             }
         } else {
             txn.apply(&mut self.table);

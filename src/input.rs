@@ -178,30 +178,6 @@ impl KeyBuffer {
     }
 
     fn match_sequence(&self) -> Option<SequenceAction> {
-        /*match self.keys.as_slice() {
-            ['g', 'g'] => Some(SequenceAction::MoveToTop),
-            ['d', 'r'] => Some(SequenceAction::DeleteRow),
-            ['d', 'c'] => Some(SequenceAction::DeleteCol),
-            ['d', 'd'] => Some(SequenceAction::Delete),
-            ['y', 'r'] => Some(SequenceAction::YankRow),
-            ['y', 'c'] => Some(SequenceAction::YankCol),
-            ['y', 'y'] => Some(SequenceAction::Yank),
-            ['j'] => Some(SequenceAction::MoveDown),
-            ['k'] => Some(SequenceAction::MoveUp),
-            ['h'] => Some(SequenceAction::MoveLeft),
-            ['l'] => Some(SequenceAction::MoveRight),
-            // Format sequences
-            ['f', 'f'] => Some(SequenceAction::FormatDefault),
-            ['f', ','] => Some(SequenceAction::FormatCommas),
-            ['f', '$'] => Some(SequenceAction::FormatCurrency),
-            ['f', 'e'] => Some(SequenceAction::FormatScientific),
-            ['f', '%'] => Some(SequenceAction::FormatPercentage),
-            // Register selection: "x where x is a valid register
-            ['"', c] if matches!(c, 'a'..='z' | 'A'..='Z' | '0' | '_' | '+' | '"') => {
-                Some(SequenceAction::SelectRegister(*c))
-            }
-            _ => None,
-        }*/
         self.config.borrow().commands.match_sequence(self.keys.clone())
     }
 
