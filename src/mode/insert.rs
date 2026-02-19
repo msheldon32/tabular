@@ -33,10 +33,10 @@ impl InsertHandler {
         self.old_width = old_width
     }
 
-    pub fn handle_key(&mut self, key: KeyEvent, view: &TableView) -> (KeyResult, Option<Transaction>) {
+    pub fn handle_key(&mut self, key: KeyEvent, view: &TableView) -> KeyResult {
         if is_escape(key) {
             self.buffer = self.true_val.clone();
-            return (KeyResult::Finish, None);
+            return KeyResult::Finish;
         }
 
         if key.code == KeyCode::Enter {
@@ -46,7 +46,7 @@ impl InsertHandler {
                 old_value: self.true_val.clone(),
                 new_value: self.buffer.clone(),
             };
-            return (KeyResult::ExecuteAndFinish(txn), None);
+            return KeyResult::ExecuteAndFinish(txn);
         }
 
         match key.code {
@@ -78,7 +78,7 @@ impl InsertHandler {
             _ => {}
         }
 
-        (KeyResult::Continue, None)
+        KeyResult::Continue
     }
 }
 

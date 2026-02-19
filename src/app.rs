@@ -362,7 +362,7 @@ impl App {
     }
 
     fn handle_insert_mode(&mut self, key: KeyEvent) {
-        let (res, _txn_option) = self.insert_handler.handle_key(key, &self.view_state.view);
+        let res  = self.insert_handler.handle_key(key, &self.view_state.view);
 
         match res {
             KeyResult::ExecuteAndFinish(txn) => {
