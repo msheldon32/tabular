@@ -278,10 +278,14 @@ impl App {
                 }
             }
             Command::Grid => self.view_state.style.toggle_grid(),
-            Command::NavigateRow(row) => self.view_state.view.cursor_row = row,
+            Command::NavigateRow(row) => {
+                self.view_state.view.cursor_row = row;
+                self.view_state.view.clamp_cursor(&self.table);
+            }
             Command::NavigateCell(cell) => {
                 self.view_state.view.cursor_row = cell.row;
                 self.view_state.view.cursor_col = cell.col;
+                self.view_state.view.clamp_cursor(&self.table);
             }
             Command::Sort => {
                 let res = sort_by_column(self.view_state.view.cursor_col,

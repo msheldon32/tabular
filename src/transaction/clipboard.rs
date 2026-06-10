@@ -310,8 +310,8 @@ impl Clipboard {
         let preview = content.data.first()
             .and_then(|r| r.first())
             .map(|s| {
-                if s.len() > 20 {
-                    format!("{}...", &s[..20])
+                if s.chars().count() > 20 {
+                    format!("{}...", s.chars().take(20).collect::<String>())
                 } else {
                     s.clone()
                 }

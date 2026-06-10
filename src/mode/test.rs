@@ -23,6 +23,14 @@ fn test_parse_sort_commands() {
 }
 
 #[test]
+fn test_parse_navigate_row() {
+    assert_eq!(Command::parse("1"), Some(Command::NavigateRow(0)));
+    assert_eq!(Command::parse("42"), Some(Command::NavigateRow(41)));
+    // ":0" must not underflow; it navigates to the first row like ":1"
+    assert_eq!(Command::parse("0"), Some(Command::NavigateRow(0)));
+}
+
+#[test]
 fn test_parse_unknown() {
     assert_eq!(
         Command::parse("unknown"),

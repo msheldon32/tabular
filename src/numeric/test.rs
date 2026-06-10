@@ -272,6 +272,15 @@ fn test_format_currency() {
 }
 
 #[test]
+fn test_format_currency_rounding_carry() {
+    // Cents that round up to 100 must carry into the integer part
+    assert_eq!(format_currency("1.999", '$'), Some("$2.00".to_string()));
+    assert_eq!(format_currency("0.999", '$'), Some("$1.00".to_string()));
+    assert_eq!(format_currency("-2.999", '$'), Some("-$3.00".to_string()));
+    assert_eq!(format_currency("999.995", '$'), Some("$1,000.00".to_string()));
+}
+
+#[test]
 fn test_format_scientific() {
     assert_eq!(format_scientific("1234", 2), Some("1.23e3".to_string()));
     assert_eq!(format_scientific("0.00123", 2), Some("1.23e-3".to_string()));

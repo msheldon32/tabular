@@ -51,10 +51,11 @@ fn is_ascii_alnum(b: u8) -> bool {
 }
 
 /// Parse column letters to 0-indexed column number (A=0, B=1, ..., Z=25, AA=26, etc.)
+/// Accepts both uppercase and lowercase letters.
 pub fn col_from_letters(letters: &str) -> usize {
     let mut result = 0usize;
     for c in letters.chars() {
-        result = result * 26 + (c as usize - 'A' as usize + 1);
+        result = result * 26 + (c.to_ascii_uppercase() as usize - 'A' as usize + 1);
     }
     result - 1
 }
@@ -133,11 +134,14 @@ pub fn translate_references(s: &str, row_diff: isize, col_diff: isize) -> String
             }
 
             // Not a valid ref -> emit current char and continue
+            // (safe: this branch is only reached for ASCII alpha bytes)
             out.push(bytes[i] as char);
             i += 1;
         } else {
-            out.push(bytes[i] as char);
-            i += 1;
+            // Copy the full UTF-8 character, not a single byte
+            let ch = s[i..].chars().next().unwrap();
+            out.push(ch);
+            i += ch.len_utf8();
         }
     }
 
@@ -347,8 +351,25 @@ mod tests {
         assert_eq!(translate_references("=AA1", 1, 0), "=AA2");
     }
 
-    // Note: lowercase cell references have a known quirk in col_from_letters
-    // which assumes uppercase input. This is documented behavior we're preserving.
+    #[test]
+    fn test_translate_references_preserves_lowercase() {
+        assert_eq!(translate_references("=a1", 1, 0), "=a2");
+        assert_eq!(translate_references("=aa1+B2", 1, 1), "=ab2+C3");
+    }
+
+    #[test]
+    fn test_col_from_letters_lowercase() {
+        assert_eq!(col_from_letters("a"), 0);
+        assert_eq!(col_from_letters("z"), 25);
+        assert_eq!(col_from_letters("aa"), 26);
+    }
+
+    #[test]
+    fn test_translate_references_non_ascii() {
+        // Non-ASCII characters must survive translation intact
+        assert_eq!(translate_references("=A1+é", 1, 0), "=A2+é");
+        assert_eq!(translate_references("=A1&\"你好\"", 0, 1), "=B1&\"你好\"");
+    }
 
     #[test]
     fn test_translate_references_negative_offset() {

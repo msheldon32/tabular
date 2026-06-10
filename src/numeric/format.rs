@@ -136,9 +136,11 @@ pub fn format_currency(val: &str, symbol: char) -> Option<String> {
     let is_negative = n < 0.0;
     let abs_n = n.abs();
 
-    // Split into integer and decimal parts
-    let integer_part = abs_n.trunc() as u64;
-    let decimal_part = ((abs_n.fract() * 100.0).round() as u64) % 100;
+    // Round to cents first so the carry propagates into the integer part
+    // (e.g. 1.999 -> $2.00, not $1.00)
+    let total_cents = (abs_n * 100.0).round() as u64;
+    let integer_part = total_cents / 100;
+    let decimal_part = total_cents % 100;
 
     // Format integer with commas
     let int_str = integer_part.to_string();

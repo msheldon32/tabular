@@ -62,7 +62,8 @@ impl Command {
         }
 
         if let Ok(row_dest) = input.parse::<usize>() {
-            return Some(Command::NavigateRow(row_dest-1));
+            // ":0" and ":1" both navigate to the first row (rows are 1-based)
+            return Some(Command::NavigateRow(row_dest.saturating_sub(1)));
         }
 
         let cell_re = Regex::new(r"[A-Z]+\d+").unwrap();

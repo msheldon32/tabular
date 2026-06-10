@@ -115,11 +115,13 @@ pub fn next_fork_filename_suffix_wins(path: &Path) -> PathBuf {
     // - `header.K.csv` => suffix K
     let mut max_suffix = start_n;
 
+    let dot_ext = format!(".{}", ext);
+
     for entry in fs::read_dir(parent).unwrap() {
         let entry = entry.unwrap();
         let name = entry.file_name().to_string_lossy().to_string();
 
-        let Some(stem2) = name.strip_suffix(ext) else { continue; };
+        let Some(stem2) = name.strip_suffix(&dot_ext) else { continue; };
 
         if stem2 == header {
             max_suffix = max_suffix.max(0);
@@ -265,8 +267,9 @@ impl FileIO {
         }
     }
 
+    #[allow(dead_code)]
     pub fn has_changed(&self) -> bool {
-        false
+        self.has_mutated().unwrap_or(false)
     }
 
     // === CSV/TSV ===
@@ -418,11 +421,34 @@ mod tests {
         writeln!(file, "1,2").unwrap();  // Short row
         writeln!(file, "3,4,5").unwrap();
 
-        let file_io = FileIO::new(Some(file.path().to_path_buf()), None, false).unwrap();
+        let mut file_io = FileIO::new(Some(file.path().to_path_buf()), None, false).unwrap();
         let result = file_io.load_table().unwrap();
 
         assert_eq!(result.table.col_count(), 3);
         assert!(!result.warnings.is_empty());
         assert!(result.warnings[0].contains("Padded"));
+    }
+
+    #[test]
+    fn test_fork_filename_skips_existing_forks() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("data.csv");
+        fs::write(&base, "a,b\n").unwrap();
+        fs::write(dir.path().join("data.1.csv"), "a,b\n").unwrap();
+        fs::write(dir.path().join("data.7.csv"), "a,b\n").unwrap();
+
+        // Must not collide with the existing data.1.csv / data.7.csv
+        let next = next_fork_filename_suffix_wins(&base);
+        assert_eq!(next, dir.path().join("data.8.csv"));
+    }
+
+    #[test]
+    fn test_fork_filename_first_fork() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("data.csv");
+        fs::write(&base, "a,b\n").unwrap();
+
+        let next = next_fork_filename_suffix_wins(&base);
+        assert_eq!(next, dir.path().join("data.1.csv"));
     }
 }
