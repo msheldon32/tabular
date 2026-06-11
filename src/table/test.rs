@@ -1223,6 +1223,127 @@ fn test_sort_float_numbers() {
     assert_eq!(indices, vec![0, 2, 3, 1]);
 }
 
+/// Sort a table end-to-end (permutation + apply) and verify no data is lost:
+/// the sorted table must contain exactly the same rows as the original.
+fn assert_sort_preserves_rows(rows: Vec<Vec<String>>, sort_col: usize, direction: SortDirection, skip_header: bool) {
+    let mut table = Table::new(rows.clone());
+
+    let permutation = match table.get_sort_permutation(sort_col, direction, skip_header) {
+        Some(p) => p,
+        None => return, // already sorted; nothing applied
+    };
+
+    // The permutation must be a true permutation: every row index exactly once
+    let mut seen: Vec<usize> = permutation.clone();
+    seen.sort_unstable();
+    assert_eq!(seen, (0..rows.len()).collect::<Vec<_>>(),
+        "permutation is not a bijection over all rows");
+
+    table.apply_row_permutation(&permutation);
+    assert_eq!(table.row_count(), rows.len(), "row count changed after sort");
+
+    let mut original = rows.clone();
+    let mut sorted: Vec<Vec<String>> = table.rows_iter().cloned().collect();
+    original.sort();
+    sorted.sort();
+    assert_eq!(original, sorted, "row contents changed after sort");
+
+    // Undo must restore the exact original order
+    let inverse = crate::transaction::transaction::Transaction::inverse_permutation(&permutation);
+    table.apply_row_permutation(&inverse);
+    let restored: Vec<Vec<String>> = table.rows_iter().cloned().collect();
+    assert_eq!(restored, rows, "undo did not restore original order");
+}
+
+#[test]
+fn test_sort_negative_numbers_no_data_loss_multichunk() {
+    // Cross several chunk boundaries (CHUNK_SIZE = 1024) with negatives,
+    // formatted negatives, blanks, and text mixed in
+    let mut rows: Vec<Vec<String>> = vec![vec!["id".to_string(), "value".to_string()]];
+    for i in 0..3000usize {
+        let val = match i % 6 {
+            0 => format!("-{}", i),
+            1 => format!("{}", i),
+            2 => format!("-$1,{:03}.50", i % 1000),
+            3 => format!("({})", i),
+            4 => String::new(),
+            _ => format!("-{}.5", i),
+        };
+        rows.push(vec![format!("row{}", i), val]);
+    }
+
+    assert_sort_preserves_rows(rows.clone(), 1, SortDirection::Ascending, true);
+    assert_sort_preserves_rows(rows, 1, SortDirection::Descending, true);
+}
+
+#[test]
+fn test_sort_negative_ordering_formatted() {
+    // Negative numbers in every supported format must order correctly
+    let table = make_table(vec![
+        vec!["0"],        // 0
+        vec!["-$5.00"],   // -5
+        vec!["-1,000"],   // -1000
+        vec!["$3.50"],    // 3.5
+        vec!["-2.5e1"],   // -25
+        vec!["($2.00)"],  // -2 (accounting parentheses)
+    ]);
+
+    let asc = table.get_sorted_row_indices(0, SortDirection::Ascending, false);
+    assert_eq!(asc, vec![2, 4, 1, 5, 0, 3]);
+
+    let desc = table.get_sorted_row_indices(0, SortDirection::Descending, false);
+    assert_eq!(desc, vec![3, 0, 5, 1, 4, 2]);
+}
+
+#[test]
+fn test_col_sort_negative_numbers_no_data_loss() {
+    // Column sort (:sortr) with negatives: no cell may be lost or duplicated
+    let mut cols: Vec<Vec<String>> = Vec::new();
+    for i in 0..50usize {
+        let key = if i % 2 == 0 { format!("-{}", i) } else { format!("{}", i) };
+        cols.push(vec![key, format!("data{}", i)]);
+    }
+    // Transpose into 2 rows x 50 cols
+    let rows: Vec<Vec<String>> = (0..2)
+        .map(|r| cols.iter().map(|c| c[r].clone()).collect())
+        .collect();
+    let mut table = Table::new(rows.clone());
+
+    let permutation = table.get_col_sort_permutation(0, SortDirection::Ascending, false)
+        .expect("table is not already sorted");
+
+    let mut seen = permutation.clone();
+    seen.sort_unstable();
+    assert_eq!(seen, (0..50).collect::<Vec<_>>(), "column permutation is not a bijection");
+
+    table.apply_col_permutation(&permutation);
+    for r in 0..2 {
+        let mut original: Vec<String> = rows[r].clone();
+        let mut sorted: Vec<String> = (0..50).map(|c| table.get_cell(r, c).unwrap().clone()).collect();
+        original.sort();
+        sorted.sort();
+        assert_eq!(original, sorted, "row {} cell contents changed after column sort", r);
+    }
+
+    // Undo must restore the exact original layout
+    let inverse = crate::transaction::transaction::Transaction::inverse_permutation(&permutation);
+    table.apply_col_permutation(&inverse);
+    let restored: Vec<Vec<String>> = table.rows_iter().cloned().collect();
+    assert_eq!(restored, rows, "undo did not restore original column order");
+}
+
+#[test]
+fn test_sort_negative_numbers_no_data_loss_parallel() {
+    // Exceed PARALLEL_THRESHOLD (10_000) to exercise the rayon sort path
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    for i in 0..12_000usize {
+        let val = if i % 2 == 0 { format!("-{}", i) } else { format!("{}", i) };
+        rows.push(vec![val]);
+    }
+
+    assert_sort_preserves_rows(rows, 0, SortDirection::Ascending, false);
+}
+
 // === Bulk row operations ===
 
 #[test]

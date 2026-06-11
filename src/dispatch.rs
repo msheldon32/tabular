@@ -287,6 +287,11 @@ impl App {
                 self.view_state.view.cursor_col = cell.col;
                 self.view_state.view.clamp_cursor(&self.table);
             }
+            Command::Sort | Command::SortDesc | Command::SortRow | Command::SortRowDesc
+                if self.view_state.row_manager.borrow().is_filtered =>
+            {
+                self.view_state.message = Some("Sort is forbidden in filtered views.".to_string());
+            }
             Command::Sort => {
                 let res = sort_by_column(self.view_state.view.cursor_col,
                                                  self.header_mode, 
