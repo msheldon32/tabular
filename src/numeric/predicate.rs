@@ -66,13 +66,15 @@ impl Predicate {
         match self {
             Predicate::Comparator { op, val } => match col_type {
                 ColumnType::Numeric => {
-                    let lhs: f64 = match other.parse() {
-                        Ok(v) => v,
-                        Err(_) => return false,
+                    // Use parse_numeric so formatted values ("$5", "1,000", "15%")
+                    // filter consistently with how column types are probed
+                    let lhs: f64 = match crate::numeric::format::parse_numeric(other) {
+                        Some(v) => v,
+                        None => return false,
                     };
-                    let rhs: f64 = match val.parse() {
-                        Ok(v) => v,
-                        Err(_) => return false,
+                    let rhs: f64 = match crate::numeric::format::parse_numeric(val) {
+                        Some(v) => v,
+                        None => return false,
                     };
 
                     match op {
@@ -114,7 +116,10 @@ impl Predicate {
 
 
 pub fn parse_predicate(pred_string: String) -> Option<Predicate> {
-    let pred_re = Regex::new(r"^\s*(!|=|<|<=|>|>=)\s*(\S+)\s*$")
+    // Multi-char operators must come first: alternation is leftmost-first,
+    // so "<" before "<=" would match "<" and corrupt the value with "=".
+    // The value may contain spaces (e.g. text filters like `= New York`).
+    let pred_re = Regex::new(r"^\s*(<=|>=|!=|==|!|=|<|>)\s*(\S.*?)\s*$")
         .expect("invalid regex");
 
     let caps = pred_re
@@ -124,8 +129,8 @@ pub fn parse_predicate(pred_string: String) -> Option<Predicate> {
     let val = caps[2].to_string();
 
     let op = match op_str {
-        "="  => Op::Eq,
-        "!"  => Op::Ne,
+        "=" | "==" => Op::Eq,
+        "!" | "!=" => Op::Ne,
         "<"  => Op::Lt,
         "<=" => Op::Le,
         ">"  => Op::Gt,
